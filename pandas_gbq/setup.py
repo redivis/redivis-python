@@ -3,8 +3,8 @@ from setuptools import find_namespace_packages, setup
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-name = "redivis-bigquery"
-description = "Redivis authentication wrapper around google-cloud-bigquery"
+name = "redivis-pandas-gbq"
+description = "Redivis authentication wrapper around pandas-gbq"
 version = "0.0.1"
 # Should be one of:
 # 'Development Status :: 3 - Alpha'
@@ -12,8 +12,8 @@ version = "0.0.1"
 # 'Development Status :: 5 - Production/Stable'
 release_status = "Development Status :: 3 - Alpha"
 dependencies = [
-    "google-cloud-bigquery == 1.20.0",
-    "google-auth == 1.6.3"
+    "pandas-gbq == 0.11.0",
+    "redivis-pandas-gbq == 0.0.1"
 ]
 
 setup(
@@ -24,8 +24,9 @@ setup(
     description=description,
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/redivis/redipy/tree/master/bigquery",
+    url="https://github.com/redivis/redipy/tree/master/pandas-gbq",
     packages=find_namespace_packages(),
+    dependency_links=['http://github.com/redivis/redipy/tarball/master#egg=redivis-pandas-gbq-1.0&subdirectory=pandas-gbq'],
     install_requires=dependencies,
     classifiers=[
         "Programming Language :: Python :: 3",

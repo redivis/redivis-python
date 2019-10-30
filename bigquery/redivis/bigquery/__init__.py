@@ -2,6 +2,7 @@ name = "bigquery"
 
 from google.cloud import bigquery
 from google.auth import credentials
+import os
 
 class Credentials(credentials.AnonymousCredentials):
 	def __init__(self, token):
@@ -15,9 +16,9 @@ class Credentials(credentials.AnonymousCredentials):
 class Client(bigquery.Client):
 	def __init__(
 		self,
-		api_key
+		api_endpoint = "https://redivis.com/api/v1"
 	):
-		credential = Credentials(api_key)
+		credential = Credentials(os.getenv('REDIVIS_API_TOKEN'))
 		super(Client, self).__init__(
-			credentials=credential, project="_", client_options={"api_endpoint": "https://redivis.com/api/v1"}
+			credentials=credential, project="_", client_options={"api_endpoint": api_endpoint}
 		)
