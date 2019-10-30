@@ -12,7 +12,7 @@ new_source = 'from redivis import bigquery as redivis_bigquery\n'+re.sub(
 )
 exec(new_source, base_pandas_gbq.gbq.__dict__)
 
-pandas_gbq = base_pandas_gbq
+read_gbq = base_pandas_gbq.read_gbq
 del base_pandas_gbq
 del source
 del new_source
