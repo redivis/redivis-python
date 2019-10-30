@@ -11,5 +11,5 @@ In order to generate a new authorization token, navigate to you [workspace/setti
 ### [redivis-bigquery](https://github.com/redivis/redipy/tree/master/bigquery)
 Provides an authorization wrapper around the [Google BigQuery client library](https://github.com/googleapis/google-cloud-python/tree/master/bigquery)
 
-### [redivis-pandas-bigquery](https://github.com/redivis/redipy/tree/master/pandas-gbq)
-Provides an authorization wrapper around the [pandas-gbq library](https://github.com/googleapis/google-cloud-python/tree/master/pandas-gbq)
+### [redivis-pandas-bigquery](https://github.com/redivis/redipy/tree/master/pandas_gbq)
+Provides an authorization wrapper around the [pandas-gbq library](https://github.com/pydata/pandas-gbq)
