@@ -12,8 +12,7 @@ Then
 from redivis import pandas_gbq
 
 sql = """
-SELECT * FROM `dataset_165.271`
-LIMIT 100
+SELECT * FROM `dataset_160.237`
 """
 df = pandas_gbq.read_gbq(sql)
 ```
