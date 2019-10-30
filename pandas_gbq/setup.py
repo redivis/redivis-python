@@ -14,7 +14,7 @@ release_status = "Development Status :: 3 - Alpha"
 dependencies = [
     "pandas-gbq == 0.11.0",
     # "redivis-bigquery == 0.0.1"
-    "redivis_bigquery @ git+https://github.com/redivis/redipy.git#subdirectory=bigquery&egg=redivis_bigquery-0.0.1"
+    "redivis-bigquery @ https://github.com/redivis/redipy.git#subdirectory=bigquery&egg=redivis-bigquery-0.0.1"
  ]
 
 setup(
