@@ -13,7 +13,7 @@ version = "0.0.1"
 release_status = "Development Status :: 3 - Alpha"
 dependencies = [
     "pandas-gbq == 0.11.0",
-    "redivis-pandas-gbq == 0.0.1"
+    "redivis-bigquery == 0.0.1"
 ]
 
 setup(
@@ -26,7 +26,7 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/redivis/redipy/tree/master/pandas-gbq",
     packages=find_namespace_packages(),
-    dependency_links=['http://github.com/redivis/redipy/tarball/master#egg=redivis-pandas-gbq-1.0&subdirectory=pandas-gbq'],
+    dependency_links=['http://github.com/redivis/redipy/tarball/master#egg=redivis-bigquery-1.0&subdirectory=bigquery'],
     install_requires=dependencies,
     classifiers=[
         "Programming Language :: Python :: 3",
