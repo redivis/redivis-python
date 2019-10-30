@@ -13,7 +13,7 @@ version = "0.0.1"
 release_status = "Development Status :: 3 - Alpha"
 dependencies = [
     "pandas-gbq == 0.11.0",
-    "redivis-bigquery @ http://github.com/redivis/redipy/tarball/master.tar.gz#subdirectory=bigquery"
+    "redivis-bigquery @ git+https://github.com/redivis/redipy.git#egg=redivis-bigquery&subdirectory=bigquery"
 ]
 
 setup(
