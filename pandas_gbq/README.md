@@ -3,7 +3,7 @@ Redivis authorization wrapper around google-cloud-bigquery
 
 # usage
 ```
-pipenv install -e "git+https://github.com/redivis/redipy.git#egg=redivis-pandas-gbq&subdirectory=pandas_gbq"
+pipenv install --skip-lock -e "git+https://github.com/redivis/redipy.git#egg=redivis-pandas-gbq&subdirectory=pandas_gbq"
 
 REDIVIS_API_TOKEN=<your-api-token> pipenv run python
 ```
