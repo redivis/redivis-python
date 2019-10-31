@@ -22,7 +22,7 @@ from redivis import bigquery
 client = bigquery.Client()
 
 # Perform a query.
-# Table at
+# Table at https://redivis.com/projects/1008/tables/9443
 QUERY = ('SELECT * FROM `ianmathews91.medicare_public_example.high_cost_in_providers_in_CA_output` LIMIT 10')
 
 query_job = client.query(QUERY)  # API request
