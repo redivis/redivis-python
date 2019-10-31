@@ -6,6 +6,7 @@ This library is currently an alpha. It may break in unexpected ways, and is not 
 
 Known issues:
 - Error handling / messaging is limited. Make sure that you have access to tables referenced by your query, and that the tables are authorized for export to your compute environment.
+- Queries are currently restricted to referencing 100GB of data or less
 
 # usage
 ### Installation
