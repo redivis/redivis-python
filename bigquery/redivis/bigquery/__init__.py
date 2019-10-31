@@ -18,9 +18,9 @@ class Client(bigquery.Client):
 		self,
 		api_endpoint = "https://redivis.com/api/v1"
 	):
-		if (os.getenv('REDIVIS_API_TOKEN') == None)
+		if os.getenv('REDIVIS_API_TOKEN') is None
 			raise EnvironmentError('The environment variable REDIVIS_API_TOKEN must be set.')
-		
+
 		credential = Credentials(os.getenv('REDIVIS_API_TOKEN'))
 		super(Client, self).__init__(
 			credentials=credential, project="_", client_options={"api_endpoint": api_endpoint}
