@@ -5,7 +5,6 @@ Redivis authorization wrapper around google-cloud-bigquery
 This library is currently an alpha. It may break in unexpected ways, and is not intended for production use.
 
 Known issues:
-- Error handling / messaging is limited. Make sure that you have access to tables referenced by your query, and that the tables are authorized for export to your compute environment.
 - Queries are currently restricted to referencing 100GB of data or less
 
 # usage
@@ -44,10 +43,24 @@ df = client.query(QUERY).to_dataframe()  # API request
 
 print(df)
 ```
-### Referencing tables
-If a table belongs to a dataset, it should be referenced as: `dataset_owner.dataset_name.version`. The decimal in the version should be replaced by an underscore; e.g. `v1.0` -> `v1_0`. If a table belongs to a project, it should be referenced as: `project_owner.project_name.table_name`.
+## Referencing tables
+All tables belong to either a dataset or project. Table references use the following pattern:
+```
+// Datasets
+// Note: table_name for datasets should always be "main". 
+// An upcoming release of Redivis will allow for named tables within datasets.
+owner_name.dataset_name[:version][:sample][:dataset_id].table_name[:table_id]
 
-Any non-alphanumeric characters in dataset, project, and table names can be replaced by an underscore (`_`), and multiple non-alphanumeric characters can be replaced by a single underscore. For example, the dataset `Yay!!! A dataset` could be represented at `yay_a_dataset`.
+// Projects
+owner_name.project_name[:project_id].table_name[:table_id]
+```
+Note that datasets (and their tables) that are added to a project should still be referenced via their dataset identifier; the tables are not considered to be within the project. (`TODO: reconsider?`)
+
+All non alpha-numeric and underscore characters in names and version tags can be escaped by an underscore (`_`) character. Colons (`:`), periods (`.`), and backticks (`` ` ``) must be escaped. Multiple underscores can be collapsed into a single underscore, and leading and trailing underscores can be ignored.
+
+References can take several optional arguments, denoted by a `:`. 
+
+### Examples
 
 # Further reference
 Consult the [google-cloud-bigquery](https://googleapis.dev/python/bigquery/latest/index.html) documentation for further information. Please note the following changes from the google-cloud-bigquery library:
