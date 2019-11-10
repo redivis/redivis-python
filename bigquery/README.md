@@ -93,7 +93,7 @@ SELECT [] FROM main:178
 # Or even the table name
 SELECT [] FROM :178
 ```
-Referencing tables in projects is quite similar, though projects don't have versions or samples:
+Referencing tables in [a project](https://redivis.com/projects/1008/tables/9443) is quite similar, though projects don't have versions or samples:
 ```sql
 SELECT [] FROM ianmathews91.medicare_public_example.high_cost_in_providers_in_CA_output
 # or
