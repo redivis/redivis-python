@@ -2,7 +2,7 @@
 Redivis authorization wrapper around google-cloud-bigquery
 
 ### Alpha disclaimer
-This library is currently an alpha. It may break in unexpected ways, and is not intended for production use.
+This library is currently an alpha. It may change in backwards-incompatible ways, and is not intended for production use.
 
 Known issues:
 - Queries are currently restricted to referencing 100GB of data or less
@@ -14,6 +14,12 @@ pipenv install -e "git+https://github.com/redivis/redipy.git#egg=redivis-bigquer
 
 REDIVIS_API_TOKEN=<your-api-token> pipenv run python
 ```
+### authorization
+In order to make calls to the Redivis API, you must set the REDIVIS_API_TOKEN environment variable:
+
+REDIVIS_API_TOKEN=<your_api_token> python script.py
+In order to generate a new authorization token, navigate to you https://redivis.com/workspace/settings and scroll to the API tokens section. Your token must be authorized have the data.data scope.
+
 ### Simple queries
 ```py
 from redivis import bigquery
