@@ -12,9 +12,7 @@ version = "0.0.1"
 # 'Development Status :: 5 - Production/Stable'
 release_status = "Development Status :: 3 - Alpha"
 dependencies = [
-    "google-cloud-bigquery == 1.25.0",
-    "google-auth >= 1.18.0",
-    "pandas == 1.0.5"
+    "google-cloud-bigquery == 1.25.0"
 ]
 
 setup(
