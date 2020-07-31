@@ -25,3 +25,4 @@ class Client(bigquery.Client):
 		super(Client, self).__init__(
 			credentials=credential, project="_", client_options={"api_endpoint": api_endpoint}
 		)
+print('Hello world')
