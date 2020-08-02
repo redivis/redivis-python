@@ -38,9 +38,7 @@ file_path = os.path.join("./", filename)
 def checkForAPIError(r):
     if r.status_code >= 400:
         res_json = r.json()
-        sys.exit(
-            "An API error occurred at {} {} with status {}:\n\t{} ".format(r.request.method, r.request.path_url,
-                                                                           r.status_code, res_json['error']['message'])
+        sys.exit("An API error occurred at {} {} with status {}:\n\t{} ".format(r.request.method, r.request.path_url, r.status_code, res_json['error']['message']))
 
 def get_next_version():
     url = "{}/datasets/{}/versions".format(api_base_path, dataset_identifier)
@@ -82,7 +80,7 @@ class Dataset:
         self.user = user
         self.dataset_identifier = dataset_identifier
         self.version = version #will be made into a class at some point
-        
+
 
     def exists(dataset_name):
 
