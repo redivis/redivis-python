@@ -1,12 +1,11 @@
 import sys
+import os
+scriptpath = "./bigquery/"
 
-sys.path.append('/Users/kevinmartin/Documents/GitHub/redipy/redivis/Elements.py')
+# Add the directory containing your module to the Python path (wants absolute paths)
+sys.path.append(os.path.abspath(scriptpath))
 
 from redivis import redipackage
 
 data_sets = redipackage.Dataset()
 data_lists = data_sets.list_datasets()
-
-
-
-

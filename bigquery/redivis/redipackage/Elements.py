@@ -7,8 +7,6 @@ import pandas
 import sys
 
 
-
-
 # # Prints all tables that Ian has
 # user = User(short_name="imathews")
 # ians_datasets = user.list_datasets()
@@ -72,7 +70,7 @@ class User:
 
     def Dataset(dataset_name):
         headers = {"Authorization": "Bearer {}".format(os.environ["REDIVIS_API_TOKEN"])}
-        r = requests.get("https://redivis.com/api/v1/users/{}/datasets/{}".format(self.short_name), headers=headers, dataset_name)
+        r = requests.get("https://redivis.com/api/v1/users/{}/datasets/{}".format(self.short_name, dataset_name), headers=headers)
         res_json = r.json()
         # We now have a JSON response for all datasets on this user
         return res_json
@@ -96,6 +94,7 @@ class Dataset:
 
 
     def get(self):
+        return
         # Populates properties on the dataset. Throws error if not exists
 
         # try:
@@ -104,8 +103,7 @@ class Dataset:
         #     raise ValueError("The dataset does not exist")
 
     def list_tables(self):
-
-    # Returns a list of table instances
+        # Returns a list of table instances
 
         headers = {"Authorization": "Bearer {}".format(os.environ["REDIVIS_API_TOKEN"])}
         r = requests.get("https://redivis.com/api/v1/users/{}/datasets/tables".format(self.short_name), headers=headers)
@@ -118,28 +116,28 @@ class Dataset:
 
 
     def create_version(self):
+        return
+        # Creates the next version
+        #     r = get_next_version()
+        #
+        #     if r.status_code == 200:
+        #         print("Next version already exists. Continuing...")
+        #         return
+        #
+        #     url = "{}/datasets/{}/versions".format(api_base_path, dataset_identifier)
+        #     headers = {"Authorization": "Bearer {}".format(access_token)}
+        #
+        #     r = requests.post(url, headers=headers)
+        #     checkForAPIError(r)
+        #     return r
 
-    # Creates the next version
-    #     r = get_next_version()
-    #
-    #     if r.status_code == 200:
-    #         print("Next version already exists. Continuing...")
-    #         return
-    #
-    #     url = "{}/datasets/{}/versions".format(api_base_path, dataset_identifier)
-    #     headers = {"Authorization": "Bearer {}".format(access_token)}
-    #
-    #     r = requests.post(url, headers=headers)
-    #     checkForAPIError(r)
-    #     return r
-
-    def get_next_version(autocreate=false):
-
-    # Gets the next version of the dataset
+    def get_next_version(autocreate=False):
+        return
+        # Gets the next version of the dataset
 
     def Table(table_name):
         headers = {"Authorization": "Bearer {}".format(os.environ["REDIVIS_API_TOKEN"])}
-        r = requests.get("https://redivis.com/api/v1/tables/users/{}/datasets/{}:{}".format(self.short_name), headers=headers,dataset_identifier,table_name)
+        r = requests.get("https://redivis.com/api/v1/tables/users/{}/datasets/{}:{}".format(self.short_name,dataset_identifier,table_name), headers=headers)
         res_json = r.json()
         # We now have a JSON response for all datasets on this user
         return res_json
@@ -159,22 +157,26 @@ def exists():
     # returns a boolean for whether the table exists
 
     def get():
+        return
 
     # Populates properties on the table. Throws error if not exists
 
-    def list_variables(maxResults=100)
+    def list_variables(max_results=100):
+        return
 
     # Returns a list of variable instances
 
-    def getRows(max_results=100, as_data_frame=false):
+    def getRows(max_results=100, as_data_frame=False):
+        return
 
     # Returns an iterator for table rows
 
-    def upload_file(file, type='csv', merge_strategy=nil, autocreate_next_version=false):
+    def upload_file(file, type='csv', merge_strategy=nil, autocreate_next_version=False):
+        return
 
 
 # Uploads a file to the table
 
 
-class Variable:
-# TODO
+# class Variable:
+    # TODO
