@@ -1,10 +1,12 @@
 import requests
-import sys
 import os
 import csv
 import json
 import time
 import pandas
+import sys
+
+
 
 
 # # Prints all tables that Ian has
@@ -22,12 +24,12 @@ import pandas
 #     .Table("pm2_5")
 #     .getRows(max_results=100)
 
-access_token = os.environ["REDIVIS_API_TOKEN"]
+access_token = os.environ["REDIVIS_ACCESS_TOKEN"]
 
 # See https://apidocs.redivis.com/referencing-resources
-user_name = "your_username"
-dataset_name = "upload_example"
-table_name = "test"
+user_name = "kevin"
+dataset_name = "a_dataset"
+table_name = "a_table"
 
 dataset_identifier = "{}.{}".format(user_name, dataset_name)
 table_identifier = "{}.{}:next.{}".format(user_name, dataset_name, table_name)
@@ -54,6 +56,8 @@ def get_next_version():
 
 
 class User:
+    """ The User class contains information about particular users"""
+
     def __init__(self, short_name, identifier):
         self.short_name = short_name
         self.identifier = identifier
@@ -75,6 +79,7 @@ class User:
 
 
 class Dataset:
+    """ The Dataset class encapsulates information about a particular user's datasets"""
 
     def __init__(self, user, dataset_identifier, version):
         self.user = user
@@ -91,14 +96,14 @@ class Dataset:
 
 
     def get(self):
-    # Populates properties on the dataset. Throws error if not exists
+        # Populates properties on the dataset. Throws error if not exists
 
-    # try:
-    #     exists(dataset)
-    # except:
-    #     raise ValueError("The dataset does not exist")
+        # try:
+        #     exists(dataset)
+        # except:
+        #     raise ValueError("The dataset does not exist")
 
-    def list_tables(maxResults):
+    def list_tables(self):
 
     # Returns a list of table instances
 
@@ -134,14 +139,14 @@ class Dataset:
 
     def Table(table_name):
         headers = {"Authorization": "Bearer {}".format(os.environ["REDIVIS_API_TOKEN"])}
-        r = requests.get("https://redivis.com/api/v1/tables/users/{}/datasets/{}:{}".format(self.short_name), headers=headers,
-                         dataset_identifier,table_name)
+        r = requests.get("https://redivis.com/api/v1/tables/users/{}/datasets/{}:{}".format(self.short_name), headers=headers,dataset_identifier,table_name)
         res_json = r.json()
         # We now have a JSON response for all datasets on this user
         return res_json
 
 
 class Table:
+    """ The Table class encapsulates information"""
 
     tableCount = 0
 
