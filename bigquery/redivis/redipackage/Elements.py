@@ -9,45 +9,21 @@ import sys
 
 
 access_token = os.environ["REDIVIS_ACCESS_TOKEN"]
+api_base_path = "https://redivis.com/api/v1"
+
+
+def checkForAPIError(self, r):
+    if r.status_code >= 400:
+        res_json = r.json()
+        sys.exit(
+            "An API error occurred at {} {} with status {}:\n\t{} ".format(r.request.method, r.request.path_url,
+                                                                           r.status_code,
+                                                                           res_json['error']['message']))
+
 
 # See https://apidocs.redivis.com/referencing-resources
 
 
-def checkForAPIError(r):
-    if r.status_code >= 400:
-        res_json = r.json()
-        sys.exit("An API error occurred at {} {} with status {}:\n\t{} ".format(r.request.method, r.request.path_url, r.status_code, res_json['error']['message']))
-
-def get_next_version():
-    url = "{}/datasets/{}/versions".format(api_base_path, dataset_identifier)
-    headers = {"Authorization": "Bearer {}".format(access_token)}
-
-    r = requests.get("{}/next".format(url), headers=headers)
-
-    # Don't exit on 404 errors
-    if r.status_code != 404:
-        checkForAPIError(r)
-        return r
-
-def create_version(self):
-
-    # Creates the next version
-    r = get_next_version()
-
-    if r.status_code == 200:
-        print("Next version already exists. Continuing...")
-        return
-
-    url = "{}/datasets/{}/versions".format(api_base_path, dataset_identifier)
-    headers = {"Authorization": "Bearer {}".format(access_token)}
-
-    r = requests.post(url, headers=headers)
-    checkForAPIError(r)
-    return r
-
-def get_next_version(autocreate=False):
-    return
-    # Gets the next version of the dataset
 
 class User:
     """ The User class contains information about  users"""
@@ -209,27 +185,123 @@ class Table:
     # Returns a list of variable instances
 
     def listRows(self, variables, max_results=100, as_data_frame=False): #force the variable input to be a comma-separated
+
         headers = {"Authorization": "Bearer {}".format(os.environ["REDIVIS_ACCESS_TOKEN"])}
         r = requests.get(
             "https://redivis.com/api/v1/tables/{}.{}.{}/rows?selectedVariables={}".format(self.user, self.dataset_name, table_name, variables),
             headers=headers)
         json_dict = r.json()
 
+        return json_dict
     # Returns an iterator for table rows
 
-    def upload_file(file, type='csv', merge_strategy="nil", autocreate_next_version=False):
+class Upload:
+    """ The upload class gives the user streamlined access to the Redivis API, simplifying the process of uploading data """
+    api_base_path = "https://redivis.com/api/v1"
+
+    def __init__(self, dataset, table):
+        self.dataset = dataset
+        self.table = table
         return
 
+    def convert_to_csv(self):
 
-# Uploads a file to the table -- incomplete
-user_name = "kevin"
-dataset_name = "a_dataset"
-table_name = "a_table"
+        with open('data.json') as json_file:
+            data = json.load(json_file)
 
-dataset_identifier = "{}.{}".format(user_name, dataset_name)
-table_identifier = "{}.{}:next.{}".format(user_name, dataset_name, table_name)
-api_base_path = "https://redivis.com/api/v1"
-filename = "test.csv"
-file_path = os.path.join("./", filename)
+        data_file = open('data_file.csv', 'w')
+
+        csv_writer = csv.writer(data_file)
+
+        count = 0
+        for data_chunk in data:
+            if count == 0:
+                header = data.keys()
+                csv_writer.writerow(header)
+                count += 1
+            csv_writer.writerow(data.values())
+        data_file.close()
+
+        return csv_writer
+
+    def get_next_version(self):
+
+        url = "{}/datasets/{}/versions".format(api_base_path, self.dataset)
+        headers = {"Authorization": "Bearer {}".format(access_token)}
+
+        r = requests.get("{}/next".format(url), headers=headers)
+
+        # Don't exit on 404 errors
+        if r.status_code != 404:
+            checkForAPIError(r)
+        return r
+
+    def create_next_version_if_not_exists(self):
+        r = get_next_version()
+
+        if r.status_code == 200:
+            print("Next version already exists. Continuing...")
+            return
+
+        url = "{}/datasets/{}/versions".format(api_base_path, self.dataset)
+        headers = {"Authorization": "Bearer {}".format(access_token)}
+
+        r = requests.post(url, headers=headers)
+        checkForAPIError(r)
+        return r
+
+    def create_upload(self, filename):
+        url = "{}/tables/{}/uploads".format(api_base_path, self.table)
+        data = {"name": filename, "mergeStrategy": "append", "type": "delimited"}
+        headers = {"Authorization": "Bearer {}".format(access_token)}
+
+        r = requests.post(url, data=json.dumps(data), headers=headers)
+
+        checkForAPIError(r)
+
+        res_json = r.json()
+
+        return res_json
+
+    def upload_file(self, path_to_file, upload_uri):
+        url = api_base_path + upload_uri
+        files = {"upload_file": open(path_to_file, "rb")}
+        headers = {"Authorization": "Bearer {}".format(access_token)}
+
+        with open(path_to_file, 'rb') as f:
+            r = requests.put(url, data=f, headers=headers)
+            checkForAPIError(r)
+
+        return r.json()
+
+    def get_upload(self, upload_uri):
+        url = api_base_path + upload_uri
+        headers = {
+            "Authorization": "Bearer {}".format(access_token),
+        }
+        r = requests.get(url, headers=headers)
+        checkForAPIError(r)
+
+        res_json = r.json()
+
+        return res_json
+
+    def release_dataset(self):
+        url = "{}/datasets/{}/versions/next/release".format(api_base_path, self.dataset)
+
+        data = {"releaseNotes": "Initial Release", "label": "Test Release"}
+        headers = {"Authorization": "Bearer {}".format(access_token)}
+
+        r = requests.post(url, data=json.dumps(data), headers=headers)
+
+        checkForAPIError(r)
+
+        return r
+
+
+    # def upload_file(file, type='csv', merge_strategy="nil", autocreate_next_version=False):
+    #     return
+
+
 
 
