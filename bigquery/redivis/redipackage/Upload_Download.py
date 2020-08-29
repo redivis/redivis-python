@@ -4,17 +4,19 @@ import os
 import requests
 import json
 import time
+from io import StringIO
+from redivis import bigquery
 
-# When calling this script, provide the API Token as an environment variables
+# When calling this script, provide the API Token as an environment variable
 # E.g.: REDIVIS_API_TOKEN=your_api_token pipenv run python upload_script.py
 
 # This script assumes you have an API access token with date.edit scope. See https://apidocs.redivis.com/authorization
 access_token = os.environ["REDIVIS_API_TOKEN"]
 
 # See https://apidocs.redivis.com/referencing-resources
-user_name = "[user_name]"
-dataset_name = "[dataset_name]"
-table_name = "[table_name]"
+user_name = "[kevin]"
+dataset_name = "[library-test]"
+table_name = "[addresses]"
 
 dataset_identifier = "{}.{}".format(user_name, dataset_name)
 table_identifier = "{}.{}:next.{}".format(user_name, dataset_name, table_name)
@@ -22,47 +24,97 @@ api_base_path = "https://redivis.com/api/v1"
 filename = "test.csv"
 file_path = os.path.join("./", filename)
 
-def pull_from_api(): # api request
 
-    #insert place holder as url
-    url = "http://www.airnowapi.org/aq/observation/latLong/current/?format=text/csv&latitude=37.7555&longitude=-122.4423&distance=25&API_KEY=A6A59B4B-07D4-4843-A7A2-72D4CF1B1AA5"
+def main():
 
+    start_time = get_start_time()
+
+    temp = get_start_time()
+
+    starting_day = int(temp[9])
+
+    end_day = starting_day + 2
+
+    temp.replace(temp[9], str(end_day))
+    print("Fetching EPA data")
+
+    epa_data = pull_from_epa_api(start_time=start_time, end_time = end_day)
+
+    print("Creating next version if needed...")
+
+    create_next_version_if_not_exists()
+
+    print("Creating upload...")
+
+    upload = create_upload()
+
+    print("Uploading file...")
+
+    upload_data(epa_data, upload['uri'])
+
+    # Wait for upload to finish importing
+    while True:
+        time.sleep(2)
+        upload = get_upload(upload['uri'])
+        if upload['status'] == 'failed':
+            sys.exit( "Issue with importing uploaded file, abandoning process...: \n\t{}".format( upload['errorMessage'] ) )
+        elif upload['status'] == 'completed':
+            break
+        else:
+            print("Import is still in progress.")
+
+    print("Import completed. Releasing version...")
+
+    release_dataset()
+
+def get_start_time():
+
+    client = bigquery.Client()
+
+    start_time = """SELECT DATETIME_ADD(MAX(PARSE_DATETIME('%Y-%m-%dT%H:%M', UTC)), INTERVAL 1 hour) as next_dt 
+                    FROM redivis.epa_test.pm2_5:1"""
+
+    query_job = client.query(start_time)
+
+    print("Fetching EPA data")
+    for row in query_job:
+        print("EPA Data Retrieved")
+
+
+    time = row.next_dt.strftime('%Y-%m-%dT%H:%M')
+    return time
+
+def pull_from_epa_api(start_time, end_time):
+    # See https://docs.airnowapi.org/Data/query
+    # BBox is for California
+    url = "http://www.airnowapi.org/aq/data/?startDate={start_time}&endDate={end_time}&parameters=PM25&BBOX={bbox}&dataType=A&format=application/json&verbose=0&nowcastonly=0&includerawconcentrations=0&API_KEY={epa_api_key}".format(start_time = start_time, end_time = end_time, bbox="-125.087280,32.200885,-113.837280,42.250626", epa_api_key="A6A59B4B-07D4-4843-A7A2-72D4CF1B1AA5")
     payload = {}
     headers= {}
 
     response = requests.request("GET", url, headers=headers, data = payload)
 
     dataset_name = response
-
-    return response.text.encode('utf8')
-
-def convert_to_csv():
+    return convert_to_csv(response.json())
 
 
-    with open('data.json') as json_file:
-        data = json.load(json_file)
+def convert_to_csv(input_json):
+    # See https://www.idkrtm.com/converting-json-to-csv-and-back-again-using-python/
+    # and https://stackoverflow.com/questions/9157314/how-do-i-write-data-into-csv-format-as-string-not-file
+    si = StringIO()
+    keylist = []
+    for key in input_json[0]:
+        keylist.append(key)
+        f = csv.writer(si)
 
+    f.writerow(keylist)
 
-    data_file = open('data_file.csv', 'w')
+    for record in input_json:
+        currentrecord = []
+        for key in keylist:
+            currentrecord.append(record[key])
+        f.writerow(currentrecord)
 
-    csv_writer = csv.writer(data_file)
-
-
-    count = 0
-
-    for data_chunk in data:
-        if count == 0:
-
-
-            header = data.keys()
-            csv_writer.writerow(header)
-            count += 1
-
-        csv_writer.writerow(data.values())
-
-    data_file.close()
-
-    return csv_writer
+    return si.getvalue()
 
 def get_next_version():
     url = "{}/datasets/{}/versions".format( api_base_path, dataset_identifier )
@@ -90,7 +142,7 @@ def create_next_version_if_not_exists( ):
     return r
 
 
-def create_upload( filename ):
+def create_upload( ):
     url = "{}/tables/{}/uploads".format(api_base_path, table_identifier)
     data = {"name": filename, "mergeStrategy": "append", "type": "delimited"}
     headers = {"Authorization": "Bearer {}".format(access_token)}
@@ -104,14 +156,12 @@ def create_upload( filename ):
     return res_json
 
 
-def upload_file(path_to_file, upload_uri):
+def upload_data(epa_data, upload_uri):
     url = api_base_path + upload_uri
-    files = {"upload_file": open(path_to_file, "rb")}
     headers = { "Authorization": "Bearer {}".format(access_token) }
 
-    with open( path_to_file, 'rb' ) as f:
-        r = requests.put(url, data=f, headers=headers)
-        checkForAPIError(r)
+    r = requests.put(url, data=epa_data, headers=headers)
+    checkForAPIError(r)
 
     return r.json()
 
@@ -144,33 +194,5 @@ def checkForAPIError(r):
         res_json = r.json()
         sys.exit( "An API error occurred at {} {} with status {}:\n\t{} ".format( r.request.method, r.request.path_url, r.status_code, res_json['error']['message'] ) )
 
-def main():
-
-    pull_from_api
-
-    create_next_version_if_not_exists()
-
-    upload = create_upload(convert_to_csv)
-
-    upload_file(file_path, upload['uri'])
-
-    # Wait for upload to finish importing
-    while True:
-        time.sleep(2)
-        upload = get_upload(upload['uri'])
-        if upload['status'] == 'failed':
-            sys.exit( "Issue with importing uploaded file, abandoning process...: \n\t{}".format( upload['errorMessage'] ) )
-        elif upload['status'] == 'completed':
-            break
-        else:
-            print("Import is still in progress.")
-
-    print("Import completed. Releasing version...")
-
-    release_dataset()
-
-
-
 main()
-
 

@@ -3,23 +3,40 @@ import os
 import csv
 import json
 import sys
+import time
 
-
+#make the defs function classes reference ian's message
 
 access_token = os.environ["REDIVIS_ACCESS_TOKEN"]
 api_base_path = "https://redivis.com/api/v1"
 
 
-def checkForAPIError(self, r):
+def checkForAPIError(r):
     if r.status_code >= 400:
         res_json = r.json()
         sys.exit(
             "An API error occurred at {} {} with status {}:\n\t{} ".format(r.request.method, r.request.path_url,
                                                                            r.status_code,
                                                                            res_json['error']['message']))
-def get_next_version(self):
+def create_next_version_if_not_exists():
 
-    url = "{}/datasets/{}/versions".format(api_base_path, self.dataset)
+    r = get_next_version()
+
+    if r.status_code == 200:
+        print("Next version already exists. Continuing...")
+        return
+
+    url = "{}/datasets/{}/versions".format(api_base_path, dataset_identifier)
+    headers = {"Authorization": "Bearer {}".format(access_token)}
+
+    r = requests.post(url, headers=headers)
+    checkForAPIError(r)
+    return r
+
+
+def get_next_version():
+
+    url = "{}/datasets/{}/versions".format(api_base_path, dataset_identifier)
     headers = {"Authorization": "Bearer {}".format(access_token)}
 
     r = requests.get("{}/next".format(url), headers=headers)
@@ -30,52 +47,59 @@ def get_next_version(self):
 
     return r
 
+def upload_data(epa_data, upload_uri):
+    url = api_base_path + upload_uri
+    headers = { "Authorization": "Bearer {}".format(access_token) }
+
+    r = requests.put(url, data=epa_data, headers=headers)
+    checkForAPIError(r)
+
+    return r.json()
+
+def get_upload( upload_uri ):
+    url = api_base_path + upload_uri
+    headers = {
+        "Authorization": "Bearer {}".format(access_token),
+    }
+    r = requests.get( url,  headers=headers)
+    checkForAPIError(r)
+
+    res_json = r.json()
+
+    return res_json
+
+
+
 class Upload:
     """ The upload class gives the user streamlined access to the Redivis API, simplifying the process of uploading data """
     api_base_path = "https://redivis.com/api/v1"
 
-    def __init__(self, dataset, table):
+    def __init__(self, user, dataset, table):
+        self.user = user
         self.dataset = dataset
         self.table = table
-        return
-
-    def convert_to_csv(self):
-
-        with open('data.json') as json_file:
-            data = json.load(json_file)
-
-        data_file = open('data_file.csv', 'w')
-
-        csv_writer = csv.writer(data_file)
-
-        count = 0
-        for data_chunk in data:
-            if count == 0:
-                header = data.keys()
-                csv_writer.writerow(header)
-                count += 1
-            csv_writer.writerow(data.values())
-        data_file.close()
-
-        return csv_writer
+        self.dataset_identifier = "{}.{}".format(self.user, self.dataset)
+        self.table_identifier = "{}.{}".format(self.user, self.dataset, self.table)
 
 
-    def create_next_version_if_not_exists(self):
-        r = get_next_version()
+    def create_upload(self,filename, endpoint_dataset):
+
+        url = "{}/datasets/{}/versions".format(api_base_path, self.dataset_identifier)
+        headers = {"Authorization": "Bearer {}".format(access_token)}
+
+        r = requests.get("{}/next".format(url), headers=headers)
 
         if r.status_code == 200:
             print("Next version already exists. Continuing...")
-            return
+        else:
+            url = "{}/datasets/{}/versions".format(api_base_path, self.dataset_identifier)
+            headers = {"Authorization": "Bearer {}".format(access_token)}
 
-        url = "{}/datasets/{}/versions".format(api_base_path, self.dataset)
-        headers = {"Authorization": "Bearer {}".format(access_token)}
+            r = requests.post(url, headers=headers)
+            checkForAPIError(r)
 
-        r = requests.post(url, headers=headers)
-        checkForAPIError(r)
-        return r
 
-    def create_upload(self, filename):
-        url = "{}/tables/{}/uploads".format(api_base_path, self.table)
+        url = "{}/tables/{}/uploads".format(api_base_path, self.table_identifier)
         data = {"name": filename, "mergeStrategy": "append", "type": "delimited"}
         headers = {"Authorization": "Bearer {}".format(access_token)}
 
@@ -85,33 +109,24 @@ class Upload:
 
         res_json = r.json()
 
-        return res_json
+        upload_data(endpoint_dataset, res_json['uri'])
 
-    def upload_file(self, path_to_file, upload_uri):
-        url = api_base_path + upload_uri
-        files = {"upload_file": open(path_to_file, "rb")}
-        headers = {"Authorization": "Bearer {}".format(access_token)}
+        # Wait for upload to finish importing
+        while True:
+            time.sleep(2)
+            upload = get_upload(res_json['uri'])
+            if upload['status'] == 'failed':
+                sys.exit(
+                    "Issue with importing uploaded file, abandoning process...: \n\t{}".format(upload['errorMessage']))
+            elif upload['status'] == 'completed':
+                break
+            else:
+                print("Import is still in progress.")
 
-        with open(path_to_file, 'rb') as f:
-            r = requests.put(url, data=f, headers=headers)
-            checkForAPIError(r)
-
-        return r.json()
-
-    def get_upload(self, upload_uri):
-        url = api_base_path + upload_uri
-        headers = {
-            "Authorization": "Bearer {}".format(access_token),
-        }
-        r = requests.get(url, headers=headers)
-        checkForAPIError(r)
-
-        res_json = r.json()
-
-        return res_json
+        print("Import completed.")
 
     def release_dataset(self):
-        url = "{}/datasets/{}/versions/next/release".format(api_base_path, self.dataset)
+        url = "{}/datasets/{}/versions/next/release".format(api_base_path, self.dataset_identifier)
 
         data = {"releaseNotes": "Initial Release", "label": "Test Release"}
         headers = {"Authorization": "Bearer {}".format(access_token)}
@@ -123,20 +138,11 @@ class Upload:
         return r
 
 
-    # def upload(file, type='csv', merge_strategy="nil", autocreate_next_version=False):
-        
-    #     return
-
-# See https://apidocs.redivis.com/referencing-resources
-
-
-
 class User:
     """ The User class contains information about  users"""
 
-    def __init__(self, username, data_set_name):
+    def __init__(self, username):
         self.username = username
-        self.data_set_name = data_set_name
 
     def list_datasets(self, max_results=10):
         # Returns a list of dataset instances
@@ -150,19 +156,21 @@ class User:
 
         i = 0
         for i in range(len(result)):
-            # Nested tuple in a list?
+
             dataset_list.append(Dataset(self.username, result[i]["name"]))
             presentation_list.append(result[i]["name"])
             presentation_list.append(result[i]["uri"])
+
         return dataset_list, presentation_list
 
 
-    def Dataset(self, dataset_name):
-        headers = {"Authorization": "Bearer {}".format(os.environ["REDIVIS_ACCESS_TOKEN"])}
-        r = requests.get("https://redivis.com/api/v1/users/{}/datasets/{}".format(self.username, dataset_name), headers=headers)
-        res_json = r.json()
-        # We now have a JSON response for all datasets on this user
-        return res_json
+    def dataset(self, dataset):
+        # headers = {"Authorization": "Bearer {}".format(os.environ["REDIVIS_ACCESS_TOKEN"])}
+        # r = requests.get("https://redivis.com/api/v1/users/{}/datasets/{}".format(self.username, dataset), headers=headers)
+        # res_json = r.json()
+
+        return Dataset("kevin", dataset)
+
 
 
 class Dataset:
@@ -171,8 +179,7 @@ class Dataset:
     def __init__(self, user, dataset_name):
         self.user = user
         self.dataset_name = dataset_name
-        #self.version = version #will be made into a class at some point
-        #do we want the dataset to be in the init?
+
 
 
     def exists(self, data_set):

@@ -30,7 +30,8 @@ The package also includes an upload class which allows clients to upload data to
 ___________________
 Requirements 
 
-This module requires no special modules (Bigquery maybe?)
+Installation of this package is dependent upon installation of redivis bigquery
+pipenv install -e "git+https://github.com/redivis/redipy.git#egg=redivis-bigquery&subdirectory=bigquery"
 
 -------------------
 Installation 
@@ -40,5 +41,6 @@ This package can be downloaded from pypi using pip install
 --------------------
 Troubleshooting
 
+Be mindful of datetime formatting errors.
 
 
