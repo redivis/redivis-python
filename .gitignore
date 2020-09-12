@@ -104,5 +104,5 @@ venv.bak/
 .mypy_cache/
 
 # intellij
-./idea
+.idea
 .idea/workspace.xml
