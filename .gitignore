@@ -106,3 +106,4 @@ venv.bak/
 # intellij
 .idea
 .idea/workspace.xml
+.DS_Store
