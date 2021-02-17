@@ -43,4 +43,4 @@ except Exception as e:
     print(e)
 
 print("Deleting dataset")
-# Dataset(f"imathews.{dataset_name}").delete()
+Dataset(f"imathews.{dataset_name}").delete()
