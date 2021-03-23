@@ -2,14 +2,16 @@
 # -*- coding: utf-8 -*-
 
 # Note: To use the 'upload' functionality of this file, you must:
-#   $ pipenv install twine --dev
+#   $ pipenv install twine wheel --dev
 
 import io
 import os
 import sys
 from shutil import rmtree
 
-from setuptools import find_packages, setup, Command
+import setuptools
+
+# from setuptools import find_packages, setup, Command
 
 # Package meta-data.
 NAME = "redivis"
@@ -18,7 +20,7 @@ URL = "https://github.com/redivis/redipy"
 EMAIL = "support@redivis.com"
 AUTHOR = "Redivis Inc."
 REQUIRES_PYTHON = ">=3.6.0"
-VERSION = "0.0.1"
+VERSION = "0.0.5"
 
 # Required dependencies
 REQUIRED = ["google-cloud-bigquery == 1.25.0", "requests == 2.24.0"]
@@ -53,7 +55,7 @@ else:
     about["__version__"] = VERSION
 
 
-class UploadCommand(Command):
+class UploadCommand(setuptools.Command):
     """Support setup.py upload."""
 
     description = "Build and publish the package."
@@ -90,8 +92,19 @@ class UploadCommand(Command):
         sys.exit()
 
 
+# Only include packages under the 'redivis' namespace. Do not include tests,
+# benchmarks, etc.
+packages = [
+    package
+    for package in setuptools.PEP420PackageFinder.find()
+    if package.startswith("redivis")
+]
+
+# Determine which namespaces are needed.
+namespaces = ["redivis"]
+
 # Where the magic happens:
-setup(
+setuptools.setup(
     name=NAME,
     version=about["__version__"],
     description=DESCRIPTION,
@@ -101,9 +114,11 @@ setup(
     author_email=EMAIL,
     python_requires=REQUIRES_PYTHON,
     url=URL,
-    packages=[
-        "redivis"
-    ],  # find_packages(where="redivis", exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
+    packages=packages,
+    namespace_packages=namespaces,
+    # packages=[
+    #     "redivis"
+    # ],  # find_packages(where="redivis", exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
     install_requires=REQUIRED,
     extras_require=EXTRAS,
     include_package_data=True,
