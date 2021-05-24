@@ -31,14 +31,17 @@ def make_request(
         url, headers=headers, params=query, verify=verifySSL, data=payload
     )
 
-    if r.status_code >= 400:
-        raise Exception(r.json()["error"])
-    elif (
-        parse_response and r.text != "OK"
-    ):  # handles deletions, where there is no content
-        return r.json()
-        # return __invert_case(json_response, __camel_to_snake)
-    else:
+    try:
+        if r.status_code >= 400:
+            raise Exception(r.json()["error"])
+        elif (
+            parse_response and r.text != "OK"
+        ):  # handles deletions, where there is no content
+            return r.json()
+            # return __invert_case(json_response, __camel_to_snake)
+        else:
+            return r.text
+    except Exception:
         return r.text
 
 
