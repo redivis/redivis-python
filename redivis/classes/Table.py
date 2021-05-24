@@ -134,7 +134,7 @@ class Table:
         max_results = (
             min(limit, int(self.properties["numRows"]))
             if limit is not None
-            else self.properties.numRows
+            else self.properties["outputNumRows"]
         )
 
         rows = ""

@@ -58,7 +58,7 @@ class Query:
         max_results = (
             min(limit, int(self.properties["outputNumRows"]))
             if limit is not None
-            else self.properties["outputNumBytes"]
+            else self.properties["outputNumRows"]
         )
 
         rows = ""
@@ -74,8 +74,16 @@ class Query:
                     else max_results - page * page_size,
                 },
             )
+            if page != 0:
+                rows += "\n"
             rows += results
             page += 1
+
+        for row in rows.split("\n"):
+            try:
+                json.loads(row)
+            except:
+                print(row)
 
         return [Row(*json.loads(row)) for row in rows.split("\n")]
 
