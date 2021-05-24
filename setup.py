@@ -23,7 +23,7 @@ REQUIRES_PYTHON = ">=3.6.0"
 VERSION = "0.1.0"
 
 # Required dependencies
-REQUIRED = ["google-cloud-bigquery == 1.25.0", "requests == 2.24.0", "pandas == 1.2.4"]
+REQUIRED = ["requests == 2.24.0", "pandas == 1.2.4"]
 
 # What packages are optional?
 EXTRAS = {
@@ -115,11 +115,11 @@ setuptools.setup(
     author_email=EMAIL,
     python_requires=REQUIRES_PYTHON,
     url=URL,
-    packages=packages,
-    namespace_packages=namespaces,
-    # packages=[
-    #     "redivis"
-    # ],  # find_packages(where="redivis", exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
+    # packages=packages,
+    # namespace_packages=namespaces,
+    packages=[
+        "redivis"
+    ],  # find_packages(where="redivis", exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
     install_requires=REQUIRED,
     extras_require=EXTRAS,
     include_package_data=True,
