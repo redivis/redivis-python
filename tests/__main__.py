@@ -1,7 +1,6 @@
 import os, sys, traceback
 
 os.environ["REDIVIS_API_ENDPOINT"] = "https://localhost:8443/api/v1"
-os.environ["REDIVIS_API_TOKEN"] = "AAAAmJzpOyUGJJi+ntevUYoICwAjwgiO"
 
 import logging
 import importlib
