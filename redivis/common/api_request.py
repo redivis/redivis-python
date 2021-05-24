@@ -34,7 +34,7 @@ def make_request(
         else:
             return r.text
     except Exception:
-        return r.text
+        raise Exception(r.text)
 
 
 def make_paginated_request(
