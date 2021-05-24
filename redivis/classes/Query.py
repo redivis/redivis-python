@@ -53,7 +53,7 @@ class Query:
         )
 
         page = 0
-        page_size = 10000
+        page_size = 1000000
 
         max_results = (
             min(limit, int(self.properties["outputNumRows"]))
