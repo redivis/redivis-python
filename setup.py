@@ -20,7 +20,7 @@ URL = "https://github.com/redivis/redipy"
 EMAIL = "support@redivis.com"
 AUTHOR = "Redivis Inc."
 REQUIRES_PYTHON = ">=3.6.0"
-VERSION = "0.0.5"
+VERSION = "0.1.0"
 
 # Required dependencies
 REQUIRED = ["google-cloud-bigquery == 1.25.0", "requests == 2.24.0", "pandas == 1.2.4"]
