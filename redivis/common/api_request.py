@@ -13,7 +13,10 @@ api_endpoint = (
 verifySSL = False if api_endpoint.find("https://localhost", 0) == 0 else True
 
 
-def make_request(*, method, path, query=None, payload=None, parse_payload=True):
+def make_request(
+    *, method, path, query=None, payload=None, parse_payload=True, parse_response=True
+):
+
     method = method.lower()
     url = f"{api_endpoint}{path}"
 
@@ -28,25 +31,51 @@ def make_request(*, method, path, query=None, payload=None, parse_payload=True):
         url, headers=headers, params=query, verify=verifySSL, data=payload
     )
 
-    if r.text != "OK":
-        json_response = r.json()
-        if r.status_code >= 400:
-            raise requests.HTTPError(json_response)
-        return json_response
-
+    if r.status_code >= 400:
+        raise Exception(r.json()["error"])
+    elif (
+        parse_response and r.text != "OK"
+    ):  # handles deletions, where there is no content
+        return r.json()
+        # return __invert_case(json_response, __camel_to_snake)
     else:
-        r.raise_for_status()
-        return
-
-    # return __invert_case(json_response, __camel_to_snake)
+        return r.text
 
 
-def make_paginated_request(*, path, query=None, max_results=100):
-    # TODO: proper pagination with max_results. How to use iterators?
-    headers = {"Authorization": f"Bearer {__get_access_token()}"}
-    url = f"{api_endpoint}{path}"
-    logging.debug(f"Making paginated API request to '{url}'")
-    requests.get(url, headers=headers, params={"maxResults": max_results}.update(query))
+def make_paginated_request(
+    *, path, query={}, page_size=100, max_results=None, parse_response=True
+):
+    logging.debug(f"Making paginated API request to '{path}'")
+
+    page = 0
+    results = []
+    next_page_token = None
+
+    while True:
+        if max_results is not None and len(results) >= max_results:
+            break
+
+        response = make_request(
+            method="get",
+            path=path,
+            parse_response=True,
+            query={
+                **query,
+                **{
+                    "pageToken": next_page_token,
+                    "maxResults": page_size
+                    if max_results is None or (page + 1) * page_size < max_results
+                    else max_results - page * page_size,
+                },
+            },
+        )
+        page += 1
+        results += response["results"]
+        next_page_token = response["nextPageToken"]
+        if not next_page_token:
+            break
+
+    return results
 
 
 def __get_access_token():

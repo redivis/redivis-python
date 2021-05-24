@@ -1,11 +1,11 @@
 import json
-import logging
 
-from .api_request import make_request, make_paginated_request
+from ..common.api_request import make_request, make_paginated_request
 
 
 class Upload:
     def __init__(self, uri, properties=None):
+        # TODO: reconsider this scheme
         self.uri = uri
         self.properties = properties
 
@@ -22,7 +22,7 @@ class Upload:
         )
 
     def upload_file(self, data):
-        # TODO: handle local files, other streams
+        # TODO: resumable uploads
         make_request(method="PUT", path=self.uri, payload=data, parse_payload=False)
         return
 

@@ -11,7 +11,7 @@ from shutil import rmtree
 
 import setuptools
 
-# from setuptools import find_packages, setup, Command
+from setuptools import find_packages, setup, Command
 
 # Package meta-data.
 NAME = "redivis"
@@ -23,7 +23,7 @@ REQUIRES_PYTHON = ">=3.6.0"
 VERSION = "0.0.5"
 
 # Required dependencies
-REQUIRED = ["google-cloud-bigquery == 1.25.0", "requests == 2.24.0"]
+REQUIRED = ["google-cloud-bigquery == 1.25.0", "requests == 2.24.0", "pandas == 1.2.4"]
 
 # What packages are optional?
 EXTRAS = {
@@ -99,6 +99,7 @@ packages = [
     for package in setuptools.PEP420PackageFinder.find()
     if package.startswith("redivis")
 ]
+print(packages)
 
 # Determine which namespaces are needed.
 namespaces = ["redivis"]
