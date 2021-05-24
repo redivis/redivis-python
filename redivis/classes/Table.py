@@ -118,7 +118,7 @@ class Table:
         variables = make_paginated_request(path=f"{self.uri}/variables", page_size=1000)
         return [Variable(variable) for variable in variables]
 
-    def list_rows(self, limit, *, offset_start=0):
+    def list_rows(self, limit=None, *, offset_start=0):
         variables = make_paginated_request(path=f"{self.uri}/variables")
         Row = namedtuple(
             "Row",
@@ -158,7 +158,7 @@ class Table:
 
         return [Row(*json.loads(row)) for row in rows.split("\n")]
 
-    def to_data_frame(self, limit, *, offset_start=0):
+    def to_data_frame(self, limit=None, *, offset_start=0):
         #  TODO: this won't work if we don't have any rows
         rows = self.list_rows(limit=limit, offset_start=offset_start)
         return pd.DataFrame(rows, columns=rows[0]._fields)

@@ -32,7 +32,7 @@ class Query:
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def list_rows(self, limit, *, offset_start=0):
+    def list_rows(self, limit=None, *, offset_start=0):
         while True:
             if self.properties["status"] == "completed":
                 break
@@ -79,7 +79,7 @@ class Query:
 
         return [Row(*json.loads(row)) for row in rows.split("\n")]
 
-    def to_data_frame(self, limit, *, offset_start=0):
+    def to_data_frame(self, limit=None, *, offset_start=0):
         #  TODO: this won't work if we don't have any rows
         rows = self.list_rows(limit=limit, offset_start=offset_start)
         return pd.DataFrame(rows, columns=rows[0]._fields)
