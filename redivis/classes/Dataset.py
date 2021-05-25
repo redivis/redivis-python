@@ -66,15 +66,18 @@ class Dataset:
         return self
 
     def update(self, *, name=None, public_access_level=None, description=None):
-        # TODO: don't send up None if user didn't pass kwargs
+        payload = {}
+        if name:
+            payload["name"] = name
+        if public_access_level:
+            payload["publicAccessLevel"] = public_access_level
+        if description is not None:
+            payload["description"] = description
+
         self.properties = make_request(
             method="POST",
             path=self.uri,
-            payload={
-                "name": name,
-                "publicAccessLevel": public_access_level,
-                "description": description,
-            },
+            payload=payload,
         )
         return self
 

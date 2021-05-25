@@ -64,15 +64,18 @@ class Table:
         return self
 
     def update(self, *, name=None, description=None, merge_strategy=None):
-        # TODO: don't pass up None if the user didn't provide it
+        payload = {}
+        if name:
+            payload["name"] = name
+        if merge_strategy:
+            payload["mergeStrategy"] = merge_strategy
+        if description is not None:
+            payload["description"] = description
+
         response = make_request(
             method="PATCH",
             path=f"{self.uri}",
-            payload={
-                "name": name,
-                "description": description,
-                "mergeStrategy": merge_strategy,
-            },
+            payload=payload,
         )
         self.properties = response
         return
@@ -134,7 +137,7 @@ class Table:
         max_results = (
             min(limit, int(self.properties["numRows"]))
             if limit is not None
-            else self.properties["outputNumRows"]
+            else self.properties["numRows"]
         )
 
         rows = ""
@@ -156,11 +159,20 @@ class Table:
             rows += results
             page += 1
 
+        if not rows:
+            return []
+
         return [Row(*json.loads(row)) for row in rows.split("\n")]
 
     def to_data_frame(self, limit=None, *, offset_start=0):
-        #  TODO: this won't work if we don't have any rows
         rows = self.list_rows(limit=limit, offset_start=offset_start)
+        if len(rows) == 0:
+            variables = make_paginated_request(path=f"{self.uri}/variables")
+            return pd.DataFrame(
+                rows,
+                columns=[variable["name"] for variable in variables],
+            )
+
         return pd.DataFrame(rows, columns=rows[0]._fields)
 
     def download(self):

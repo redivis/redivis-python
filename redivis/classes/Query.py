@@ -79,15 +79,19 @@ class Query:
             rows += results
             page += 1
 
-        for row in rows.split("\n"):
-            try:
-                json.loads(row)
-            except:
-                print(row)
+        if not rows:
+            return []
 
         return [Row(*json.loads(row)) for row in rows.split("\n")]
 
     def to_data_frame(self, limit=None, *, offset_start=0):
-        #  TODO: this won't work if we don't have any rows
         rows = self.list_rows(limit=limit, offset_start=offset_start)
+        if len(rows) == 0:
+            return pd.DataFrame(
+                rows,
+                columns=[
+                    variable["name"] for variable in self.properties["outputSchema"]
+                ],
+            )
+
         return pd.DataFrame(rows, columns=rows[0]._fields)
