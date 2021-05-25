@@ -42,7 +42,7 @@ Full reference for this package is available at https://apidocs.redivis.com/redi
 ## Examples
 
 ### Querying data
-Execute a query
+#### Execute a query
 ```py
 import redivis
 
@@ -59,7 +59,7 @@ for row in query.list_rows():
 df = query.to_dataframe();
 print(df)
 ```
-Execute a scoped query
+#### Execute a scoped query
 ```py
 import redivis
 
@@ -105,7 +105,7 @@ print(df)
 ```
 
 ### Uploading data
-Create a new dataset
+#### Create a new dataset
 ```py
 import redivis
 
@@ -118,7 +118,7 @@ dataset = redivis.user("your-username").dataset("some dataset")
 # public_access_level can be one of ('none', 'overview', 'metadata', 'sample', 'data')
 dataset.create(public_access_level="overview")
 ```
-Create a table and upload data
+#### Create a table and upload data
 ```py
 import redivis
 
@@ -139,14 +139,14 @@ table = (
 with open("path/to/file", "rb") as f:
     table.create_upload(name="tiny.csv", type="delimited", data=f)
 ```
-Release a new version
+#### Release a new version
 ```py
 import redivis
 
 dataset = redivis.organization("Demo").dataset("some dataset")
 dataset.release()
 ```
-Update an existing dataset
+#### Update an existing dataset
 ```py
 import redivis
 
