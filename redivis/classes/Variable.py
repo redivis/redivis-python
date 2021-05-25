@@ -2,8 +2,9 @@ import json
 
 
 class Variable:
-    def __init__(self, uri):
-        self.uri = uri
+    def __init__(self, properties):
+        self.properties = properties
+        self.uri = self.properties.uri
 
     def __getitem__(self, key):
         return self.properties[key]
