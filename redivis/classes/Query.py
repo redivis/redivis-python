@@ -1,4 +1,5 @@
-from ..common.api_request import make_request, make_paginated_request
+from ..common.api_request import make_request, make_rows_request
+from ..common.util import set_dataframe_types
 import json
 import time
 from collections import namedtuple
@@ -12,10 +13,10 @@ class Query:
             path="/queries",
             payload={
                 "query": query,
-                "defaultProject": default_project.uri.split("projects/")[1]
+                "defaultProject": default_project.identifer
                 if default_project
                 else None,
-                "defaultDataset": default_dataset.uri.split("datasets/")[1]
+                "defaultDataset": default_dataset.identifier
                 if default_dataset
                 else None,
             },
@@ -32,7 +33,49 @@ class Query:
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def list_rows(self, limit=None, *, offset_start=0):
+    def list_rows(self, limit=None):
+        self._wait_for_finish()
+        variables = self.properties["outputSchema"]
+        Row = namedtuple(
+            "Row",
+            [variable["name"] for variable in variables],
+        )
+
+        max_results = (
+            min(limit, int(self.properties["outputNumRows"]))
+            if limit is not None
+            else self.properties["outputNumRows"]
+        )
+
+        rows = make_rows_request(uri=self.uri, max_results=max_results)
+        return [Row(*row) for row in rows]
+
+    def to_dataframe(self, limit=None):
+        self._wait_for_finish()
+        variables = self.properties["outputSchema"]
+
+        max_results = (
+            min(limit, int(self.properties["outputNumRows"]))
+            if limit is not None
+            else self.properties["outputNumRows"]
+        )
+
+        rows = make_rows_request(uri=self.uri, max_results=max_results)
+        if len(rows) == 0:
+            return pd.DataFrame(
+                rows,
+                columns=[variable["name"] for variable in variables],
+            )
+
+        df = pd.DataFrame(
+            rows,
+            dtype="string",
+            columns=[variable["name"] for variable in variables],
+        )
+
+        return set_dataframe_types(df, variables)
+
+    def _wait_for_finish(self):
         while True:
             if self.properties["status"] == "completed":
                 break
@@ -45,53 +88,3 @@ class Query:
             else:
                 time.sleep(2)
                 self.get()
-
-        variables = self.properties["outputSchema"]
-        Row = namedtuple(
-            "Row",
-            [variable["name"] for variable in variables],
-        )
-
-        page = 0
-        page_size = 1000000
-
-        max_results = (
-            min(limit, int(self.properties["outputNumRows"]))
-            if limit is not None
-            else self.properties["outputNumRows"]
-        )
-
-        rows = ""
-        while page * page_size < max_results:
-            results = make_request(
-                method="get",
-                path=f"{self.uri}/rows",
-                parse_response=False,
-                query={
-                    "startIndex": page * page_size + offset_start,
-                    "maxResults": page_size
-                    if (page + 1) * page_size < max_results
-                    else max_results - page * page_size,
-                },
-            )
-            if page != 0:
-                rows += "\n"
-            rows += results
-            page += 1
-
-        if not rows:
-            return []
-
-        return [Row(*json.loads(row)) for row in rows.split("\n")]
-
-    def to_data_frame(self, limit=None, *, offset_start=0):
-        rows = self.list_rows(limit=limit, offset_start=offset_start)
-        if len(rows) == 0:
-            return pd.DataFrame(
-                rows,
-                columns=[
-                    variable["name"] for variable in self.properties["outputSchema"]
-                ],
-            )
-
-        return pd.DataFrame(rows, columns=rows[0]._fields)

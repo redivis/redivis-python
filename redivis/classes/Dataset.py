@@ -1,6 +1,6 @@
 from .Table import Table
 from .Query import Query
-import requests
+from urllib.parse import quote as quote_uri
 
 from ..common.api_request import make_request, make_paginated_request
 import json
@@ -20,8 +20,10 @@ class Dataset:
         self.version = version
         self.user = user
         self.organization = organization
-        # TODO: encode URI
-        self.uri = f"/datasets/{(self.organization or self.user).name}.{self.name}:{self.version}"
+        self.identifier = (
+            f"{(self.organization or self.user).name}.{self.name}:{self.version}"
+        )
+        self.uri = f"/datasets/{quote_uri(self.identifier)}"
         self.properties = properties
 
     def __getitem__(self, key):

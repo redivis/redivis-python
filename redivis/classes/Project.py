@@ -1,5 +1,6 @@
 from .Query import Query
 from .Table import Table
+from urllib.parse import quote as quote_uri
 from ..common.api_request import make_paginated_request
 
 
@@ -7,7 +8,8 @@ class Project:
     def __init__(self, name, *, user, properties=None):
         self.user = user
         self.name = name
-        self.uri = f"/projects/{self.user.name}.{self.name}"
+        self.identifier = f"{self.user.name}.{self.name}"
+        self.uri = f"/projects/{quote_uri(self.identifier)}"
         self.properties = properties
 
     def query(self, query):

@@ -2,12 +2,13 @@ import time
 import json
 import logging
 from collections import namedtuple
-import requests
+from ..common.util import set_dataframe_types
 import pandas as pd
+from urllib.parse import quote as quote_uri
 
 from .Upload import Upload
 from .Variable import Variable
-from ..common.api_request import make_request, make_paginated_request
+from ..common.api_request import make_request, make_paginated_request, make_rows_request
 
 
 class Table:
@@ -27,7 +28,10 @@ class Table:
         self.name = name
         self.dataset = dataset
         self.project = project
-        self.uri = f"/tables/{owner.name}.{parent.name}:{version_string}.{self.name}{sample_string}"
+        self.identifier = (
+            f"{owner.name}.{parent.name}:{version_string}.{self.name}{sample_string}"
+        )
+        self.uri = f"/tables/{quote_uri(self.identifier)}"
         self.properties = properties
 
     def __getitem__(self, key):
@@ -131,49 +135,53 @@ class Table:
         if not self.properties:
             self.get()
 
-        page = 0
-        page_size = 1000000
+        max_results = (
+            min(limit, int(self.properties["numRows"]))
+            if limit is not None
+            else self.properties["numRows"]
+        )
+        rows = make_rows_request(
+            uri=self.uri,
+            max_results=max_results,
+            query={
+                "selectedVariables": ",".join(
+                    map(lambda variable: variable["name"], variables)
+                ),
+            },
+        )
+
+        return [Row(*row) for row in rows]
+
+    def to_dataframe(self, limit=None, *, offset_start=0):
+        variables = make_paginated_request(path=f"{self.uri}/variables")
+
+        if not self.properties:
+            self.get()
 
         max_results = (
             min(limit, int(self.properties["numRows"]))
             if limit is not None
             else self.properties["numRows"]
         )
-
-        rows = ""
-        while page * page_size < max_results:
-            results = make_request(
-                method="get",
-                path=f"{self.uri}/rows",
-                parse_response=False,
-                query={
-                    "selectedVariables": ",".join(
-                        map(lambda variable: variable["name"], variables)
-                    ),
-                    "startIndex": page * page_size + offset_start,
-                    "maxResults": page_size
-                    if (page + 1) * page_size < max_results
-                    else max_results - page * page_size,
-                },
-            )
-            rows += results
-            page += 1
-
-        if not rows:
-            return []
-
-        return [Row(*json.loads(row)) for row in rows.split("\n")]
-
-    def to_data_frame(self, limit=None, *, offset_start=0):
-        rows = self.list_rows(limit=limit, offset_start=offset_start)
+        rows = make_rows_request(
+            uri=self.uri,
+            max_results=max_results,
+            query={
+                "selectedVariables": ",".join(
+                    map(lambda variable: variable["name"], variables)
+                ),
+            },
+        )
         if len(rows) == 0:
-            variables = make_paginated_request(path=f"{self.uri}/variables")
             return pd.DataFrame(
                 rows,
                 columns=[variable["name"] for variable in variables],
             )
 
-        return pd.DataFrame(rows, columns=rows[0]._fields)
+        df = pd.DataFrame(
+            rows, dtype="string", columns=[variable["name"] for variable in variables]
+        )
+        return set_dataframe_types(df, variables)
 
     def download(self):
         # TODO

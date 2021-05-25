@@ -24,17 +24,19 @@ def make_request(
         url, headers=headers, params=query, verify=verify_ssl, data=payload
     )
 
+    response_json = {}
     try:
-        if r.status_code >= 400:
-            raise Exception(r.json()["error"])
-        elif (
-            parse_response and r.text != "OK"
-        ):  # handles deletions, where there is no content
-            return r.json()
-        else:
-            return r.text
+        if r.status_code >= 400 or (parse_response and r.text != "OK"):
+            response_json = r.json()
     except Exception:
         raise Exception(r.text)
+
+    if r.status_code >= 400:
+        raise Exception(response_json["error"])
+    elif parse_response:
+        return response_json
+    else:
+        return r.text
 
 
 def make_paginated_request(
@@ -71,6 +73,37 @@ def make_paginated_request(
             break
 
     return results
+
+
+def make_rows_request(*, uri, max_results, query={}):
+    page = 0
+    page_size = 100000
+
+    rows = ""
+    while page * page_size < max_results:
+        results = make_request(
+            method="get",
+            path=f"{uri}/rows",
+            parse_response=False,
+            query={
+                **query,
+                **{
+                    "startIndex": page * page_size,
+                    "maxResults": page_size
+                    if (page + 1) * page_size < max_results
+                    else max_results - page * page_size,
+                },
+            },
+        )
+        if page != 0:
+            rows += "\n"
+        rows += results
+        page += 1
+
+    if not rows:
+        return []
+
+    return [json.loads(row) for row in rows.split("\n")]
 
 
 def __get_api_endpoint():

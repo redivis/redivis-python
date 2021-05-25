@@ -1,8 +1,13 @@
-# redipy
-Redivis client libraries for python.
+![Redivis Logo](assets/logo_small.png)
+# redivis-python
+[Redivis](redivis.com) client library for python! 
 
-## Alpha disclaimer
-This library is currently in alpha testing. We encourage early adopters to test it out and give feedback, though be aware that some interfaces are incomplete and/or may change in future releases.
+Connect data on Redivis to the Python scientific stack, and script your data management tasks.
+
+## Beta disclaimer
+This library is currently in beta testing. Many of the interfaces are nearing stability, but there may still be backwards-incompatible changes in the future. 
+
+Please report any issues or feature requests in the [issue tracker](https://github.com/redivis/redivis-python/issues).
 
 ## Installation
 ```
@@ -10,6 +15,8 @@ pip install redivis
 ```
 
 ## Authentication
+> If you are using this library within a Redivis notebook, you'll automatically be authenticated; you can ignore this section.
+
 In order to authenticate with your Redivis account, you must first [generate an API Token](https://apidocs.redivis.com/authorization).
 
 This API token must then be set as the `REDIVIS_API_TOKEN` environment variable before running your script. You can set the variable for your current session by running the following in your terminal:
@@ -18,116 +25,144 @@ export REDIVIS_API_TOKEN=YOUR_TOKEN
 ```
 
 ## Interface
+```py
+import redivis
+
+query = redivis.query("""
+    SELECT * FROM demo.cms_2014_medicare_data.home_health_agencies 
+    LIMIT 10
+""")
+
+df = query.to_dataframe();
+```
 When referencing datasets, projects, and tables on Redivis, you should be familiar with the [resource reference syntax](https://apidocs.redivis.com/referencing-resources).
 
-For example:
-```
-username.dataset_name:v1_0.table_name     # All non-ascii characters can be escaped with an underscore
-organization_name.my_dataset.table_name   # version tag is optional
+Full reference for this package is available at https://apidocs.redivis.com/redivis-python/reference
 
-username.project_name:3.table_name:4      # projects, datasets, and tables have persistent numeric identifiers 
-                                          # to ensure your script works after a rename. 
-```
+## Examples
 
 ### Querying data
-The redivis.bigquery subpackage is a thin wrapper around the google-cloud-bigquery python client, allowing you to leverage its functionality to interface with tables stored on Redivis. All authentication is managed via your Redivis API credentials.
-
-Please note that the only supported methods are those that involve querying tables. Interfaces involved in listing BigQuery resource, referencing BigQuery datasets, or any calls to create, modify, or delete BigQuery resources are not supported.
-
-Consult the [google-cloud-bigquery](https://googleapis.dev/python/bigquery/latest/index.html) python library for full documentation.
-
-#### Examples:
-Simple queries
+Execute a query
 ```py
-from redivis import bigquery
+import redivis
 
-client = bigquery.Client()
+# Perform a query on the Demo CMS Medicare data. Table at https://redivis.com/demo/datasets/1754/tables
+query = redivis.query("""
+    SELECT * FROM demo.cms_2014_medicare_data.home_health_agencies 
+    WHERE state = 'CA'
+""")
 
-# Perform a query.
-# Table at https://redivis.com/projects/1008/tables/9443
-QUERY = ('SELECT * FROM `ianmathews91.medicare_public_example.high_cost_in_providers_in_CA_output` LIMIT 10')
+for row in query.list_rows():
+    print(row['agency_name'])
 
-query_job = client.query(QUERY)  # API request
-
-for row in query_job:
-	print(row)
-```
-Working with data frames
-```py
-from redivis import bigquery
-
-client = bigquery.Client()
-
-# Perform a query.
-# Table at https://redivis.com/StanfordPHS/datasets/1411/tables
-QUERY = ("SELECT * FROM `stanfordphs.commuting_zone:v1_0.life_expectancy_trends` LIMIT 10")
-
-df = client.query(QUERY).to_dataframe()  # API request
-
+# We can also use data frames
+df = query.to_dataframe();
 print(df)
 ```
+Execute a scoped query
+```py
+import redivis
+
+# Perform a query on the Demo CMS Medicare data. Table at https://redivis.com/demo/datasets/1754/tablesd
+
+# We don't need to include fully-qualified table names if we scope our query to the appropriate dataset or project
+
+query = (
+    redivis
+    .organization("Demo")
+    .dataset("CMS 2014 Medicare Data")
+    .query("""
+        SELECT provider_name, average_total_payments 
+        FROM nursing_facilities
+        INNER JOIN outpatient_charges USING (provider_id)
+        WHERE state = 'CA'
+    """)
+)
+
+for row in query.list_rows():
+    print(row.agency_name)
+
+# We can also use data frames
+df = query.to_dataframe();
+print(df)
+```
+
+### Reading table data
+```py
+table = (
+    redivis
+    .organization("Demo")
+    .dataset("CMS 2014 Medicare Data")
+    .table("Hospice providers")
+
+# We can specify an optional limit argument to only load some of the records
+for row in table.list_rows(limit=100):
+    print(row)
+
+df = table.to_dataframe(limit=100)
+print(df)
+
+```
+
 ### Uploading data
 Create a new dataset
 ```py
-from redivis import create_dataset
+import redivis
+
+dataset = redivis.user("your-username").dataset("some dataset")
+
+# Could also create a dataset under an organization:
+# dataset = redivis.organization("Demo organization").dataset("some dataset")
 
 
-user_name = "your_user_name"
-dataset_name = "dataset_name"
-table_name = "table_name"
+# public_access_level can be one of ('none', 'overview', 'metadata', 'sample', 'data')
+dataset.create(public_access_level="overview")
+```
+Create a table and upload data
+```py
+import redivis
 
-
-# Can also provide an organization parameter to create a dataset in an organization
-
-dataset = create_dataset(
-    user=user_name, name=dataset_name, public_access_level="none", description="A description"
-)
-
+dataset = redivis.user("your-username").dataset("some dataset")
 
 # Create a table on the dataset. Datasets may have multiple tables
 # Merge strategy (append or replace) will affect whether future updates
 #    are appended to or replace the existing table. This can also be modified at a later point.
 
-table = dataset.create_table(
-    name=table_name, description="Some description", upload_merge_strategy="replace"
+table = (
+    dataset
+    .table("Table name")
+    .create(description="Some description", upload_merge_strategy="replace")
 )
 
-
-# Upload a file to the table. You can upload multiple files to any table, and they'll be unioned into one
+# Upload a file to the table. You can upload multiple files to any table, and they'll be appended together
 
 with open("path/to/file", "rb") as f:
     table.create_upload(name="tiny.csv", type="delimited", data=f)
+```
+Release a new version
+```py
+import redivis
 
+dataset = redivis.organization("Demo").dataset("some dataset")
 dataset.release()
 ```
-Update an exiting dataset
+Update an existing dataset
 ```py
-from redivis import Table
+import redivis
 
-owner_name = "your_user_or_organization_name"
-dataset_name = "dataset_name"
-table_name = "table_name"
+dataset = redivis.user("your-username").dataset("some dataset")
 
-table = Table(f"{owner_name}.{dataset_name}.{table_name}")
+# dataset.create_next_version will throw an error if a "next" version already exists,
+# unless the ignore_if_exists argument is provided
+dataset = dataset.create_next_version(ignore_if_exists=True)
 
-with open("path/to/file", "rb") as f:
-    table.create_upload(name="tiny.csv", type="delimited", data=f)
+# Upload new data to your table
+with open("tiny.csv", "rb") as f:
+    dataset.table("Table name").upload(name="tiny.csv", type="delimited", data=f)
 
 dataset.release()
 ```
 
 ## Contributing
-Please mark any bugs or feature requests by opening an issue on this repo — your feedback is much appreciated!
-
-For local development, clone this repository and then run
-```py
-python setup.py develop
-```
-You can then run the tests, e.g.: 
-```
-REDIVIS_API_TOKEN=YOUR_TOKEN python tests 
-```
-To upload to PyPi:
-```
-python setup.py upload
-```
+Please report any issues or feature requests in the [issue tracker](https://github.com/redivis/redivis-python/issues)
+ — your feedback is much appreciated!
