@@ -151,7 +151,7 @@ class Table:
                         map(lambda variable: variable["name"], variables)
                     ),
                     "startIndex": page * page_size + offset_start,
-                    "max_results": page_size
+                    "maxResults": page_size
                     if (page + 1) * page_size < max_results
                     else max_results - page * page_size,
                 },
