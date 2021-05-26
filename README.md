@@ -1,4 +1,4 @@
-![Redivis Logo](assets/logo_small.png)
+![Redivis Logo](https://github.com/redivis/redivis-python/raw/master/assets/logo_small.png)
 # redivis-python
 [Redivis](redivis.com) client library for python! 
 
@@ -8,6 +8,8 @@ Connect data on Redivis to the Python scientific stack, and script your data man
 This library is currently in beta testing. Many of the interfaces are nearing stability, but there may still be backwards-incompatible changes in the future. 
 
 Please report any issues or feature requests in the [issue tracker](https://github.com/redivis/redivis-python/issues).
+
+Comprehensive documentation for this package is available at https://apidocs.redivis.com/redivis-python
 
 ## Installation
 ```
