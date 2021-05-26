@@ -9,7 +9,7 @@ This library is currently in beta testing. Many of the interfaces are nearing st
 
 Please report any issues or feature requests in the [issue tracker](https://github.com/redivis/redivis-python/issues).
 
-Comprehensive documentation for this package is available at https://apidocs.redivis.com/redivis-python
+Comprehensive documentation for this package is available at https://apidocs.redivis.com/client-libraries/redivis-python
 
 ## Installation
 ```
@@ -39,7 +39,7 @@ df = query.to_dataframe();
 ```
 When referencing datasets, projects, and tables on Redivis, you should be familiar with the [resource reference syntax](https://apidocs.redivis.com/referencing-resources).
 
-Full reference for this package is available at https://apidocs.redivis.com/redivis-python/reference
+Full reference for this package is available at https://apidocs.redivis.com/client-libraries/redivis-python/reference
 
 ## Examples
 
