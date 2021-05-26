@@ -67,12 +67,12 @@ class Table:
         self.uri = self.properties["uri"]
         return self
 
-    def update(self, *, name=None, description=None, merge_strategy=None):
+    def update(self, *, name=None, description=None, upload_merge_strategy=None):
         payload = {}
         if name:
             payload["name"] = name
-        if merge_strategy:
-            payload["mergeStrategy"] = merge_strategy
+        if upload_merge_strategy:
+            payload["mergeStrategy"] = upload_merge_strategy
         if description is not None:
             payload["description"] = description
 
@@ -117,15 +117,19 @@ class Table:
 
         return upload
 
-    def list_uploads(self):
-        uploads = make_paginated_request(path=f"{self.uri}/uploads")
+    def list_uploads(self, *, max_results=None):
+        uploads = make_paginated_request(
+            path=f"{self.uri}/uploads", max_results=max_results
+        )
         return [Upload(upload) for upload in uploads]
 
-    def list_variables(self):
-        variables = make_paginated_request(path=f"{self.uri}/variables", page_size=1000)
+    def list_variables(self, *, max_results=None):
+        variables = make_paginated_request(
+            path=f"{self.uri}/variables", page_size=1000, max_results=max_results
+        )
         return [Variable(variable) for variable in variables]
 
-    def list_rows(self, limit=None, *, offset_start=0):
+    def list_rows(self, limit=None):
         variables = make_paginated_request(path=f"{self.uri}/variables")
         Row = namedtuple(
             "Row",

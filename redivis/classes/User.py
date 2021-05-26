@@ -1,4 +1,5 @@
 from .Dataset import Dataset
+from .Project import Project
 
 
 class User:
@@ -7,3 +8,6 @@ class User:
 
     def dataset(self, name, *, version="current"):
         return Dataset(name, user=self, version=version)
+
+    def project(self, name):
+        return Project(name, user=self)
