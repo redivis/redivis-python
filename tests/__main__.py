@@ -1,7 +1,8 @@
 import os, sys, traceback
 
-os.environ["REDIVIS_API_ENDPOINT"] = "https://localhost:8443/api/v1"
-os.environ["REDIVIS_API_TOKEN"] = ""
+# os.environ["REDIVIS_API_ENDPOINT"] = "https://localhost:8443/api/v1"
+# os.environ["REDIVIS_API_TOKEN"] = ""
+
 
 import logging
 import importlib
@@ -20,8 +21,8 @@ logging.getLogger().setLevel(logging.DEBUG)
 try:
     """Run tests"""
     # upload_and_release()
-    list_variables()
-    list_rows()
+    # list_variables()
+    # list_rows()
     check_type_parsing()
 
 except Exception as e:

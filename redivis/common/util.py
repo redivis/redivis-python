@@ -7,9 +7,11 @@ def set_dataframe_types(df, variables):
         type = variable["type"]
 
         if type == "integer":
-            df[name] = df[name].astype("Int64")
+            df[name] = pd.to_numeric(df[name])
+            # df[name] = df[name].astype("Int64")
         elif type == "float":
-            df[name] = df[name].astype("Float64")
+            df[name] = df[name].astype("float64")
+            # df[name] = df[name].astype("Float64")
         elif type == "date":
             df[name] = pd.to_datetime(df[name], errors="coerce")
         elif type == "dateTime":
