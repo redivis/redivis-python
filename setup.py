@@ -20,7 +20,7 @@ URL = "https://github.com/redivis/redivis-python"
 EMAIL = "support@redivis.com"
 AUTHOR = "Redivis Inc."
 REQUIRES_PYTHON = ">=3.8.0"
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 
 # Required dependencies
 REQUIRED = ["requests >= 2.24.0", "pandas >= 1.2.4"]

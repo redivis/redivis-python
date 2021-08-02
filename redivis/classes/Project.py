@@ -13,7 +13,7 @@ class Project:
         self.properties = properties
 
     def query(self, query):
-        return Query(query, default_project=self)
+        return Query(query, default_project=self.identifier)
 
     def table(self, name):
         return Table(name, project=self)

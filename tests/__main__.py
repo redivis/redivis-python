@@ -25,7 +25,7 @@ try:
     # list_variables()
     # list_rows()
     # check_type_parsing()
-    resumable_upload()
+    # resumable_upload()
 except Exception as e:
     traceback.print_exc(file=sys.stdout)
     print(e)

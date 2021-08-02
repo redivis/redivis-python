@@ -129,4 +129,4 @@ class Dataset:
         ]
 
     def query(self, query):
-        return Query(query, default_dataset=self)
+        return Query(query, default_dataset=self.identifier)

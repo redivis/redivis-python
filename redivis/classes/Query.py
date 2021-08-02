@@ -13,12 +13,8 @@ class Query:
             path="/queries",
             payload={
                 "query": query,
-                "defaultProject": default_project.identifer
-                if default_project
-                else None,
-                "defaultDataset": default_dataset.identifier
-                if default_dataset
-                else None,
+                "defaultProject": default_project if default_project else None,
+                "defaultDataset": default_dataset if default_dataset else None,
             },
         )
         self.uri = f"/queries/{self.properties['id']}"
