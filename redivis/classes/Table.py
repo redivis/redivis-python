@@ -22,14 +22,14 @@ class Table:
         properties=None,
     ):
         parent = dataset or project
-        owner = parent.organization or parent.user
+        owner = parent.user or parent.organization
         sample_string = ":sample" if sample else ""
         version_string = f":{dataset.version}" if dataset else ""
         self.name = name
         self.dataset = dataset
         self.project = project
         self.identifier = (
-            f"{owner.name}.{parent.name}:{version_string}.{self.name}{sample_string}"
+            f"{owner.name}.{parent.name}{version_string}.{self.name}{sample_string}"
         )
         self.uri = f"/tables/{quote_uri(self.identifier)}"
         self.properties = properties
