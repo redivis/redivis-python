@@ -26,5 +26,5 @@ class Project:
             query={"includeDatasetTables": include_dataset_tables},
         )
         return [
-            Table(table["name"], dataset=self, properties=table) for table in tables
+            Table(table["name"], project=self, properties=table) for table in tables
         ]
