@@ -26,12 +26,7 @@ try:
     # list_rows()
     # check_type_parsing()
     # resumable_upload()
-    rows = (
-        redivis.organization("demo")
-        .dataset("novel_corona_virus_2019_dataset")
-        .table("covid_19_data")
-        .to_dataframe(max_results=1)
-    )
+    rows = redivis.query("SELECT * FROM merge_output").to_dataframe(max_results=1)
     print(rows)
 except Exception as e:
     traceback.print_exc(file=sys.stdout)

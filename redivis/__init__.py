@@ -22,8 +22,17 @@ def user(name):
     return _User(name)
 
 
-def query(query):
-    return _Query(query)
+def query(
+    query,
+    *,
+    default_dataset=os.getenv("REDIVIS_DEFAULT_DATASET"),
+    default_project=os.getenv("REDIVIS_DEFAULT_PROJECT")
+):
+    return _Query(
+        query,
+        default_dataset=default_dataset,
+        default_project=default_project,
+    )
 
 
 def table(name):
@@ -45,4 +54,4 @@ def table(name):
         )
 
 
-__all__ = ["organization", "user", "query"]
+__all__ = ["organization", "user", "query", "table"]

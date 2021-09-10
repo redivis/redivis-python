@@ -17,6 +17,7 @@ class Query:
                 "defaultDataset": default_dataset if default_dataset else None,
             },
         )
+        print(default_project)
         self.uri = f"/queries/{self.properties['id']}"
 
     def __getitem__(self, key):
