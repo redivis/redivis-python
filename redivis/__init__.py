@@ -1,3 +1,5 @@
+import os
+
 try:
     import pkg_resources
 
@@ -22,6 +24,25 @@ def user(name):
 
 def query(query):
     return _Query(query)
+
+
+def table(name):
+    if os.getenv("REDIVIS_DEFAULT_PROJECT") is not None:
+        return (
+            _User(os.getenv("REDIVIS_DEFAULT_PROJECT").split(".")[0])
+            .project(os.getenv("REDIVIS_DEFAULT_PROJECT").split(".")[1])
+            .table(name)
+        )
+    elif os.getenv("REDIVIS_DEFAULT_DATASET") is not None:
+        return (
+            _User(os.getenv("REDIVIS_DEFAULT_DATASET").split(".")[0])
+            .dataset(os.getenv("REDIVIS_DEFAULT_DATASET").split(".")[1])
+            .table(name)
+        )
+    else:
+        raise Exception(
+            "Cannot reference an unqualified table if the neither the REDIVIS_DEFAULT_PROJECT or REDIVIS_DEFAULT_DATASET environment variables are set."
+        )
 
 
 __all__ = ["organization", "user", "query"]

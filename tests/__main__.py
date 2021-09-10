@@ -1,6 +1,6 @@
 import os, sys, traceback
 
-os.environ["REDIVIS_API_ENDPOINT"] = "https://localhost:8443/api/v1"
+# os.environ["REDIVIS_API_ENDPOINT"] = "https://localhost:8443/api/v1"
 # os.environ["REDIVIS_API_TOKEN"] = ""
 
 
@@ -26,6 +26,8 @@ try:
     # list_rows()
     # check_type_parsing()
     # resumable_upload()
+    rows = redivis.table("Merge geo data output").list_rows(10)
+    print(rows)
 except Exception as e:
     traceback.print_exc(file=sys.stdout)
     print(e)
