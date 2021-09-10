@@ -29,7 +29,10 @@ class Query:
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def list_rows(self, limit=None):
+    def list_rows(self, max_results=None, *, limit=None):
+        if limit and max_results is None:
+            max_results = limit
+
         self._wait_for_finish()
         variables = self.properties["outputSchema"]
         Row = namedtuple(
@@ -38,21 +41,24 @@ class Query:
         )
 
         max_results = (
-            min(limit, int(self.properties["outputNumRows"]))
-            if limit is not None
+            min(max_results, int(self.properties["outputNumRows"]))
+            if max_results is not None
             else self.properties["outputNumRows"]
         )
 
         rows = make_rows_request(uri=self.uri, max_results=max_results)
         return [Row(*row) for row in rows]
 
-    def to_dataframe(self, limit=None):
+    def to_dataframe(self, max_results=None, *, limit=None):
+        if limit and max_results is None:
+            max_results = limit
+
         self._wait_for_finish()
         variables = self.properties["outputSchema"]
 
         max_results = (
-            min(limit, int(self.properties["outputNumRows"]))
-            if limit is not None
+            min(max_results, int(self.properties["outputNumRows"]))
+            if max_results is not None
             else self.properties["outputNumRows"]
         )
 

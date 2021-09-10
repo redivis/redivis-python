@@ -129,7 +129,11 @@ class Table:
         )
         return [Variable(variable) for variable in variables]
 
-    def list_rows(self, limit=None):
+    def list_rows(self, max_results=None, *, limit=None):
+        # TODO: this is deprectated and should ultimately be removed
+        if limit and max_results is None:
+            max_results = limit
+
         variables = make_paginated_request(path=f"{self.uri}/variables")
         Row = namedtuple(
             "Row",
@@ -140,8 +144,8 @@ class Table:
             self.get()
 
         max_results = (
-            min(limit, int(self.properties["numRows"]))
-            if limit is not None
+            min(max_results, int(self.properties["numRows"]))
+            if max_results is not None
             else self.properties["numRows"]
         )
         rows = make_rows_request(
@@ -156,15 +160,18 @@ class Table:
 
         return [Row(*row) for row in rows]
 
-    def to_dataframe(self, limit=None, *, offset_start=0):
+    def to_dataframe(self, max_results=None, *, limit=None, offset_start=0):
         variables = make_paginated_request(path=f"{self.uri}/variables")
+        # TODO: this is deprectated and should ultimately be removed
+        if limit and max_results is None:
+            max_results = limit
 
         if not self.properties:
             self.get()
 
         max_results = (
-            min(limit, int(self.properties["numRows"]))
-            if limit is not None
+            min(max_results, int(self.properties["numRows"]))
+            if max_results is not None
             else self.properties["numRows"]
         )
         rows = make_rows_request(
