@@ -171,7 +171,7 @@ class Table:
             if max_results is not None
             else self.properties["numRows"]
         )
-        response = make_rows_request(
+        res = make_rows_request(
             uri=self.uri,
             max_results=max_results,
             query={
@@ -181,8 +181,11 @@ class Table:
             },
         )
 
-        gzip_fd = gzip.GzipFile(fileobj=response, mode="r")
-        reader = csv.reader(io.TextIOWrapper(gzip_fd))
+        fd = res.raw
+        if res.headers.get("content-encoding") == "gzip":
+            fd = gzip.GzipFile(fileobj=fd, mode="r")
+
+        reader = csv.reader(io.TextIOWrapper(fd))
 
         return [Row(*row) for row in reader]
 
@@ -219,7 +222,7 @@ class Table:
             if max_results is not None
             else self.properties["numRows"]
         )
-        rows = make_rows_request(
+        res = make_rows_request(
             uri=self.uri,
             max_results=max_results,
             query={
@@ -230,7 +233,12 @@ class Table:
         )
 
         df = pd.read_csv(
-            rows, dtype="string", names=original_variable_names, compression="gzip"
+            res.raw,
+            dtype="string",
+            names=original_variable_names,
+            compression="gzip"
+            if res.headers.get("content-encoding") == "gzip"
+            else None,
         )
 
         if variables is None:

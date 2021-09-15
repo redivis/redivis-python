@@ -48,7 +48,7 @@ try:
 
     start = time.time()
 
-    df = table.list_rows(10)
+    df = table.to_dataframe(10)
     end = time.time()
     print(end - start)
     # print(rows)

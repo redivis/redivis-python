@@ -3,6 +3,10 @@ import logging
 import os
 import json
 from .auth import get_auth_token
+from urllib3.exceptions import InsecureRequestWarning
+
+# Suppress only the single warning from urllib3 needed.
+requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 
 def make_request(
@@ -16,7 +20,14 @@ def make_request(
     stream=False,
 ):
     api_endpoint = __get_api_endpoint()
-    verify_ssl = False if api_endpoint.find("https://localhost", 0) == 0 else True
+    verify_ssl = (
+        False
+        if api_endpoint.find("https://localhost", 0) == 0
+        or os.getenv("REDIVIS_ENV") == "development"
+        or os.getenv("REDIVIS_ENV") == "test"
+        or os.getenv("REDIVIS_ENV") == "staging"
+        else True
+    )
     method = method.lower()
     url = f"{api_endpoint}{path}"
 
@@ -99,7 +110,7 @@ def make_rows_request(*, uri, max_results, query={}):
         },
     )
 
-    return res.raw
+    return res
 
 
 def __get_api_endpoint():

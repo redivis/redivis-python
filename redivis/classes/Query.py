@@ -49,9 +49,12 @@ class Query:
             else self.properties["outputNumRows"]
         )
 
-        response = make_rows_request(uri=self.uri, max_results=max_results)
-        gzip_fd = gzip.GzipFile(fileobj=response, mode="r")
-        reader = csv.reader(io.TextIOWrapper(gzip_fd))
+        res = make_rows_request(uri=self.uri, max_results=max_results)
+        fd = res.raw
+        if res.headers.get("content-encoding") == "gzip":
+            fd = gzip.GzipFile(fileobj=fd, mode="r")
+
+        reader = csv.reader(io.TextIOWrapper(fd))
 
         return [Row(*row) for row in reader]
 
@@ -68,13 +71,15 @@ class Query:
             else self.properties["outputNumRows"]
         )
 
-        response = make_rows_request(uri=self.uri, max_results=max_results)
+        res = make_rows_request(uri=self.uri, max_results=max_results)
 
         df = pd.read_csv(
-            response,
+            res.raw,
             dtype="string",
             names=[variable["name"] for variable in variables],
-            compression="gzip",
+            compression="gzip"
+            if res.headers.get("content-encoding") == "gzip"
+            else None,
         )
 
         return set_dataframe_types(df, variables)
