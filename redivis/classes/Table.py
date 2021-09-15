@@ -1,6 +1,9 @@
 import time
 import json
+import csv
+import gzip
 import logging
+import io
 from collections import namedtuple
 from ..common.util import set_dataframe_types
 import pandas as pd
@@ -168,7 +171,7 @@ class Table:
             if max_results is not None
             else self.properties["numRows"]
         )
-        rows = make_rows_request(
+        response = make_rows_request(
             uri=self.uri,
             max_results=max_results,
             query={
@@ -177,7 +180,11 @@ class Table:
                 ),
             },
         )
-        return [Row(*row) for row in rows]
+
+        gzip_fd = gzip.GzipFile(fileobj=response, mode="r")
+        reader = csv.reader(io.TextIOWrapper(gzip_fd))
+
+        return [Row(*row) for row in reader]
 
     def to_dataframe(self, max_results=None, *, limit=None, variables=None):
         original_variable_names = variables
@@ -221,13 +228,10 @@ class Table:
                 ),
             },
         )
-        if len(rows) == 0:
-            return pd.DataFrame(
-                rows,
-                columns=original_variable_names,
-            )
 
-        df = pd.DataFrame(rows, dtype="string", columns=original_variable_names)
+        df = pd.read_csv(
+            rows, dtype="string", names=original_variable_names, compression="gzip"
+        )
 
         if variables is None:
             return set_dataframe_types(df, variables_list)

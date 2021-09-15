@@ -1,6 +1,9 @@
 from ..common.api_request import make_request, make_rows_request
 from ..common.util import set_dataframe_types
 import json
+import gzip
+import csv
+import io
 import time
 from collections import namedtuple
 import pandas as pd
@@ -46,8 +49,11 @@ class Query:
             else self.properties["outputNumRows"]
         )
 
-        rows = make_rows_request(uri=self.uri, max_results=max_results)
-        return [Row(*row) for row in rows]
+        response = make_rows_request(uri=self.uri, max_results=max_results)
+        gzip_fd = gzip.GzipFile(fileobj=response, mode="r")
+        reader = csv.reader(io.TextIOWrapper(gzip_fd))
+
+        return [Row(*row) for row in reader]
 
     def to_dataframe(self, max_results=None, *, limit=None):
         if limit and max_results is None:
@@ -62,17 +68,13 @@ class Query:
             else self.properties["outputNumRows"]
         )
 
-        rows = make_rows_request(uri=self.uri, max_results=max_results)
-        if len(rows) == 0:
-            return pd.DataFrame(
-                rows,
-                columns=[variable["name"] for variable in variables],
-            )
+        response = make_rows_request(uri=self.uri, max_results=max_results)
 
-        df = pd.DataFrame(
-            rows,
+        df = pd.read_csv(
+            response,
             dtype="string",
-            columns=[variable["name"] for variable in variables],
+            names=[variable["name"] for variable in variables],
+            compression="gzip",
         )
 
         return set_dataframe_types(df, variables)

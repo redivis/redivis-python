@@ -33,14 +33,25 @@ try:
     #     .table("covid19_jhu_csse_summary")
     # )
 
-    table = redivis.user("imathews").project("demo_project").table("nyc_taxis")
-    query = redivis.query(
-        """
-        SELECT * EXCEPT(__isUpload) FROM imathews.demo_project.nyc_taxis limit 10000
-    """
+    table = (
+        redivis.user("imathews")
+        .project("demo_project")
+        .table("aggregate_by_census_tract")
     )
-    df = query.to_dataframe()
+    # query = redivis.query(
+    #     """
+    #     SELECT * EXCEPT(__isUpload) FROM imathews.demo_project.nyc_taxis limit 10000
+    # """
+    # )
+    # rows = table.list_rows(1)
+    import time
 
+    start = time.time()
+
+    df = table.list_rows(10)
+    end = time.time()
+    print(end - start)
+    # print(rows)
     print(df)
 
 except Exception as e:

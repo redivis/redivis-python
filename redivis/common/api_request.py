@@ -6,7 +6,14 @@ from .auth import get_auth_token
 
 
 def make_request(
-    *, method, path, query=None, payload=None, parse_payload=True, parse_response=True
+    *,
+    method,
+    path,
+    query=None,
+    payload=None,
+    parse_payload=True,
+    parse_response=True,
+    stream=False,
 ):
     api_endpoint = __get_api_endpoint()
     verify_ssl = False if api_endpoint.find("https://localhost", 0) == 0 else True
@@ -21,7 +28,12 @@ def make_request(
         payload = json.dumps(payload)
 
     r = getattr(requests, method)(
-        url, headers=headers, params=query, verify=verify_ssl, data=payload
+        url,
+        headers=headers,
+        params=query,
+        verify=verify_ssl,
+        data=payload,
+        stream=stream,
     )
 
     response_json = {}
@@ -36,7 +48,7 @@ def make_request(
     elif parse_response:
         return response_json
     else:
-        return r.text
+        return r
 
 
 def make_paginated_request(
@@ -76,22 +88,18 @@ def make_paginated_request(
 
 
 def make_rows_request(*, uri, max_results, query={}):
-    rows = make_request(
+    res = make_request(
         method="get",
         path=f"{uri}/rows",
         parse_response=False,
+        stream=True,
         query={
             **query,
-            **{
-                "maxResults": max_results,
-            },
+            **{"maxResults": max_results, "format": "csv"},
         },
     )
 
-    if not rows:
-        return []
-
-    return [json.loads(row) for row in rows.split("\n")]
+    return res.raw
 
 
 def __get_api_endpoint():
