@@ -76,29 +76,17 @@ def make_paginated_request(
 
 
 def make_rows_request(*, uri, max_results, query={}):
-    page = 0
-    page_size = 100000
-
-    rows = ""
-    while page * page_size < max_results:
-        results = make_request(
-            method="get",
-            path=f"{uri}/rows",
-            parse_response=False,
-            query={
-                **query,
-                **{
-                    "startIndex": page * page_size,
-                    "maxResults": page_size
-                    if (page + 1) * page_size < max_results
-                    else max_results - page * page_size,
-                },
+    rows = make_request(
+        method="get",
+        path=f"{uri}/rows",
+        parse_response=False,
+        query={
+            **query,
+            **{
+                "maxResults": max_results,
             },
-        )
-        if page != 0:
-            rows += "\n"
-        rows += results
-        page += 1
+        },
+    )
 
     if not rows:
         return []

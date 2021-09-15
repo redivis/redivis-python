@@ -129,15 +129,35 @@ class Table:
         )
         return [Variable(variable) for variable in variables]
 
-    def list_rows(self, max_results=None, *, limit=None):
-        # TODO: this is deprectated and should ultimately be removed
+    def list_rows(self, max_results=None, *, limit=None, variables=None):
+        # TODO: limit is deprectated and should ultimately be removed
         if limit and max_results is None:
             max_results = limit
 
-        variables = make_paginated_request(path=f"{self.uri}/variables")
+        # This allows us to persist casing of the passed variable names
+        original_variable_names = variables
+        all_variables = make_paginated_request(path=f"{self.uri}/variables")
+
+        if variables is None:
+            variables_list = all_variables
+            original_variable_names = [variable["name"] for variable in all_variables]
+        else:
+            lower_variable_names = [variable.lower() for variable in variables]
+            variables_list = list(
+                filter(
+                    lambda variable: variable["name"].lower() in lower_variable_names,
+                    all_variables,
+                )
+            )
+            variables_list.sort(
+                key=lambda variable: lower_variable_names.index(
+                    variable["name"].lower()
+                )
+            )
+
         Row = namedtuple(
             "Row",
-            [variable["name"] for variable in variables],
+            original_variable_names,
         )
 
         if not self.properties:
@@ -153,16 +173,34 @@ class Table:
             max_results=max_results,
             query={
                 "selectedVariables": ",".join(
-                    map(lambda variable: variable["name"], variables)
+                    map(lambda variable: variable["name"], variables_list)
                 ),
             },
         )
-
         return [Row(*row) for row in rows]
 
-    def to_dataframe(self, max_results=None, *, limit=None, offset_start=0):
-        variables = make_paginated_request(path=f"{self.uri}/variables")
-        # TODO: this is deprectated and should ultimately be removed
+    def to_dataframe(self, max_results=None, *, limit=None, variables=None):
+        original_variable_names = variables
+        all_variables = make_paginated_request(path=f"{self.uri}/variables")
+
+        if variables is None:
+            variables_list = all_variables
+            original_variable_names = [variable["name"] for variable in all_variables]
+        else:
+            lower_variable_names = [variable.lower() for variable in variables]
+            variables_list = list(
+                filter(
+                    lambda variable: variable["name"].lower() in lower_variable_names,
+                    all_variables,
+                )
+            )
+            variables_list.sort(
+                key=lambda variable: lower_variable_names.index(
+                    variable["name"].lower()
+                )
+            )
+
+        # TODO: limit is deprectated and should ultimately be removed
         if limit and max_results is None:
             max_results = limit
 
@@ -179,21 +217,29 @@ class Table:
             max_results=max_results,
             query={
                 "selectedVariables": ",".join(
-                    map(lambda variable: variable["name"], variables)
+                    map(lambda variable: variable["name"], variables_list)
                 ),
             },
         )
         if len(rows) == 0:
             return pd.DataFrame(
                 rows,
-                columns=[variable["name"] for variable in variables],
+                columns=original_variable_names,
             )
 
-        df = pd.DataFrame(
-            rows, dtype="string", columns=[variable["name"] for variable in variables]
-        )
-        return set_dataframe_types(df, variables)
+        df = pd.DataFrame(rows, dtype="string", columns=original_variable_names)
 
-    def download(self):
-        # TODO
-        return
+        if variables is None:
+            return set_dataframe_types(df, variables_list)
+        else:
+            return set_dataframe_types(
+                df,
+                map(
+                    lambda variable, variable_name: {
+                        "name": variable_name,
+                        "type": variable["type"],
+                    },
+                    variables_list,
+                    variables,
+                ),
+            )

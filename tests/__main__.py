@@ -26,8 +26,23 @@ try:
     # list_rows()
     # check_type_parsing()
     # resumable_upload()
-    rows = redivis.query("SELECT * FROM merge_output").to_dataframe(max_results=1)
-    print(rows)
+
+    # table = (
+    #     redivis.user("stanfordphs")
+    #     .dataset("Coronavirus COVID - 19 Global Cases")
+    #     .table("covid19_jhu_csse_summary")
+    # )
+
+    table = redivis.user("imathews").project("demo_project").table("nyc_taxis")
+    query = redivis.query(
+        """
+        SELECT * EXCEPT(__isUpload) FROM imathews.demo_project.nyc_taxis limit 10000
+    """
+    )
+    df = query.to_dataframe()
+
+    print(df)
+
 except Exception as e:
     traceback.print_exc(file=sys.stdout)
     print(e)
