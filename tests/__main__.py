@@ -33,11 +33,15 @@ try:
     #     .table("covid19_jhu_csse_summary")
     # )
 
-    table = (
-        redivis.user("imathews")
-        .project("demo_project")
-        .table("aggregate_by_census_tract")
+    geo_coords = (
+        redivis.organization("stanfordphs")
+        .dataset("us_zip_codes_to_longitude_and_latitude")
+        .query(
+            f"SELECT latitude, longitude, state, city FROM us_zip_codes_to_longitude_and_latitude WHERE Zip = 10533"
+        )
+        .to_dataframe()
     )
+    geo_coords
     # query = redivis.query(
     #     """
     #     SELECT * EXCEPT(__isUpload) FROM imathews.demo_project.nyc_taxis limit 10000

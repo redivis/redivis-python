@@ -19,11 +19,11 @@ DESCRIPTION = "Redivis python client library"
 URL = "https://github.com/redivis/redivis-python"
 EMAIL = "support@redivis.com"
 AUTHOR = "Redivis Inc."
-REQUIRES_PYTHON = ">=3.8.0"
-VERSION = "0.1.21"
+REQUIRES_PYTHON = ">=3.6.0"
+VERSION = "0.2.0"
 
 # Required dependencies
-REQUIRED = ["requests >= 2.24.0", "pandas >= 1.2.4"]
+REQUIRED = ["requests >= 2.0.0", "pandas >= 1.0.0"]
 
 # What packages are optional?
 EXTRAS = {
