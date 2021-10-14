@@ -21,42 +21,38 @@ logging.getLogger().setLevel(logging.DEBUG)
 
 try:
     """Run tests"""
-    # upload_and_release()
+    upload_and_release()
     # list_variables()
     # list_rows()
     # check_type_parsing()
     # resumable_upload()
 
-    # table = (
-    #     redivis.user("stanfordphs")
-    #     .dataset("Coronavirus COVID - 19 Global Cases")
-    #     .table("covid19_jhu_csse_summary")
-    # )
-
-    geo_coords = (
-        redivis.organization("stanfordphs")
-        .dataset("us_zip_codes_to_longitude_and_latitude")
-        .query(
-            f"SELECT latitude, longitude, state, city FROM us_zip_codes_to_longitude_and_latitude WHERE Zip = 10533"
-        )
-        .to_dataframe()
+    query = (
+        redivis.user("ddi")
+        .dataset("colombia_ecd")
+        .table("colombia_ecd_followup_2_younger_sibling_assessment")
     )
-    geo_coords
+
+    # geo_coords = (
+    #     redivis.organization("stanfordphs")
+    #     .dataset("us_zip_codes_to_longitude_and_latitude")
+    #     .query(
+    #         f"SELECT latitude, longitude, state, city FROM us_zip_codes_to_longitude_and_latitude WHERE Zip = 10533"
+    #     )
+    #     .to_dataframe()
+    # )
+    # geo_coords
     # query = redivis.query(
     #     """
-    #     SELECT * EXCEPT(__isUpload) FROM imathews.demo_project.nyc_taxis limit 10000
+    #     SELECT CAST('2021-01-01' AS DATE), CAST('2021-01-01T00:00:01' AS DATETIME), CAST('12:00:00' AS TIME), FALSE, 1, 1.0, 'asdf'
+    #     UNION ALL
+    #     SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL
     # """
     # )
-    # rows = table.list_rows(1)
-    import time
+    rows = query.list_rows(1)
+    print(rows)
+    print(query.to_dataframe())
 
-    start = time.time()
-
-    df = table.to_dataframe(10)
-    end = time.time()
-    print(end - start)
-    # print(rows)
-    print(df)
 
 except Exception as e:
     traceback.print_exc(file=sys.stdout)

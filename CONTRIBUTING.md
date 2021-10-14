@@ -8,7 +8,8 @@ You can then run the tests, e.g.:
 ```
 REDIVIS_API_TOKEN=YOUR_TOKEN python3 tests 
 ```
-To upload to PyPi:
+#### To upload to PyPi:  
+First, update the version in setup.py. Then:
 ```
 python3 setup.py upload
 ```

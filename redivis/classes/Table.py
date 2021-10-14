@@ -94,11 +94,31 @@ class Table:
         )
         return
 
-    def upload(self, *, name, data, type, remove_on_fail=True):
+    def upload(
+        self,
+        *,
+        name,
+        data,
+        type,
+        has_header_row=True,
+        skip_bad_records=False,
+        allow_quoted_newlines=False,
+        quote_character='"',
+        delimiter=None,
+        remove_on_fail=True,
+    ):
         response = make_request(
             method="POST",
             path=f"{self.uri}/uploads",
-            payload={"name": name, "type": type},
+            payload={
+                "name": name,
+                "type": type,
+                "hasHeaderRow": has_header_row,
+                "skipBadRecords": skip_bad_records,
+                "allowQuotedNewlines": allow_quoted_newlines,
+                "quoteCharacter": quote_character,
+                "delimiter": delimiter,
+            },
         )
         upload = Upload(uri=response["uri"])
         try:

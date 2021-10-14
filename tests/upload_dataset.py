@@ -15,7 +15,12 @@ def upload_and_release():
 
     print(table)
 
-    table.upload(name="tiny.csv", type="delimited", data="a,b\n1,2\n3,4")
+    table.upload(
+        name="tiny.csv",
+        type="delimited",
+        data='a,b\n1,2\n3,"4\n5"',
+        allow_quoted_newlines=True,
+    )
     with open("tiny.csv", "rb") as f:
         table.upload(name="tiny.csv", type="delimited", data=f)
 
