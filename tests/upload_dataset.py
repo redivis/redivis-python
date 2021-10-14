@@ -21,7 +21,7 @@ def upload_and_release():
         data='a,b\n1,2\n3,"4\n5"',
         allow_quoted_newlines=True,
     )
-    with open("tiny.csv", "rb") as f:
+    with open("tests/data/tiny.csv", "rb") as f:
         table.upload(name="tiny.csv", type="delimited", data=f)
 
     dataset.release()
@@ -29,7 +29,7 @@ def upload_and_release():
     dataset = dataset.create_next_version()
     table = dataset.table("a table")
 
-    with open("tiny.csv", "rb") as f:
+    with open("tests/data/tiny.csv", "rb") as f:
         table.upload(name="tiny.csv", type="delimited", data=f)
 
     dataset.release()

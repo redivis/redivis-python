@@ -54,7 +54,7 @@ class Upload:
                 data.seek(start_byte)
                 chunk = data.read(end_byte - start_byte + 1)
             else:
-                chunk = data[start_byte:end_byte]
+                chunk = data[start_byte : end_byte + 1]
 
             try:
                 res = requests.put(
