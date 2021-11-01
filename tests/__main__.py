@@ -12,6 +12,7 @@ importlib.reload(redivis)
 
 from read_table import list_variables, list_rows, check_type_parsing
 from upload_dataset import upload_and_release
+from streaming_upload import streaming_upload
 from query import run_global_query, run_scoped_query
 from resumable_upload import resumable_upload
 
@@ -21,17 +22,18 @@ logging.getLogger().setLevel(logging.DEBUG)
 
 try:
     """Run tests"""
-    upload_and_release()
+    streaming_upload()
+    # resumable_upload()
     # list_variables()
     # list_rows()
     # check_type_parsing()
     # resumable_upload()
 
-    query = (
-        redivis.user("ddi")
-        .dataset("colombia_ecd")
-        .table("colombia_ecd_followup_2_younger_sibling_assessment")
-    )
+    # query = (
+    #     redivis.user("ddi")
+    #     .dataset("colombia_ecd")
+    #     .table("colombia_ecd_followup_2_younger_sibling_assessment")
+    # )
 
     # geo_coords = (
     #     redivis.organization("stanfordphs")
@@ -49,9 +51,9 @@ try:
     #     SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL
     # """
     # )
-    rows = query.list_rows(1)
-    print(rows)
-    print(query.to_dataframe())
+    # rows = query.list_rows(1)
+    # print(rows)
+    # print(query.to_dataframe())
 
 
 except Exception as e:

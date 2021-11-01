@@ -5,16 +5,18 @@ from urllib.parse import quote as quote_uri
 from ..common.api_request import make_request, make_paginated_request
 import json
 
-
+# TODO: update attrs for proper getters and setters
+# https://stackoverflow.com/questions/4555932/public-or-private-attribute-in-python-what-is-the-best-way
+# Consider dataset.metadata? Will only be populated after a .get
 class Dataset:
     def __init__(
         self,
         name,
         *,
-        version="current",
+        version="current",  # TODO: should be version_tag, version would reference a version class (?) dataset().version("next").create()? .version("next").release()?
         user=None,
         organization=None,
-        properties=None,
+        properties={},
     ):
         self.name = name
         self.version = version
@@ -27,7 +29,9 @@ class Dataset:
         self.properties = properties
 
     def __getitem__(self, key):
-        return self.properties[key]
+        return (
+            self.properties[key] if self.properties and key in self.properties else None
+        )
 
     def __str__(self):
         return json.dumps(self.properties, indent=2)
@@ -38,12 +42,11 @@ class Dataset:
     def exists(self):
         try:
             make_request(method="GET", path=self.uri)
+            return True
         except Exception as err:
             if err.args[0]["status"] != 404:
                 raise err
             return False
-
-        return True
 
     def get(self):
         self.properties = make_request(method="GET", path=self.uri)
@@ -109,6 +112,7 @@ class Dataset:
         ).get()
 
     def release(self):
+        # TODO:
         make_request(
             method="POST",
             path=f"{self.uri}/versions/next/release",

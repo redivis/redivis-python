@@ -8,6 +8,8 @@ from collections import namedtuple
 from ..common.util import set_dataframe_types
 import pandas as pd
 from urllib.parse import quote as quote_uri
+import warnings
+
 
 from .Upload import Upload
 from .Variable import Variable
@@ -38,7 +40,9 @@ class Table:
         self.properties = properties
 
     def __getitem__(self, key):
-        return self.properties[key]
+        return (
+            self.properties[key] if self.properties and key in self.properties else None
+        )
 
     def __str__(self):
         return json.dumps(self.properties, indent=2)
@@ -46,6 +50,7 @@ class Table:
     def exists(self):
         try:
             make_request(method="GET", path=self.uri)
+            return True
         except Exception as err:
             if err.args[0]["status"] != 404:
                 raise err
@@ -75,7 +80,7 @@ class Table:
         if name:
             payload["name"] = name
         if upload_merge_strategy:
-            payload["mergeStrategy"] = upload_merge_strategy
+            payload["uploadMergeStrategy"] = upload_merge_strategy
         if description is not None:
             payload["description"] = description
 
@@ -96,47 +101,44 @@ class Table:
 
     def upload(
         self,
-        *,
         name,
-        data,
-        type,
+        *,
+        type="delimited",
+        schema=None,
         has_header_row=True,
         skip_bad_records=False,
         allow_quoted_newlines=False,
         quote_character='"',
         delimiter=None,
+        #     This is deprecated
+        data=None,
         remove_on_fail=True,
     ):
-        response = make_request(
-            method="POST",
-            path=f"{self.uri}/uploads",
-            payload={
-                "name": name,
-                "type": type,
-                "hasHeaderRow": has_header_row,
-                "skipBadRecords": skip_bad_records,
-                "allowQuotedNewlines": allow_quoted_newlines,
-                "quoteCharacter": quote_character,
-                "delimiter": delimiter,
-            },
+        upload = Upload(
+            table=self,
+            name=name,
         )
-        upload = Upload(uri=response["uri"])
-        try:
-            upload.upload_file(data)
-            while True:
-                time.sleep(2)
-                upload.get()
-                if upload["status"] == "completed":
-                    break
-                elif upload["status"] == "failed":
-                    raise Exception(upload["errorMessage"])
-                else:
-                    logging.debug("Upload is still in progress...")
-        except Exception as e:
-            if remove_on_fail:
-                print("An error occurred. Deleting upload.")
-                upload.delete()
-            raise e
+        if data is not None:
+            warnings.warn(
+                "Passing data directly to the upload constructor is deprecated. Please call table.upload().upload_file(file) instead.",
+                DeprecationWarning,
+            )
+            upload.create(
+                schema=schema,
+                type=type,
+                has_header_row=has_header_row,
+                skip_bad_records=skip_bad_records,
+                allow_quoted_newlines=allow_quoted_newlines,
+                quote_character=quote_character,
+                delimiter=delimiter,
+            )
+            upload.upload_file(
+                data,
+                create_if_needed=True,
+                wait_for_finish=True,
+                raise_on_fail=True,
+                remove_on_fail=remove_on_fail,
+            )
 
         return upload
 
@@ -150,16 +152,24 @@ class Table:
         variables = make_paginated_request(
             path=f"{self.uri}/variables", page_size=1000, max_results=max_results
         )
-        return [Variable(variable) for variable in variables]
+        return [
+            Variable(variable["name"], table=self, properties=variable)
+            for variable in variables
+        ]
 
     def list_rows(self, max_results=None, *, limit=None, variables=None):
-        # TODO: limit is deprectated and should ultimately be removed
         if limit and max_results is None:
+            warnings.warn(
+                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
+                DeprecationWarning,
+            )
             max_results = limit
 
         # This allows us to persist casing of the passed variable names
         original_variable_names = variables
-        all_variables = make_paginated_request(path=f"{self.uri}/variables")
+        all_variables = make_paginated_request(
+            path=f"{self.uri}/variables", page_size=1000
+        )
 
         if variables is None:
             variables_list = all_variables
@@ -211,7 +221,9 @@ class Table:
 
     def to_dataframe(self, max_results=None, *, limit=None, variables=None):
         original_variable_names = variables
-        all_variables = make_paginated_request(path=f"{self.uri}/variables")
+        all_variables = make_paginated_request(
+            path=f"{self.uri}/variables", page_size=1000
+        )
 
         if variables is None:
             variables_list = all_variables
@@ -230,8 +242,11 @@ class Table:
                 )
             )
 
-        # TODO: limit is deprectated and should ultimately be removed
         if limit and max_results is None:
+            warnings.warn(
+                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
+                DeprecationWarning,
+            )
             max_results = limit
 
         if not self.properties:

@@ -7,6 +7,7 @@ import io
 import time
 from collections import namedtuple
 import pandas as pd
+import warnings
 
 
 class Query:
@@ -23,7 +24,9 @@ class Query:
         self.uri = f"/queries/{self.properties['id']}"
 
     def __getitem__(self, key):
-        return self.properties[key]
+        return (
+            self.properties[key] if self.properties and key in self.properties else None
+        )
 
     def __str__(self):
         return json.dumps(self.properties, indent=2)
@@ -34,6 +37,10 @@ class Query:
 
     def list_rows(self, max_results=None, *, limit=None):
         if limit and max_results is None:
+            warnings.warn(
+                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
+                DeprecationWarning,
+            )
             max_results = limit
 
         self._wait_for_finish()
@@ -60,6 +67,10 @@ class Query:
 
     def to_dataframe(self, max_results=None, *, limit=None):
         if limit and max_results is None:
+            warnings.warn(
+                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
+                DeprecationWarning,
+            )
             max_results = limit
 
         self._wait_for_finish()

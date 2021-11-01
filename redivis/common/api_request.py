@@ -45,6 +45,7 @@ def make_request(
         verify=verify_ssl,
         data=payload,
         stream=stream,
+        timeout=125,
     )
 
     response_json = {}
@@ -99,7 +100,7 @@ def make_paginated_request(
 
 
 def make_rows_request(*, uri, max_results, query={}):
-    res = make_request(
+    return make_request(
         method="get",
         path=f"{uri}/rows",
         parse_response=False,
@@ -109,8 +110,6 @@ def make_rows_request(*, uri, max_results, query={}):
             **{"maxResults": max_results, "format": "csv"},
         },
     )
-
-    return res
 
 
 def __get_api_endpoint():
