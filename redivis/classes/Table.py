@@ -75,7 +75,7 @@ class Table:
         if name:
             payload["name"] = name
         if upload_merge_strategy:
-            payload["mergeStrategy"] = upload_merge_strategy
+            payload["uploadMergeStrategy"] = upload_merge_strategy
         if description is not None:
             payload["description"] = description
 
