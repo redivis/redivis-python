@@ -12,12 +12,6 @@ class Project:
         self.uri = f"/projects/{quote_uri(self.identifier)}"
         self.properties = properties
 
-    def query(self, query):
-        return Query(query, default_project=self.identifier)
-
-    def table(self, name):
-        return Table(name, project=self)
-
     def list_tables(self, *, max_results=None, include_dataset_tables=False):
         tables = make_paginated_request(
             path=f"{self.uri}/tables",
@@ -28,3 +22,9 @@ class Project:
         return [
             Table(table["name"], project=self, properties=table) for table in tables
         ]
+
+    def query(self, query):
+        return Query(query, default_project=self.identifier)
+
+    def table(self, name):
+        return Table(name, project=self)
