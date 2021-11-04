@@ -2,11 +2,10 @@ import requests
 import logging
 import os
 import json
-from .auth import get_auth_token
-from urllib3.exceptions import InsecureRequestWarning
+import platform
 
-# Suppress only the single warning from urllib3 needed.
-requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+from .auth import get_auth_token
+from .._version import __version__
 
 
 def make_request(
@@ -31,7 +30,15 @@ def make_request(
     method = method.lower()
     url = f"{api_endpoint}{path}"
 
-    headers = {"Authorization": f"Bearer {get_auth_token()}"}
+    headers = {
+        "Authorization": f"Bearer {get_auth_token()}",
+        "X-Redivis-Client": "redivis-python",
+        "X-Redivis-Client-Version": __version__,
+        "X-Redivis-Client-Python-Version": platform.python_version(),
+        "X-Redivis-Client-System": platform.system(),
+        "X-Redivis-Client-System-Version": platform.release(),
+        "User-Agent": f"redivis-python/{__version__}",
+    }
 
     logging.debug(f"Making API '{method}' request to '{url}'")
 
@@ -53,6 +60,7 @@ def make_request(
         if r.status_code >= 400 or (parse_response and r.text != "OK"):
             response_json = r.json()
     except Exception:
+        print(r)
         raise Exception(r.text)
 
     if r.status_code >= 400:
@@ -97,19 +105,6 @@ def make_paginated_request(
             break
 
     return results
-
-
-def make_rows_request(*, uri, max_results, query={}):
-    return make_request(
-        method="get",
-        path=f"{uri}/rows",
-        parse_response=False,
-        stream=True,
-        query={
-            **query,
-            **{"maxResults": max_results, "format": "csv"},
-        },
-    )
 
 
 def __get_api_endpoint():

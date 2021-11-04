@@ -1,13 +1,12 @@
 from .Table import Table
 from .Query import Query
 from urllib.parse import quote as quote_uri
+import warnings
 
 from ..common.api_request import make_request, make_paginated_request
 import json
 
-# TODO: update attrs for proper getters and setters
-# https://stackoverflow.com/questions/4555932/public-or-private-attribute-in-python-what-is-the-best-way
-# Consider dataset.metadata? Will only be populated after a .get
+
 class Dataset:
     def __init__(
         self,
@@ -16,7 +15,7 @@ class Dataset:
         version="current",  # TODO: should be version_tag, version would reference a version class (?) dataset().version("next").create()? .version("next").release()?
         user=None,
         organization=None,
-        properties={},
+        properties=None,
     ):
         self.name = name
         self.version = version
@@ -36,23 +35,6 @@ class Dataset:
     def __str__(self):
         return json.dumps(self.properties, indent=2)
 
-    def table(self, name, *, sample=False):
-        return Table(name, dataset=self, sample=sample)
-
-    def exists(self):
-        try:
-            make_request(method="GET", path=self.uri)
-            return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
-            return False
-
-    def get(self):
-        self.properties = make_request(method="GET", path=self.uri)
-        self.uri = self.properties["uri"]
-        return self
-
     def create(self, *, public_access_level="none", description=None):
         if self.organization:
             path = f"/organizations/{self.organization.name}/datasets"
@@ -70,6 +52,78 @@ class Dataset:
         )
         return self
 
+    def create_next_version(self, *, if_not_exists=False, ignore_if_exists=None):
+        if ignore_if_exists is not None:
+            warnings.warn(
+                "The ignore_if_exists parameter has been renamed to if_not_exists, and will be removed in a future version of this library",
+                DeprecationWarning,
+            )
+            if_not_exists = ignore_if_exists
+
+        if not self.properties or not hasattr(self.properties, "nextVersion"):
+            self.get()
+
+        if not self.properties["nextVersion"]:
+            make_request(method="POST", path=f"{self.uri}/versions")
+        elif not if_not_exists:
+            raise Exception(
+                f"Next version already exists at {self.properties['nextVersion']['datasetUri']}. To avoid this error, set argument ignore_if_exists to True"
+            )
+
+        return Dataset(
+            name=self.name,
+            user=self.user,
+            organization=self.organization,
+            version="next",
+        ).get()
+
+    def delete(self):
+        make_request(
+            method="DELETE",
+            path=self.uri,
+        )
+        return
+
+    def exists(self):
+        try:
+            make_request(method="GET", path=self.uri)
+            return True
+        except Exception as err:
+            if err.args[0]["status"] != 404:
+                raise err
+            return False
+
+    def get(self):
+        self.properties = make_request(method="GET", path=self.uri)
+        self.uri = self.properties["uri"]
+        return self
+
+    def list_tables(self, max_results):
+        tables = make_paginated_request(
+            path=f"{self.uri}/tables", page_size=100, max_results=max_results
+        )
+        return [
+            Table(table["name"], dataset=self, properties=table) for table in tables
+        ]
+
+    def query(self, query):
+        return Query(query, default_dataset=self.identifier)
+
+    def release(self):
+        make_request(
+            method="POST",
+            path=f"{self.uri}/versions/next/release",
+        )
+        return Dataset(
+            name=self.name,
+            user=self.user,
+            organization=self.organization,
+            version="current",
+        ).get()
+
+    def table(self, name, *, sample=False):
+        return Table(name, dataset=self, sample=sample)
+
     def update(self, *, name=None, public_access_level=None, description=None):
         payload = {}
         if name:
@@ -85,52 +139,3 @@ class Dataset:
             payload=payload,
         )
         return self
-
-    def delete(self):
-        make_request(
-            method="DELETE",
-            path=self.uri,
-        )
-        return
-
-    def create_next_version(self, ignore_if_exists=False):
-        if not self.properties or not hasattr(self.properties, "nextVersion"):
-            self.get()
-
-        if not self.properties["nextVersion"]:
-            make_request(method="POST", path=f"{self.uri}/versions")
-        elif not ignore_if_exists:
-            raise Exception(
-                f"Next version already exists at {self.properties['nextVersion']['datasetUri']}. To avoid this error, set argument ignore_if_exists to True"
-            )
-
-        return Dataset(
-            name=self.name,
-            user=self.user,
-            organization=self.organization,
-            version="next",
-        ).get()
-
-    def release(self):
-        # TODO:
-        make_request(
-            method="POST",
-            path=f"{self.uri}/versions/next/release",
-        )
-        return Dataset(
-            name=self.name,
-            user=self.user,
-            organization=self.organization,
-            version="current",
-        ).get()
-
-    def list_tables(self, max_results):
-        tables = make_paginated_request(
-            path=f"{self.uri}/tables", page_size=100, max_results=max_results
-        )
-        return [
-            Table(table["name"], dataset=self, properties=table) for table in tables
-        ]
-
-    def query(self, query):
-        return Query(query, default_dataset=self.identifier)

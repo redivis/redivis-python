@@ -1,21 +1,17 @@
 import json
 import time
 import re
-import io
 import math
 import os
 import logging
-import csv
-import gzip
-from collections import namedtuple
-import pandas as pd
 import requests
 from urllib.parse import quote as quote_uri
 import warnings
 
-from ..common.util import set_dataframe_types
+from ..common.list_rows import list_rows
+
 from .Variable import Variable
-from ..common.api_request import make_request, make_paginated_request, make_rows_request
+from ..common.api_request import make_request, make_paginated_request
 
 
 # 8MB
@@ -28,7 +24,7 @@ class Upload:
         name,
         *,
         table,
-        properties={},
+        properties=None,
     ):
         self.table = table
         self.name = name
@@ -43,156 +39,6 @@ class Upload:
     def __str__(self):
         return json.dumps(self.properties, indent=2)
 
-    def exists(self):
-        try:
-            make_request(method="GET", path=self.uri)
-            return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
-            return False
-
-    def get(self):
-        self.properties = make_request(
-            method="GET",
-            path=self.uri,
-        )
-        self.uri = self.properties["uri"]
-
-    def list_rows(self, max_results=None, *, limit=None, variables=None):
-        if limit and max_results is None:
-            warnings.warn(
-                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
-                DeprecationWarning,
-            )
-            max_results = limit
-
-        # This allows us to persist casing of the passed variable names
-        original_variable_names = variables
-        all_variables = make_paginated_request(
-            path=f"{self.uri}/variables", page_size=1000
-        )
-
-        if variables is None:
-            variables_list = all_variables
-            original_variable_names = [variable["name"] for variable in all_variables]
-        else:
-            lower_variable_names = [variable.lower() for variable in variables]
-            variables_list = list(
-                filter(
-                    lambda variable: variable["name"].lower() in lower_variable_names,
-                    all_variables,
-                )
-            )
-            variables_list.sort(
-                key=lambda variable: lower_variable_names.index(
-                    variable["name"].lower()
-                )
-            )
-
-        Row = namedtuple(
-            "Row",
-            original_variable_names,
-        )
-
-        if not self.properties:
-            self.get()
-
-        max_results = (
-            min(max_results, int(self.properties["numRows"]))
-            if max_results is not None
-            else self.properties["numRows"]
-        )
-        res = make_rows_request(
-            uri=self.uri,
-            max_results=max_results,
-            query={
-                "selectedVariables": ",".join(
-                    map(lambda variable: variable["name"], variables_list)
-                ),
-            },
-        )
-
-        fd = res.raw
-        if res.headers.get("content-encoding") == "gzip":
-            fd = gzip.GzipFile(fileobj=fd, mode="r")
-
-        reader = csv.reader(io.TextIOWrapper(fd))
-
-        return [Row(*row) for row in reader]
-
-    def to_dataframe(self, max_results=None, *, limit=None, variables=None):
-        original_variable_names = variables
-        all_variables = make_paginated_request(
-            path=f"{self.uri}/variables", page_size=1000
-        )
-
-        if variables is None:
-            variables_list = all_variables
-            original_variable_names = [variable["name"] for variable in all_variables]
-        else:
-            lower_variable_names = [variable.lower() for variable in variables]
-            variables_list = list(
-                filter(
-                    lambda variable: variable["name"].lower() in lower_variable_names,
-                    all_variables,
-                )
-            )
-            variables_list.sort(
-                key=lambda variable: lower_variable_names.index(
-                    variable["name"].lower()
-                )
-            )
-
-        if limit and max_results is None:
-            warnings.warn(
-                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
-                DeprecationWarning,
-            )
-            max_results = limit
-
-        if not self.properties:
-            self.get()
-
-        max_results = (
-            min(max_results, int(self.properties["numRows"]))
-            if max_results is not None
-            else self.properties["numRows"]
-        )
-        res = make_rows_request(
-            uri=self.uri,
-            max_results=max_results,
-            query={
-                "selectedVariables": ",".join(
-                    map(lambda variable: variable["name"], variables_list)
-                ),
-            },
-        )
-
-        df = pd.read_csv(
-            res.raw,
-            dtype="string",
-            names=original_variable_names,
-            compression="gzip"
-            if res.headers.get("content-encoding") == "gzip"
-            else None,
-        )
-
-        if variables is None:
-            return set_dataframe_types(df, variables_list)
-        else:
-            return set_dataframe_types(
-                df,
-                map(
-                    lambda variable, variable_name: {
-                        "name": variable_name,
-                        "type": variable["type"],
-                    },
-                    variables_list,
-                    variables,
-                ),
-            )
-
     def create(
         self,
         *,
@@ -202,7 +48,7 @@ class Upload:
         has_header_row=True,
         skip_bad_records=False,
         allow_quoted_newlines=False,
-        quote_character=None,
+        quote_character='"',
         if_not_exists=False,
     ):
 
@@ -238,6 +84,22 @@ class Upload:
             path=self.uri,
         )
 
+    def exists(self):
+        try:
+            make_request(method="GET", path=self.uri)
+            return True
+        except Exception as err:
+            if err.args[0]["status"] != 404:
+                raise err
+            return False
+
+    def get(self):
+        self.properties = make_request(
+            method="GET",
+            path=self.uri,
+        )
+        self.uri = self.properties["uri"]
+
     def insert_rows(self, rows, *, update_schema=False):
         response = make_request(
             method="POST",
@@ -255,23 +117,65 @@ class Upload:
             for variable in variables
         ]
 
+    def list_rows(self, max_results=None, *, variables=None):
+        if not self.properties or not hasattr(self.properties, "numRows"):
+            self.get()
+
+        max_results = (
+            min(max_results, int(self.properties["numRows"]))
+            if max_results is not None
+            else self.properties["numRows"]
+        )
+
+        mapped_variables = get_mapped_variables(variables, self.uri)
+
+        return list_rows(
+            uri=f"{self.uri}/rows",
+            max_results=max_results,
+            selected_variables=variables,
+            mapped_variables=mapped_variables,
+            type="tuple",
+        )
+
+    def to_dataframe(self, max_results=None, *, limit=None, variables=None):
+        if not self.properties or not hasattr(self.properties, "numRows"):
+            self.get()
+
+        max_results = (
+            min(max_results, int(self.properties["numRows"]))
+            if max_results is not None
+            else self.properties["numRows"]
+        )
+
+        mapped_variables = get_mapped_variables(variables, self.uri)
+
+        return list_rows(
+            uri=f"{self.uri}/rows",
+            max_results=max_results,
+            selected_variables=variables,
+            mapped_variables=mapped_variables,
+            type="dataframe",
+        )
+
     def upload_file(
         self,
         data,
         *,
+        type="delimited",
         create_if_needed=True,
         delimiter=None,
         schema=None,
         has_header_row=True,
         skip_bad_records=False,
         allow_quoted_newlines=False,
-        quote_character=None,
+        quote_character='"',
         remove_on_fail=False,
         wait_for_finish=True,
         raise_on_fail=True,
     ):
         if create_if_needed and not self.exists():
             self.create(
+                type=type,
                 delimiter=delimiter,
                 schema=schema,
                 has_header_row=has_header_row,
@@ -338,7 +242,6 @@ class Upload:
 
                     retry_count += 1
                     time.sleep(retry_count)
-                    print(e)
                     print("An error occurred. Retrying last chunk of resumable upload")
                     start_byte = retry_partial_upload(
                         file_size=file_size, resumable_uri=resumable_uri
@@ -348,14 +251,15 @@ class Upload:
                     time.sleep(2)
                     self.get()
                     if self["status"] == "completed" or self["status"] == "failed":
+                        if self["status"] == "failed" and raise_on_fail:
+                            raise Exception(self["errorMessage"])
                         break
                     else:
                         logging.debug("Upload is still in progress...")
         except Exception as e:
             if remove_on_fail:
                 self.delete()
-            if raise_on_fail:
-                raise Exception(self["errorMessage"] or str(e))
+            raise Exception(str(e))
         return
 
 
@@ -396,3 +300,22 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_uri):
             file_size=file_size,
             resumable_uri=resumable_uri,
         )
+
+
+def get_mapped_variables(variables, uri):
+    all_variables = make_paginated_request(path=f"{uri}/variables", page_size=1000)
+
+    if variables is None:
+        return all_variables
+    else:
+        lower_variable_names = [variable.lower() for variable in variables]
+        variables_list = list(
+            filter(
+                lambda variable: variable["name"].lower() in lower_variable_names,
+                all_variables,
+            )
+        )
+        variables_list.sort(
+            key=lambda variable: lower_variable_names.index(variable["name"].lower())
+        )
+        return variables_list

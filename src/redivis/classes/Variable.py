@@ -11,7 +11,7 @@ class Variable:
         *,
         table=None,
         upload=None,
-        properties={},
+        properties=None,
     ):
         self.name = name
         self.table = table
@@ -24,15 +24,6 @@ class Variable:
 
     def __str__(self):
         return json.dumps(self.properties, indent=2)
-
-    def exists(self):
-        try:
-            make_request(method="GET", path=self.uri)
-            return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
-            return False
 
     def get(self, wait_for_statistics=False):
         self.properties = make_request(
@@ -50,3 +41,12 @@ class Variable:
             )
 
         return self
+
+    def exists(self):
+        try:
+            make_request(method="GET", path=self.uri)
+            return True
+        except Exception as err:
+            if err.args[0]["status"] != 404:
+                raise err
+            return False

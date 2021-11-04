@@ -7,6 +7,7 @@
 import io
 import os
 import sys
+import re
 from shutil import rmtree
 
 import setuptools
@@ -20,7 +21,16 @@ URL = "https://github.com/redivis/redivis-python"
 EMAIL = "support@redivis.com"
 AUTHOR = "Redivis Inc."
 REQUIRES_PYTHON = ">=3.6.0"
-VERSION = "0.2.2"
+
+# Parse version string from _version.py file
+VERSIONFILE = "src/redivis/_version.py"
+verstrline = open(VERSIONFILE, "rt").read()
+VSRE = r"^__version__ = ['\"]([^'\"]*)['\"]"
+mo = re.search(VSRE, verstrline, re.M)
+if mo:
+    VERSION = mo.group(1)
+else:
+    raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # Required dependencies
 REQUIRED = ["requests >= 2.0.0", "pandas >= 1.0.0"]
@@ -92,18 +102,6 @@ class UploadCommand(setuptools.Command):
         sys.exit()
 
 
-# Only include packages under the 'redivis' namespace. Do not include tests,
-# benchmarks, etc.
-packages = [
-    package
-    for package in setuptools.PEP420PackageFinder.find()
-    if package.startswith("redivis")
-]
-print(packages)
-
-# Determine which namespaces are needed.
-namespaces = ["redivis"]
-
 # Where the magic happens:
 setuptools.setup(
     name=NAME,
@@ -115,11 +113,9 @@ setuptools.setup(
     author_email=EMAIL,
     python_requires=REQUIRES_PYTHON,
     url=URL,
-    packages=packages,
-    # namespace_packages=namespaces,
-    # packages=[
-    #     "redivis"
-    # ],  # find_packages(where="redivis", exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
+    # packages=packages,
+    package_dir={"": "src"},
+    packages=setuptools.find_packages(where="src", exclude=("classes", "common")),
     install_requires=REQUIRED,
     extras_require=EXTRAS,
     include_package_data=True,
