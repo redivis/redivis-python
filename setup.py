@@ -115,7 +115,7 @@ setuptools.setup(
     url=URL,
     # packages=packages,
     package_dir={"": "src"},
-    packages=setuptools.find_packages(where="src", exclude=("classes", "common")),
+    packages=setuptools.find_packages(where="src"),
     install_requires=REQUIRED,
     extras_require=EXTRAS,
     include_package_data=True,
