@@ -161,28 +161,10 @@ class Upload:
         self,
         data,
         *,
-        type="delimited",
-        create_if_needed=True,
-        delimiter=None,
-        schema=None,
-        has_header_row=True,
-        skip_bad_records=False,
-        allow_quoted_newlines=False,
-        quote_character='"',
         remove_on_fail=False,
         wait_for_finish=True,
         raise_on_fail=True,
     ):
-        if create_if_needed and not self.exists():
-            self.create(
-                type=type,
-                delimiter=delimiter,
-                schema=schema,
-                has_header_row=has_header_row,
-                skip_bad_records=skip_bad_records,
-                allow_quoted_newlines=allow_quoted_newlines,
-                quote_character=quote_character,
-            )
         try:
             start_byte = 0
             retry_count = 0

@@ -1,4 +1,4 @@
-![Redivis Logo](./assets/logo_small.png)
+![Redivis Logo](https://github.com/redivis/redivis-python/raw/main/assets/logo_small.png)
 # redivis-python
 [Redivis](redivis.com) client library for python! 
 
