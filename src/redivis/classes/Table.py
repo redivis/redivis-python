@@ -204,6 +204,9 @@ class Table:
 
         return upload
 
+    def variable(self, name):
+        return Variable(name, table=self)
+
 
 def get_mapped_variables(variables, uri):
     all_variables = make_paginated_request(path=f"{uri}/variables", page_size=1000)

@@ -11,9 +11,15 @@ class Query:
         self,
         query,
         *,
-        default_project=os.getenv("REDIVIS_DEFAULT_PROJECT"),
-        default_dataset=os.getenv("REDIVIS_DEFAULT_DATASET"),
+        default_project=None,
+        default_dataset=None,
     ):
+        if not default_project and not default_dataset:
+            if os.getenv("REDIVIS_DEFAULT_PROJECT"):
+                default_project = os.getenv("REDIVIS_DEFAULT_PROJECT")
+            elif os.getenv("REDIVIS_DEFAULT_DATASET"):
+                default_dataset = os.getenv("REDIVIS_DEFAULT_DATASET")
+
         self.properties = make_request(
             method="post",
             path="/queries",

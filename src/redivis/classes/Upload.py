@@ -262,6 +262,9 @@ class Upload:
             raise Exception(str(e))
         return
 
+    def variable(self, name):
+        return Variable(name, upload=self)
+
 
 def retry_partial_upload(*, retry_count=0, file_size, resumable_uri):
     logging.debug("Attempting to resume upload")
