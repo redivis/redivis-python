@@ -6,7 +6,7 @@ python3 setup.py develop
 ```
 You can then run the tests, e.g.: 
 ```
-REDIVIS_API_TOKEN=YOUR_TOKEN pytest -s --disable-warnings [-k test_prefix]
+REDIVIS_API_ENDPOINT=https://localhost:8443/api/v1 REDIVIS_API_TOKEN=YOUR_TOKEN pytest -s --disable-warnings [-k test_prefix]
 ```
 #### To upload to PyPi:  
 First, update the version in setup.py. Then:

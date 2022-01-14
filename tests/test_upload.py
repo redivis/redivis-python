@@ -78,11 +78,20 @@ def test_streaming_upload():
     upload = table.upload(name="test")
     upload.create(type="stream")
 
-    print(upload.insert_rows([{"var1": 1, "var2": "a"}], update_schema=True))
+    print(
+        upload.insert_rows([{"var1": 1, "var2": "a", "var3": None}], update_schema=True)
+    )
 
     upload.insert_rows([{"var2": 1}], update_schema=True)
-    upload.insert_rows([{"var1": "a", "var2": 1.2}], update_schema=True)
-
+    upload.insert_rows(
+        [{"var1": "a", "var2": 1.2, "var3": "2020-01-01"}], update_schema=True
+    )
+    upload.insert_rows(
+        [{"var1": "a", "var2": 1.2, "var3": "2020-01-01"}], update_schema=False
+    )
+    upload.insert_rows(
+        [{"var1": "a", "var2": 1.2, "var3": "2020-01-01T00:00:00"}], update_schema=True
+    )
     variables = upload.list_variables()
     print(variables)
     print(variables[0].get(wait_for_statistics=True))
@@ -150,3 +159,53 @@ def test_streaming_performance():
         upload.insert_rows(data, update_schema=True)
 
     print("--- %s seconds ---" % (time.time() - start_time))
+
+
+def test_streaming_after_upload():
+    util.create_test_dataset()
+    util.clear_test_data()
+
+    table = util.get_table()
+
+    df = pandas.read_csv(os.path.join(os.path.dirname(__file__), "data/tiny.csv"))
+    data = df.to_dict(orient="records")
+    table.create(description="Some info")
+    upload = table.upload(name="seed_file").create(type="delimited")
+
+    with open("tests/data/tiny.csv", "rb") as f:
+        upload.upload_file(data=f)
+
+    upload = table.upload(name="streamed_date").create(
+        type="stream",
+        schema=[
+            {
+                "name": "id",
+                "type": "integer",
+            },
+            {
+                "name": "Numeric",
+                "type": "float",
+            },
+            {
+                "name": "Key",
+                "type": "string",
+            },
+            {
+                "name": "Timestamp",
+                "type": "string",
+            },
+            {
+                "name": "Year",
+                "type": "integer",
+            },
+            {
+                "name": "Boolean",
+                "type": "boolean",
+            },
+            {
+                "name": "Text",
+                "type": "string",
+            },
+        ],
+    )
+    upload.insert_rows(data, update_schema=False)
