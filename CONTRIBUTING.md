@@ -2,7 +2,7 @@
 ## Contributing
 For local development, clone this repository and then run
 ```py
-python3 setup.py develop
+python3 setup.py develop --user
 ```
 You can then run the tests, e.g.: 
 ```
