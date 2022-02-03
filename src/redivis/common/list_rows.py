@@ -3,8 +3,7 @@ import pandas as pd
 from collections import namedtuple
 import fastavro
 import pyarrow
-from tqdm import tqdm
-import time
+from tqdm.auto import tqdm
 from ..common.api_request import make_request
 
 def list_rows(
