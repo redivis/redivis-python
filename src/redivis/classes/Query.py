@@ -61,7 +61,7 @@ class Query:
         )
 
         return list_rows(
-            uri=f"{self.uri}/rows",
+            uri=self.uri,
             max_results=max_results,
             mapped_variables=variables,
             type="tuple",
@@ -85,7 +85,7 @@ class Query:
         )
 
         return list_rows(
-            uri=f"{self.uri}/rows",
+            uri=self.uri,
             max_results=max_results,
             mapped_variables=variables,
             type="dataframe",

@@ -2,7 +2,7 @@
 ## Contributing
 For local development, clone this repository and then run
 ```py
-source ./venv/bin/activate && python3 setup.py develop --user
+source ./venv/bin/activate && python setup.py develop --user
 ```
 You can then run the tests, e.g.: 
 ```

@@ -130,7 +130,7 @@ class Upload:
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
-            uri=f"{self.uri}/rows",
+            uri=self.uri,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -150,7 +150,7 @@ class Upload:
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
-            uri=f"{self.uri}/rows",
+            uri=self.uri,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
