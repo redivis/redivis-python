@@ -1,7 +1,6 @@
 
 import pandas as pd
 from collections import namedtuple
-import fastavro
 import pyarrow
 from tqdm.auto import tqdm
 from ..common.api_request import make_request
@@ -22,98 +21,98 @@ def list_rows(
     )
 
     progressbar = tqdm(total=max_results, leave=False)
-    if format == "arrow":
-        stream_results = []
-        for stream in read_session["streams"]:
-            arrow_response = make_request(
-                method="get",
-                path=f'/readStreams/{stream["id"]}',
-                stream=True,
-                parse_response=False,
-            )
+    stream_results = []
+    for stream in read_session["streams"]:
+        arrow_response = make_request(
+            method="get",
+            path=f'/readStreams/{stream["id"]}',
+            stream=True,
+            parse_response=False,
+        )
 
-            reader = pyarrow.ipc.open_stream(arrow_response.raw)
-            batches = []
-            for batch in reader:
-                batches.append(batch)
-                progressbar.update(batch.num_rows)
-
-            if type == "tuple":
-                stream_results.append(pyarrow.Table.from_batches(batches).to_pydict())
-            else:
-                stream_results.append(pyarrow.Table.from_batches(batches).to_pandas())
+        reader = pyarrow.ipc.open_stream(arrow_response.raw)
+        batches = []
+        for batch in reader:
+            batches.append(batch)
+            progressbar.update(batch.num_rows)
 
         if type == "tuple":
-            Row = namedtuple(
-                "Row",
-                [variable["name"] for variable in mapped_variables],
-            )
-            res = []
-            for pydict in stream_results:
-                keys = list(pydict.keys())
-                for i in range(len(pydict[keys[0]])):
-                    if len(res) == max_results:
-                        break
-                    res.append(Row(*[format_tuple_type(pydict[variable["name"]][i], variable["type"]) if variable["name"] in pydict else None for variable in mapped_variables]))
-
-            progressbar.close()
-            return res
+            stream_results.append(pyarrow.Table.from_batches(batches).to_pydict())
         else:
-            df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
-            df = set_dataframe_types(df, mapped_variables)
-            if len(df.index) > max_results:
-                return df.iloc[0:max_results, :]
+            stream_results.append(pyarrow.Table.from_batches(batches).to_pandas())
 
-            progressbar.close()
-            return df
+    if type == "tuple":
+        Row = namedtuple(
+            "Row",
+            [variable["name"] for variable in mapped_variables],
+        )
+        res = []
+        for pydict in stream_results:
+            keys = list(pydict.keys())
+            for i in range(len(pydict[keys[0]])):
+                if len(res) == max_results:
+                    break
+                res.append(Row(*[format_tuple_type(pydict[variable["name"]][i], variable["type"]) if variable["name"] in pydict else None for variable in mapped_variables]))
+
+        progressbar.close()
+        return res
     else:
-        if type == "tuple":
-            res = []
-            for stream in read_session["streams"]:
-                avro_response = make_request(
-                    method="get",
-                    path=f'/readStreams/{stream["id"]}',
-                    stream=True,
-                    parse_response=False,
-                )
-                parsed_schema = fastavro.parse_schema(read_session["schemas"][stream["schemaIndex"]])
+        df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
+        df = set_dataframe_types(df, mapped_variables)
+        if len(df.index) > max_results:
+            return df.iloc[0:max_results, :]
 
-                Row = namedtuple(
-                    "Row",
-                    [variable["name"] for variable in mapped_variables],
-                )
-                while True:
-                    try:
-                        res.append(Row(**fastavro.schemaless_reader(avro_response.raw, parsed_schema)))
-                    except Exception as err:
-                        break
-                    progressbar.update()
+        progressbar.close()
+        return df
 
-                progressbar.close()
-
-            return res
-        else:
-            res = []
-            for stream in read_session["streams"]:
-                avro_response = make_request(
-                    method="get",
-                    path=f'/readStreams/{stream["id"]}',
-                    stream=True,
-                    parse_response=False,
-                )
-                parsed_schema = fastavro.parse_schema(read_session["schemas"][stream["schemaIndex"]])
-
-                while True:
-                    try:
-                        res.append(fastavro.schemaless_reader(avro_response.raw, parsed_schema))
-                    except Exception as err:
-                        break
-                    progressbar.update()
-
-                progressbar.close()
-
-            df = pd.DataFrame(res, dtype="string")
-            return set_dataframe_types(df, mapped_variables)
+    # Old avro parsing, removed in preference of Arrow
+    # if type == "tuple":
+    #     res = []
+    #     for stream in read_session["streams"]:
+    #         avro_response = make_request(
+    #             method="get",
+    #             path=f'/readStreams/{stream["id"]}',
+    #             stream=True,
+    #             parse_response=False,
+    #         )
+    #         parsed_schema = fastavro.parse_schema(read_session["schemas"][stream["schemaIndex"]])
+    #
+    #         Row = namedtuple(
+    #             "Row",
+    #             [variable["name"] for variable in mapped_variables],
+    #         )
+    #         while True:
+    #             try:
+    #                 res.append(Row(**fastavro.schemaless_reader(avro_response.raw, parsed_schema)))
+    #             except Exception as err:
+    #                 break
+    #             progressbar.update()
+    #
+    #         progressbar.close()
+    #
+    #     return res
+    # else:
+    #     res = []
+    #     for stream in read_session["streams"]:
+    #         avro_response = make_request(
+    #             method="get",
+    #             path=f'/readStreams/{stream["id"]}',
+    #             stream=True,
+    #             parse_response=False,
+    #         )
+    #         parsed_schema = fastavro.parse_schema(read_session["schemas"][stream["schemaIndex"]])
+    #
+    #         while True:
+    #             try:
+    #                 res.append(fastavro.schemaless_reader(avro_response.raw, parsed_schema))
+    #             except Exception as err:
+    #                 break
+    #             progressbar.update()
+    #
+    #         progressbar.close()
+    #
+    #     df = pd.DataFrame(res, dtype="string")
+    #     return set_dataframe_types(df, mapped_variables)
 
 
 def format_tuple_type(val, type):
