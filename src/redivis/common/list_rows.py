@@ -43,9 +43,6 @@ def list_rows(
             else:
                 stream_results.append(pyarrow.Table.from_batches(batches).to_pandas())
 
-        progressbar.close()
-
-
         if type == "tuple":
             Row = namedtuple(
                 "Row",
@@ -59,6 +56,7 @@ def list_rows(
                         break
                     res.append(Row(*[format_tuple_type(pydict[variable["name"]][i], variable["type"]) if variable["name"] in pydict else None for variable in mapped_variables]))
 
+            progressbar.close()
             return res
         else:
             df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
@@ -66,6 +64,7 @@ def list_rows(
             if len(df.index) > max_results:
                 return df.iloc[0:max_results, :]
 
+            progressbar.close()
             return df
     else:
         if type == "tuple":
