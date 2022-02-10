@@ -40,10 +40,9 @@ def test_upload_string():
     )
 
     table.upload(name="tiny.csv",).create(
+        data='a,b\n1,2\n3,"4\n5"',
         type="delimited",
         allow_quoted_newlines=True,
-    ).upload_file(
-        data='a,b\n1,2\n3,"4\n5"',
     )
 
 
@@ -55,7 +54,7 @@ def test_upload_and_release():
     )
 
     with open("tests/data/tiny.csv", "rb") as f:
-        table.upload(name="tiny.csv").create(type="delimited").upload_file(data=f)
+        table.upload(name="tiny.csv").create(data=f, type="delimited", wait_for_finish=True)
 
     dataset.release()
 

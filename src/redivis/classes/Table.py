@@ -196,7 +196,6 @@ class Table:
             )
             upload.upload_file(
                 data,
-                create_if_needed=True,
                 wait_for_finish=True,
                 raise_on_fail=True,
                 remove_on_fail=remove_on_fail,
