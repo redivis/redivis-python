@@ -49,13 +49,21 @@ class Upload:
         schema=None,
         has_header_row=True,
         skip_bad_records=False,
-        allow_quoted_newlines=False,
+        allow_quoted_newlines=None,
+        has_quoted_newlines=None,
         quote_character='"',
         if_not_exists=False,
         remove_on_fail=False,
         wait_for_finish=True,
         raise_on_fail=True,
     ):
+        if allow_quoted_newlines is not None and allow_quoted_newlines is None:
+            has_quoted_newlines = allow_quoted_newlines
+            warnings.warn(
+                "The parameter allow_quoted_newlines has been renamed to has_quoted_newlines. Please update your script to ensure future compatability.",
+                DeprecationWarning,
+            )
+
         data_is_file = False
         resumable_upload_id = None
 
@@ -93,7 +101,7 @@ class Upload:
                 "schema": schema,
                 "hasHeaderRow": has_header_row,
                 "skipBadRecords": skip_bad_records,
-                "allowQuotedNewlines": allow_quoted_newlines,
+                "hasQuotedNewlines": has_quoted_newlines,
                 "quoteCharacter": quote_character,
                 "delimiter": delimiter,
                 "resumableUploadId": resumable_upload_id
