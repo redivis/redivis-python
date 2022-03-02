@@ -7,6 +7,7 @@ import logging
 import requests
 from urllib.parse import quote as quote_uri
 import warnings
+import io
 
 from ..common.list_rows import list_rows
 
@@ -41,16 +42,46 @@ class Upload:
 
     def create(
         self,
+        data=None, # Old versions of the library didn't accept this param, and instead use the upload_file interface
         *,
         type="delimited",
         delimiter=None,
         schema=None,
         has_header_row=True,
         skip_bad_records=False,
-        allow_quoted_newlines=False,
+        allow_quoted_newlines=None,
+        has_quoted_newlines=None,
         quote_character='"',
         if_not_exists=False,
+        remove_on_fail=False,
+        wait_for_finish=True,
+        raise_on_fail=True,
     ):
+        if allow_quoted_newlines is not None and allow_quoted_newlines is None:
+            has_quoted_newlines = allow_quoted_newlines
+            warnings.warn(
+                "The parameter allow_quoted_newlines has been renamed to has_quoted_newlines. Please update your script to ensure future compatability.",
+                DeprecationWarning,
+            )
+
+        data_is_file = False
+        resumable_upload_id = None
+
+        if data:
+            data_is_file = hasattr(data, "read")
+
+        if data and data_is_file:
+            if os.stat(data.name).st_size > 1e7:
+                resumable_upload_id = self.upload_file(
+                    data,
+                    remove_on_fail=remove_on_fail,
+                    wait_for_finish=wait_for_finish,
+                    raise_on_fail=raise_on_fail,
+                    use_legacy_endpoint=False
+                )
+                data = None
+        elif data:
+            data = io.StringIO(data)
 
         if schema and type != "stream":
             warnings.warn(
@@ -63,19 +94,39 @@ class Upload:
         response = make_request(
             method="POST",
             path=f"{self.table.uri}/uploads",
+            parse_payload=data is None,
             payload={
                 "name": self.name,
                 "type": type,
                 "schema": schema,
                 "hasHeaderRow": has_header_row,
                 "skipBadRecords": skip_bad_records,
-                "allowQuotedNewlines": allow_quoted_newlines,
+                "hasQuotedNewlines": has_quoted_newlines,
                 "quoteCharacter": quote_character,
                 "delimiter": delimiter,
+                "resumableUploadId": resumable_upload_id
             },
+            files={'data': data} if data is not None else None
         )
         self.properties = response
         self.uri = self.properties["uri"]
+
+        try:
+            if (data or resumable_upload_id) and wait_for_finish:
+                while True:
+                    time.sleep(2)
+                    self.get()
+                    if self["status"] == "completed" or self["status"] == "failed":
+                        if self["status"] == "failed" and raise_on_fail:
+                            raise Exception(self["errorMessage"])
+                        break
+                    else:
+                        logging.debug("Upload is still in progress...")
+        except Exception as e:
+            if remove_on_fail:
+                self.delete()
+            raise Exception(str(e))
+
         return self
 
     def delete(self):
@@ -164,6 +215,8 @@ class Upload:
         remove_on_fail=False,
         wait_for_finish=True,
         raise_on_fail=True,
+        #     TODO: remove in 1.0
+        use_legacy_endpoint=True
     ):
         try:
             start_byte = 0
@@ -171,13 +224,23 @@ class Upload:
             chunk_size = MAX_CHUNK_SIZE
             is_file = True if hasattr(data, "read") else False
             file_size = os.stat(data.name).st_size if is_file else len(data)
+            resumable_upload_id = None
 
-            res = make_request(
-                path=f"{self.uri}/resumableUri",
-                method="POST",
-                payload={"size": file_size},
-            )
-            resumable_uri = res["uri"]
+            if use_legacy_endpoint:
+                res = make_request(
+                    path=f"{self.uri}/resumableUri",
+                    method="POST",
+                    payload={"size": file_size},
+                )
+                resumable_uri = res["uri"]
+            else:
+                res = make_request(
+                    path=f"{self.table.uri}/resumableUpload",
+                    method="POST",
+                    payload={"size": file_size},
+                )
+                resumable_uri = res["url"]
+                resumable_upload_id = res["id"]
 
             while start_byte < file_size:
                 end_byte = min(start_byte + chunk_size - 1, file_size - 1)
@@ -200,11 +263,12 @@ class Upload:
 
                     start_byte += chunk_size
 
-                    make_request(
-                        path=self.uri,
-                        method="PATCH",
-                        payload={"percentCompleted": (end_byte + 1) / file_size * 100},
-                    )
+                    if use_legacy_endpoint:
+                        make_request(
+                            path=self.uri,
+                            method="PATCH",
+                            payload={"percentCompleted": (end_byte + 1) / file_size * 100},
+                        )
                     retry_count = 0
                 except Exception as e:
                     if retry_count > 20:
@@ -212,13 +276,14 @@ class Upload:
                             "A network error occurred. Upload failed after too many retries."
                         )
 
-                        self.properties = make_request(
-                            path=self.uri,
-                            method="PATCH",
-                            payload={
-                                "errorMessage": "A network error occurred. Upload failed after too many retries."
-                            },
-                        )
+                        if use_legacy_endpoint:
+                            self.properties = make_request(
+                                path=self.uri,
+                                method="PATCH",
+                                payload={
+                                    "errorMessage": "A network error occurred. Upload failed after too many retries."
+                                },
+                            )
 
                         raise e
 
@@ -228,7 +293,7 @@ class Upload:
                     start_byte = retry_partial_upload(
                         file_size=file_size, resumable_uri=resumable_uri
                     )
-            if wait_for_finish:
+            if wait_for_finish and use_legacy_endpoint:
                 while True:
                     time.sleep(2)
                     self.get()
@@ -238,8 +303,11 @@ class Upload:
                         break
                     else:
                         logging.debug("Upload is still in progress...")
+            elif use_legacy_endpoint == False:
+                return resumable_upload_id
+
         except Exception as e:
-            if remove_on_fail:
+            if remove_on_fail and use_legacy_endpoint:
                 self.delete()
             raise Exception(str(e))
         return

@@ -17,6 +17,7 @@ def make_request(
     parse_payload=True,
     parse_response=True,
     stream=False,
+    files=None
 ):
     api_endpoint = __get_api_endpoint()
     verify_ssl = (
@@ -44,6 +45,7 @@ def make_request(
 
     if parse_payload and payload:
         payload = json.dumps(payload)
+        headers["Content-Type"] = "application/json"
 
     r = getattr(requests, method)(
         url,
@@ -52,6 +54,7 @@ def make_request(
         verify=verify_ssl,
         data=payload,
         stream=stream,
+        files=files,
         timeout=125,
     )
 

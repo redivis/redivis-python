@@ -182,7 +182,7 @@ class Table:
         )
         if data is not None:
             warnings.warn(
-                "Passing data directly to the upload constructor is deprecated. Please call table.upload().upload_file(file) instead.",
+                "Passing data directly to the upload constructor is deprecated. Please call table.upload('filename').create(data) instead.",
                 DeprecationWarning,
             )
             upload.create(
@@ -196,7 +196,6 @@ class Table:
             )
             upload.upload_file(
                 data,
-                create_if_needed=True,
                 wait_for_finish=True,
                 raise_on_fail=True,
                 remove_on_fail=remove_on_fail,
