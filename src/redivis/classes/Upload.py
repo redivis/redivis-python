@@ -188,7 +188,7 @@ class Upload:
             type="tuple",
         )
 
-    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geometry=""):
+    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable=""):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -205,7 +205,7 @@ class Upload:
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
-            geometry_variable=geometry,
+            geography_variable=geography_variable,
             type="dataframe",
         )
 

@@ -118,7 +118,7 @@ class Table:
             for variable in variables
         ]
 
-    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geometry=""):
+    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable=""):
         if limit and max_results is None:
             warnings.warn(
                 "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
@@ -141,7 +141,7 @@ class Table:
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
-            geometry_variable=geometry,
+            geography_variable=geography_variable,
             type="dataframe",
         )
 

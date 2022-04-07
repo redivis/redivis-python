@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 from ..common.api_request import make_request
 
 def list_rows(
-    *, uri, type="tuple", max_results=None, selected_variables=None, mapped_variables=None, geometry_variable=None
+    *, uri, type="tuple", max_results=None, selected_variables=None, mapped_variables=None, geography_variable=None
 ):
     read_session = make_request(
         method="post",
@@ -58,7 +58,7 @@ def list_rows(
         return res
     else:
         df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
-        df = set_dataframe_types(df, mapped_variables, geometry_variable)
+        df = set_dataframe_types(df, mapped_variables, geography_variable)
         if len(df.index) > max_results:
             return df.iloc[0:max_results, :]
 
@@ -85,7 +85,7 @@ def format_tuple_type(val, type):
         return str(val)
 
 
-def set_dataframe_types(df, variables, geometry_variable=None):
+def set_dataframe_types(df, variables, geography_variable=None):
     for variable in variables:
         name = variable["name"]
         type = variable["type"]
@@ -111,14 +111,14 @@ def set_dataframe_types(df, variables, geometry_variable=None):
             )
             # Pandas seems to throw errors if all the boolean values are NA, in which case we should just ignore and fall back to a string dtype
             df[name] = df[name].astype("boolean", errors="ignore")
-        elif type == "geography" and geometry_variable is not None:
-            if geometry_variable == "":
-                geometry_variable = name
+        elif type == "geography" and geography_variable is not None:
+            if geography_variable == "":
+                geography_variable = name
             df[name] = geopandas.GeoSeries.from_wkt(df[name])
         else:
             df[name] = df[name].astype("string")
 
-    if geometry_variable:
-        return geopandas.GeoDataFrame(data=df, geometry=geometry_variable)
+    if geography_variable:
+        return geopandas.GeoDataFrame(data=df, geometry=geography_variable)
     else:
         return df
