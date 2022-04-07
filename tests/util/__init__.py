@@ -61,7 +61,7 @@ def clear_test_data():
         table.delete()
 
 
-def populate_test_data():
+def populate_test_data(data_file_name="tiny.csv"):
     create_test_dataset()
     table = (
         redivis.user(get_user_name())
@@ -74,6 +74,6 @@ def populate_test_data():
 
     if not table.get().properties["numRows"]:
         with open(
-            os.path.join(os.path.dirname(__file__), "../data/tiny.csv"), "rb"
+            os.path.join(os.path.dirname(__file__), f"../data/{data_file_name}"), "rb"
         ) as f:
-            table.upload(name="local.csv", type="delimited").create().upload_file(data=f)
+            table.upload(name=data_file_name).create().upload_file(data=f)

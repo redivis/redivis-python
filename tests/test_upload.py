@@ -1,6 +1,6 @@
 import util
-import os
 import pandas
+import os
 
 
 def test_linebreaks_in_cell():

@@ -2,13 +2,13 @@
 import pandas as pd
 from collections import namedtuple
 import pyarrow
+import geopandas
 from tqdm.auto import tqdm
 from ..common.api_request import make_request
 
 def list_rows(
-    *, uri, type="tuple", max_results=None, selected_variables=None, mapped_variables=None
+    *, uri, type="tuple", max_results=None, selected_variables=None, mapped_variables=None, geometry_variable=None
 ):
-    format = 'arrow'
     read_session = make_request(
         method="post",
         path=f'{uri}/readSessions',
@@ -16,7 +16,7 @@ def list_rows(
         payload={
             "selectedVariables": selected_variables,
             "maxResults": max_results,
-            "format": format
+            "format": "arrow"
         },
     )
 
@@ -58,61 +58,12 @@ def list_rows(
         return res
     else:
         df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
-        df = set_dataframe_types(df, mapped_variables)
+        df = set_dataframe_types(df, mapped_variables, geometry_variable)
         if len(df.index) > max_results:
             return df.iloc[0:max_results, :]
 
         progressbar.close()
         return df
-
-    # Old avro parsing, removed in preference of Arrow
-    # if type == "tuple":
-    #     res = []
-    #     for stream in read_session["streams"]:
-    #         avro_response = make_request(
-    #             method="get",
-    #             path=f'/readStreams/{stream["id"]}',
-    #             stream=True,
-    #             parse_response=False,
-    #         )
-    #         parsed_schema = fastavro.parse_schema(read_session["schemas"][stream["schemaIndex"]])
-    #
-    #         Row = namedtuple(
-    #             "Row",
-    #             [variable["name"] for variable in mapped_variables],
-    #         )
-    #         while True:
-    #             try:
-    #                 res.append(Row(**fastavro.schemaless_reader(avro_response.raw, parsed_schema)))
-    #             except Exception as err:
-    #                 break
-    #             progressbar.update()
-    #
-    #         progressbar.close()
-    #
-    #     return res
-    # else:
-    #     res = []
-    #     for stream in read_session["streams"]:
-    #         avro_response = make_request(
-    #             method="get",
-    #             path=f'/readStreams/{stream["id"]}',
-    #             stream=True,
-    #             parse_response=False,
-    #         )
-    #         parsed_schema = fastavro.parse_schema(read_session["schemas"][stream["schemaIndex"]])
-    #
-    #         while True:
-    #             try:
-    #                 res.append(fastavro.schemaless_reader(avro_response.raw, parsed_schema))
-    #             except Exception as err:
-    #                 break
-    #             progressbar.update()
-    #
-    #         progressbar.close()
-    #
-    #     df = pd.DataFrame(res, dtype="string")
-    #     return set_dataframe_types(df, mapped_variables)
 
 
 def format_tuple_type(val, type):
@@ -134,10 +85,12 @@ def format_tuple_type(val, type):
         return str(val)
 
 
-def set_dataframe_types(df, variables):
+def set_dataframe_types(df, variables, geometry_variable=None):
     for variable in variables:
         name = variable["name"]
         type = variable["type"]
+
+        print(name, type)
 
         # TODO: need to finalize what types we're returning
         if type == "integer":
@@ -158,7 +111,14 @@ def set_dataframe_types(df, variables):
             )
             # Pandas seems to throw errors if all the boolean values are NA, in which case we should just ignore and fall back to a string dtype
             df[name] = df[name].astype("boolean", errors="ignore")
+        elif type == "geography" and geometry_variable is not None:
+            if geometry_variable == "":
+                geometry_variable = name
+            df[name] = geopandas.GeoSeries.from_wkt(df[name])
         else:
             df[name] = df[name].astype("string")
 
-    return df
+    if geometry_variable:
+        return geopandas.GeoDataFrame(data=df, geometry=geometry_variable)
+    else:
+        return df

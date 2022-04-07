@@ -24,3 +24,12 @@ def test_selected_variables():
     util.populate_test_data()
     table = util.get_table()
     print(table.to_dataframe(max_results=10, variables=["ID"]))
+
+
+def test_geo_dataframe():
+    util.delete_test_dataset()
+    util.populate_test_data("us_states.geojsonl")
+    table = util.get_table()
+    df = table.to_dataframe(max_results=100)
+    print(df.dtypes)
+    print(df)

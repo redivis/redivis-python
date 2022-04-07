@@ -67,7 +67,7 @@ class Query:
             type="tuple",
         )
 
-    def to_dataframe(self, max_results=None, *, limit=None):
+    def to_dataframe(self, max_results=None, *, limit=None, geometry=""):
         if limit and max_results is None:
             warnings.warn(
                 "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
@@ -89,6 +89,7 @@ class Query:
             max_results=max_results,
             mapped_variables=variables,
             type="dataframe",
+            geometry_variable=geometry,
         )
 
     def _wait_for_finish(self):

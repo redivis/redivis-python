@@ -44,7 +44,7 @@ class Upload:
         self,
         data=None, # Old versions of the library didn't accept this param, and instead use the upload_file interface
         *,
-        type="delimited",
+        type=None,
         delimiter=None,
         schema=None,
         has_header_row=True,
@@ -188,7 +188,7 @@ class Upload:
             type="tuple",
         )
 
-    def to_dataframe(self, max_results=None, *, limit=None, variables=None):
+    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geometry=""):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -205,6 +205,7 @@ class Upload:
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
+            geometry_variable=geometry,
             type="dataframe",
         )
 

@@ -3,6 +3,8 @@
 For local development, clone this repository and then run
 ```py
 source ./venv/bin/activate && python setup.py develop --user
+# OR
+source ./venv/bin/activate &&  python3 -m pip install .  
 ```
 You can then run the tests, e.g.: 
 ```

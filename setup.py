@@ -33,7 +33,7 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # Required dependencies
-REQUIRED = ["requests >= 2.0.0", "pandas >= 1.3.0", "tqdm >= 4.0.0", "pyarrow >= 6.0.0"]
+REQUIRED = ["requests >= 2.0.0", "pandas >= 1.3.0", "tqdm >= 4.0.0", "pyarrow >= 6.0.0", "geopandas >= 0.10.0"]
 
 # What packages are optional?
 EXTRAS = {
