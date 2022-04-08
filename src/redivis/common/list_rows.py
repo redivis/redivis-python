@@ -90,7 +90,8 @@ def set_dataframe_types(df, variables, geography_variable=None):
         name = variable["name"]
         type = variable["type"]
 
-        print(name, type)
+        if name not in df.columns:
+            continue
 
         # TODO: need to finalize what types we're returning
         if type == "integer":

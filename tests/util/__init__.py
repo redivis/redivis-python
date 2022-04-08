@@ -5,8 +5,8 @@ import os
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-os.environ["REDIVIS_API_ENDPOINT"] = "https://localhost:8443/api/v1"
+if os.getenv("REDIVIS_API_ENDPOINT") is None:
+    os.environ["REDIVIS_API_ENDPOINT"] = "https://localhost:8443/api/v1"
 
 
 def get_user_name():
