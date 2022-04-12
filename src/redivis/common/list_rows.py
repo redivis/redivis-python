@@ -120,6 +120,6 @@ def set_dataframe_types(df, variables, geography_variable=None):
             df[name] = df[name].astype("string")
 
     if geography_variable:
-        return geopandas.GeoDataFrame(data=df, geometry=geography_variable)
+        return geopandas.GeoDataFrame(data=df, geometry=geography_variable, crs="EPSG:4326")
     else:
         return df
