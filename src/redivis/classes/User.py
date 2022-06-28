@@ -7,7 +7,7 @@ from ..common.api_request import make_paginated_request
 class User:
     def __init__(self, name):
         self.name = name
-        self.uri = f"/users/{quote_uri(self.name)}"
+        self.uri = f"/users/{quote_uri(self.name, '')}"
 
     def dataset(self, name, *, version="current"):
         return Dataset(name, user=self, version=version)

@@ -9,7 +9,7 @@ class Project:
         self.user = user
         self.name = name
         self.identifier = f"{self.user.name}.{self.name}"
-        self.uri = f"/projects/{quote_uri(self.identifier)}"
+        self.uri = f"/projects/{quote_uri(self.identifier, '')}"
         self.properties = properties
 
     def list_tables(self, *, max_results=None, include_dataset_tables=False):

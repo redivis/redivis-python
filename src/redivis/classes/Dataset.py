@@ -24,7 +24,7 @@ class Dataset:
         self.identifier = (
             f"{(self.organization or self.user).name}.{self.name}:{self.version}"
         )
-        self.uri = f"/datasets/{quote_uri(self.identifier)}"
+        self.uri = f"/datasets/{quote_uri(self.identifier, '')}"
         self.properties = properties
 
     def __getitem__(self, key):

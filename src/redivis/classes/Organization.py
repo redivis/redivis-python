@@ -6,7 +6,7 @@ from ..common.api_request import make_paginated_request
 class Organization:
     def __init__(self, name):
         self.name = name
-        self.uri = f"/organizations/{quote_uri(self.name)}"
+        self.uri = f"/organizations/{quote_uri(self.name, '')}"
 
     def dataset(self, name, *, version="current"):
         return Dataset(name, organization=self, version=version)

@@ -29,7 +29,7 @@ class Upload:
     ):
         self.table = table
         self.name = name
-        self.uri = f"{table.uri}/uploads/{quote_uri(self.name)}"
+        self.uri = f"{table.uri}/uploads/{quote_uri(self.name,'')}"
         self.properties = properties
 
     def __getitem__(self, key):

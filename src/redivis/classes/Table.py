@@ -30,7 +30,7 @@ class Table:
         self.identifier = (
             f"{owner.name}.{parent.name}{version_string}.{self.name}{sample_string}"
         )
-        self.uri = f"/tables/{quote_uri(self.identifier)}"
+        self.uri = f"/tables/{quote_uri(self.identifier, '')}"
         self.properties = properties
 
     def __getitem__(self, key):
