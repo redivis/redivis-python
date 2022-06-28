@@ -22,7 +22,6 @@ class File:
         return json.dumps(self.properties, indent=2)
 
     def get(self):
-        print(self.uri)
         self.properties = make_request(method="GET", path=self.uri)
         self.uri = self.properties["uri"]
         return self
