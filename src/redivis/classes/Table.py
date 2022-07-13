@@ -147,7 +147,6 @@ class Table:
 
     def download_files(self, path, *, overwrite=False, max_results=None, file_id_variable=None):
         files = self.list_files(max_results, file_id_variable=file_id_variable)
-        print(path)
         if not os.path.exists(path):
             pathlib.Path(path).mkdir(exist_ok=True, parents=True)
         with concurrent.futures.ThreadPoolExecutor() as executor:
