@@ -25,6 +25,9 @@ class Variable:
     def __str__(self):
         return json.dumps(self.properties, indent=2)
 
+    def __repr__(self):
+        return str(self)
+
     def get(self, wait_for_statistics=False):
         self.properties = make_request(
             method="GET",

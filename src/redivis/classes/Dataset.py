@@ -35,6 +35,9 @@ class Dataset:
     def __str__(self):
         return json.dumps(self.properties, indent=2)
 
+    def __repr__(self):
+        return str(self)
+
     def create(self, *, public_access_level="none", description=None):
         if self.organization:
             path = f"/organizations/{self.organization.name}/datasets"

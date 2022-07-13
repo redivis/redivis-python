@@ -40,6 +40,9 @@ class Upload:
     def __str__(self):
         return json.dumps(self.properties, indent=2)
 
+    def __repr__(self):
+        return str(self)
+
     def create(
         self,
         data=None, # Old versions of the library didn't accept this param, and instead use the upload_file interface
