@@ -1,15 +1,18 @@
-import json
+from .Base import Base
 from urllib.parse import quote as quote_uri
 import warnings
 import os
+import concurrent.futures
+import pathlib
 
 from .Upload import Upload
 from .Variable import Variable
+from .File import File
 from ..common.list_rows import list_rows
 from ..common.api_request import make_request, make_paginated_request
 
 
-class Table:
+class Table(Base):
     def __init__(
         self,
         name,
@@ -17,7 +20,7 @@ class Table:
         sample=False,
         dataset=None,
         project=None,
-        properties=None,
+        properties={},
     ):
         dataset, project = get_table_parents(dataset, project)
         parent = dataset or project
@@ -30,16 +33,15 @@ class Table:
         self.identifier = (
             f"{owner.name}.{parent.name}{version_string}.{self.name}{sample_string}"
         )
-        self.uri = f"/tables/{quote_uri(self.identifier)}"
-        self.properties = properties
-
-    def __getitem__(self, key):
-        return (
-            self.properties[key] if self.properties and key in self.properties else None
-        )
-
-    def __str__(self):
-        return json.dumps(self.properties, indent=2)
+        self.uri = f"/tables/{quote_uri(self.identifier, '')}"
+        self.properties = {
+            **{
+                "kind": "table",
+                "name": name,
+                "uri": self.uri
+            },
+            **properties
+        }
 
     def create(self, *, description=None, upload_merge_strategy="append"):
         response = make_request(
@@ -117,6 +119,39 @@ class Table:
             Variable(variable["name"], table=self, properties=variable)
             for variable in variables
         ]
+
+    def list_files(self, max_results=None, *, file_id_variable=None):
+        if file_id_variable:
+            variable = Variable(file_id_variable, table=self)
+            if not variable.get().properties['isFileId']:
+                raise Exception(f'The variable {file_id_variable} does not represent a file id.')
+        else:
+            variables = make_paginated_request(
+                path=f"{self.uri}/variables", max_results=2, query={"isFileId": True}
+            )
+            if len(variables) == 0:
+                raise Exception(f"No variable containing file ids was found on this table")
+            elif len(variables) > 1:
+                raise Exception(f"This table contains multiple variables representing a file id. Please specify the variable with file ids you want to download via the 'file_id_variable' parameter.")
+
+            file_id_variable = variables[0]["name"]
+
+        rows = self.list_rows(max_results, variables=[file_id_variable])
+        return [
+            File(row.__getattribute__(file_id_variable), table=self)
+            for row in rows
+        ]
+
+    def download_files(self, path, *, overwrite=False, max_results=None, file_id_variable=None):
+        files = self.list_files(max_results, file_id_variable=file_id_variable)
+        if path is None:
+            path = os.getcwd()
+
+        if not os.path.exists(path):
+            pathlib.Path(path).mkdir(exist_ok=True, parents=True)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            executor.map(lambda file: file.download(path, overwrite=overwrite), files)
+
 
     def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable=""):
         if limit and max_results is None:
@@ -210,7 +245,6 @@ class Table:
 
 def get_mapped_variables(variables, uri):
     all_variables = make_paginated_request(path=f"{uri}/variables", page_size=1000)
-
     if variables is None:
         return all_variables
     else:

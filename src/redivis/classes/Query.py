@@ -1,12 +1,12 @@
 from ..common.api_request import make_request
-import json
+from .Base import Base
 import os
 import time
 from ..common.list_rows import list_rows
 import warnings
 
 
-class Query:
+class Query(Base):
     def __init__(
         self,
         query,
@@ -30,14 +30,6 @@ class Query:
             },
         )
         self.uri = f"/queries/{self.properties['id']}"
-
-    def __getitem__(self, key):
-        return (
-            self.properties[key] if self.properties and key in self.properties else None
-        )
-
-    def __str__(self):
-        return json.dumps(self.properties, indent=2)
 
     def get(self):
         self.properties = make_request(method="GET", path=self.uri)

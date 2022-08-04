@@ -1,4 +1,3 @@
-import json
 import time
 import re
 import math
@@ -11,34 +10,33 @@ import io
 
 from ..common.list_rows import list_rows
 
+from .Base import Base
 from .Variable import Variable
 from ..common.api_request import make_request, make_paginated_request
-
 
 # 8MB
 MAX_CHUNK_SIZE = 2 ** 23
 
 
-class Upload:
+class Upload(Base):
     def __init__(
         self,
         name,
         *,
         table,
-        properties=None,
+        properties={},
     ):
         self.table = table
         self.name = name
-        self.uri = f"{table.uri}/uploads/{quote_uri(self.name)}"
-        self.properties = properties
-
-    def __getitem__(self, key):
-        return (
-            self.properties[key] if self.properties and key in self.properties else None
-        )
-
-    def __str__(self):
-        return json.dumps(self.properties, indent=2)
+        self.uri = f"{table.uri}/uploads/{quote_uri(self.name,'')}"
+        self.properties = {
+            **{
+                "kind": "upload",
+                "name": name,
+                "uri": self.uri
+            },
+            **properties
+        }
 
     def create(
         self,

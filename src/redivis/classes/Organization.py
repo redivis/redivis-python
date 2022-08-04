@@ -1,12 +1,17 @@
-import warnings
 from .Dataset import Dataset
+from .Base import Base
 from urllib.parse import quote as quote_uri
 from ..common.api_request import make_paginated_request
 
-class Organization:
+class Organization(Base):
     def __init__(self, name):
         self.name = name
-        self.uri = f"/organizations/{quote_uri(self.name)}"
+        self.uri = f"/organizations/{quote_uri(self.name, '')}"
+        self.properties = {
+            "kind": "organization",
+            "uri": self.uri,
+            "userName": name
+        }
 
     def dataset(self, name, *, version="current"):
         return Dataset(name, organization=self, version=version)

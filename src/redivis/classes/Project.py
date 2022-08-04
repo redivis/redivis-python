@@ -1,16 +1,24 @@
 from .Query import Query
 from .Table import Table
+from .Base import Base
 from urllib.parse import quote as quote_uri
 from ..common.api_request import make_paginated_request
 
 
-class Project:
-    def __init__(self, name, *, user, properties=None):
+class Project(Base):
+    def __init__(self, name, *, user, properties={}):
         self.user = user
         self.name = name
         self.identifier = f"{self.user.name}.{self.name}"
-        self.uri = f"/projects/{quote_uri(self.identifier)}"
-        self.properties = properties
+        self.uri = f"/projects/{quote_uri(self.identifier, '')}"
+        self.properties = {
+            **{
+                "kind": "project",
+                "name": name,
+                "uri": self.uri
+            },
+            **properties
+        }
 
     def list_tables(self, *, max_results=None, include_dataset_tables=False):
         tables = make_paginated_request(

@@ -1,29 +1,29 @@
-import json
 import time
-
+from .Base import Base
 from ..common.api_request import make_request
 
 
-class Variable:
+class Variable(Base):
     def __init__(
         self,
         name,
         *,
         table=None,
         upload=None,
-        properties=None,
+        properties={},
     ):
         self.name = name
         self.table = table
         self.upload = upload
-        self.properties = properties
         self.uri = f"{table.uri if table else upload.uri}/variables/{self.name}"
-
-    def __getitem__(self, key):
-        return self.properties[key]
-
-    def __str__(self):
-        return json.dumps(self.properties, indent=2)
+        self.properties = {
+            **{
+                "kind": "variable",
+                "name": "name",
+                "uri": self.uri
+            },
+            **properties
+        }
 
     def get(self, wait_for_statistics=False):
         self.properties = make_request(
