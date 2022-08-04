@@ -1,6 +1,6 @@
 ![Redivis Logo](https://github.com/redivis/redivis-python/raw/main/assets/logo_small.png)
 # redivis-python
-[Redivis](redivis.com) client library for python! 
+[Redivis](https://redivis.com) client library for python! 
 
 Connect data on Redivis to the Python scientific stack, and script your data management tasks.
 
