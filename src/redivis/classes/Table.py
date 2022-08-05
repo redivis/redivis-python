@@ -142,7 +142,7 @@ class Table(Base):
             for row in rows
         ]
 
-    def download_files(self, path, *, overwrite=False, max_results=None, file_id_variable=None):
+    def download_files(self, path=None, *, overwrite=False, max_results=None, file_id_variable=None):
         files = self.list_files(max_results, file_id_variable=file_id_variable)
         if path is None:
             path = os.getcwd()
