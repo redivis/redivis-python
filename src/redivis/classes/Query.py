@@ -35,7 +35,7 @@ class Query(Base):
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def list_rows(self, max_results=None, *, limit=None):
+    def list_rows(self, max_results=None, *, limit=None, progress=True):
         if limit and max_results is None:
             warnings.warn(
                 "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
@@ -57,9 +57,10 @@ class Query(Base):
             max_results=max_results,
             mapped_variables=variables,
             type="tuple",
+            progress=progress
         )
 
-    def to_dataframe(self, max_results=None, *, limit=None, geography_variable=""):
+    def to_dataframe(self, max_results=None, *, limit=None, geography_variable="", progress=True):
         if limit and max_results is None:
             warnings.warn(
                 "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
@@ -82,6 +83,7 @@ class Query(Base):
             mapped_variables=variables,
             type="dataframe",
             geography_variable=geography_variable,
+            progress=progress
         )
 
     def _wait_for_finish(self):

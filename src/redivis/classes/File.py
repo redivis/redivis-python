@@ -49,8 +49,6 @@ class File(Base):
 
             # Make sure output directory exists
             pathlib.Path(file_name).parent.mkdir(exist_ok=True, parents=True)
-            if self.properties['size'] < 10000000:
-                progress = False
 
             with open(file_name, 'wb') as f:
                 if progress:

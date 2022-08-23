@@ -166,7 +166,7 @@ class Upload(Base):
             for variable in variables
         ]
 
-    def list_rows(self, max_results=None, *, variables=None):
+    def list_rows(self, max_results=None, *, variables=None, progress=True):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -184,9 +184,10 @@ class Upload(Base):
             selected_variables=variables,
             mapped_variables=mapped_variables,
             type="tuple",
+            progress=progress
         )
 
-    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable=""):
+    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable="", progress=True):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -205,6 +206,7 @@ class Upload(Base):
             mapped_variables=mapped_variables,
             geography_variable=geography_variable,
             type="dataframe",
+            progress=progress
         )
 
     def upload_file(

@@ -172,8 +172,7 @@ class Table(Base):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             executor.map(download, files)
 
-
-    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable=""):
+    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable="", progress=True):
         if limit and max_results is None:
             warnings.warn(
                 "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
@@ -198,6 +197,7 @@ class Table(Base):
             mapped_variables=mapped_variables,
             geography_variable=geography_variable,
             type="dataframe",
+            progress=progress
         )
 
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
