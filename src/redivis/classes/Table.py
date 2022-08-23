@@ -169,7 +169,7 @@ class Table(Base):
             if progress:
                 pbar_count.update()
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
             executor.map(download, files)
 
     def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable="", progress=True):
