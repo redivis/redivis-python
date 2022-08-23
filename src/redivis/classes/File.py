@@ -1,4 +1,4 @@
-import json
+from tqdm.auto import tqdm
 import os
 from io import BytesIO
 import pathlib
@@ -28,7 +28,7 @@ class File(Base):
         parse_headers(self, res)
         return self
 
-    def download(self, path=None, *, overwrite=False):
+    def download(self, path=None, *, overwrite=False, progress=True, on_progress=None):
         is_dir = False
         if path is None:
             path = os.getcwd()
@@ -49,10 +49,21 @@ class File(Base):
 
             # Make sure output directory exists
             pathlib.Path(file_name).parent.mkdir(exist_ok=True, parents=True)
+            if self.properties['size'] < 10000000:
+                progress = False
 
             with open(file_name, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=None):
+                if progress:
+                    pbar = tqdm(total=self.properties['size'], leave=False, unit='iB', unit_scale=True)
+                for chunk in r.iter_content(chunk_size=1024*1024):
+                    if progress:
+                        pbar.update(len(chunk))
                     f.write(chunk)
+                    if on_progress:
+                        on_progress(len(chunk))
+
+                if progress:
+                    pbar.close()
 
         return file_name
 

@@ -4,6 +4,7 @@ import warnings
 import os
 import concurrent.futures
 import pathlib
+from tqdm.auto import tqdm
 
 from .Upload import Upload
 from .Variable import Variable
@@ -78,7 +79,7 @@ class Table(Base):
                 raise err
             return False
 
-    def list_rows(self, max_results=None, *, limit=None, variables=None):
+    def list_rows(self, max_results=None, *, limit=None, variables=None, progress=True):
         if limit and max_results is None:
             warnings.warn(
                 "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
@@ -103,6 +104,7 @@ class Table(Base):
             selected_variables=variables,
             mapped_variables=mapped_variables,
             type="tuple",
+            progress=progress
         )
 
     def list_uploads(self, *, max_results=None):
@@ -136,21 +138,39 @@ class Table(Base):
 
             file_id_variable = variables[0]["name"]
 
-        rows = self.list_rows(max_results, variables=[file_id_variable])
+        rows = self.list_rows(max_results, variables=[file_id_variable], progress=False)
         return [
             File(row.__getattribute__(file_id_variable), table=self)
             for row in rows
         ]
 
-    def download_files(self, path=None, *, overwrite=False, max_results=None, file_id_variable=None):
+    def download_files(self, path=None, *, overwrite=False, max_results=None, file_id_variable=None, progress=True):
         files = self.list_files(max_results, file_id_variable=file_id_variable)
         if path is None:
             path = os.getcwd()
 
+        if progress:
+            pbar_count = tqdm(total=len(files), leave=False, unit=' files')
+            pbar_bytes = tqdm(unit='B', leave=False, unit_scale=True)
+
         if not os.path.exists(path):
             pathlib.Path(path).mkdir(exist_ok=True, parents=True)
+
+
+        def on_progress(bytes):
+            nonlocal pbar_bytes
+            pbar_bytes.update(bytes)
+
+        def download(file):
+            nonlocal progress
+            nonlocal pbar_count
+
+            file.download(path, overwrite=overwrite, progress=False, on_progress=on_progress if progress else None)
+            if progress:
+                pbar_count.update()
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            executor.map(lambda file: file.download(path, overwrite=overwrite), files)
+            executor.map(download, files)
 
 
     def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable=""):

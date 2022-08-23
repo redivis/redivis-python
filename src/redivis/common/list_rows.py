@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 from ..common.api_request import make_request
 
 def list_rows(
-    *, uri, type="tuple", max_results=None, selected_variables=None, mapped_variables=None, geography_variable=None
+    *, uri, type="tuple", max_results=None, selected_variables=None, mapped_variables=None, geography_variable=None, progress=True
 ):
     read_session = make_request(
         method="post",
@@ -20,7 +20,9 @@ def list_rows(
         },
     )
 
-    progressbar = tqdm(total=max_results, leave=False)
+    if progress:
+        progressbar = tqdm(total=max_results, leave=False)
+
     stream_results = []
     for stream in read_session["streams"]:
         arrow_response = make_request(
@@ -34,7 +36,8 @@ def list_rows(
         batches = []
         for batch in reader:
             batches.append(batch)
-            progressbar.update(batch.num_rows)
+            if progress:
+                progressbar.update(batch.num_rows)
 
         if type == "tuple":
             stream_results.append(pyarrow.Table.from_batches(batches).to_pydict())
@@ -54,7 +57,9 @@ def list_rows(
                     break
                 res.append(Row(*[format_tuple_type(pydict[variable["name"]][i], variable["type"]) if variable["name"] in pydict else None for variable in mapped_variables]))
 
-        progressbar.close()
+        if progress:
+            progressbar.close()
+
         return res
     else:
         df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
@@ -62,7 +67,8 @@ def list_rows(
         if len(df.index) > max_results:
             return df.iloc[0:max_results, :]
 
-        progressbar.close()
+        if progress:
+            progressbar.close()
         return df
 
 
