@@ -151,7 +151,7 @@ class Table(Base):
 
         if progress:
             pbar_count = tqdm(total=len(files), leave=False, unit=' files')
-            pbar_bytes = tqdm(unit='B', leave=False, unit_scale=True)
+            pbar_bytes = tqdm(unit='B', leave=False, unit_scale=True, bar_format='{n_fmt} ({rate_fmt})')
 
         if not os.path.exists(path):
             pathlib.Path(path).mkdir(exist_ok=True, parents=True)
@@ -169,8 +169,15 @@ class Table(Base):
             if progress:
                 pbar_count.update()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
-            executor.map(download, files)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            try:
+                executor.map(download, files)
+            except KeyboardInterrupt:
+                executor.shutdown(wait=False, cancel_futures=True)
+
+        if progress:
+            pbar_count.close()
+            pbar_bytes.close()
 
     def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable="", progress=True):
         if limit and max_results is None:
