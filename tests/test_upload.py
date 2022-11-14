@@ -208,3 +208,21 @@ def test_streaming_after_upload():
         ],
     )
     upload.insert_rows(data, update_schema=False)
+
+def test_upload_raw_file():
+    dataset = util.create_test_dataset()
+    util.clear_test_data()
+    table = util.get_table().create(is_file_index=True)
+
+    with open("tests/data/tiny.csv", "rb") as f:
+        file = table.add_file(name="tiny.csv", data=f)
+        print(file)
+
+
+def test_upload_metadata():
+    dataset = util.create_test_dataset()
+    util.clear_test_data()
+    table = util.get_table().create()
+
+    with open("tests/data/tiny.csv", "rb") as f:
+        upload = table.upload("tiny.csv").create(f, metadata={"id": { "label": "foo", "description": "bar", "valueLabels": { "1": "hello world"}}})

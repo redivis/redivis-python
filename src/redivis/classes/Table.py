@@ -44,7 +44,7 @@ class Table(Base):
             **properties
         }
 
-    def create(self, *, description=None, upload_merge_strategy="append"):
+    def create(self, *, description=None, upload_merge_strategy="append", is_file_index=False):
         response = make_request(
             method="POST",
             path=f"{self.dataset.uri}/tables",
@@ -52,6 +52,7 @@ class Table(Base):
                 "name": self.name,
                 "description": description,
                 "uploadMergeStrategy": upload_merge_strategy,
+                "isFileIndex": is_file_index
             },
         )
         self.properties = response
@@ -121,6 +122,16 @@ class Table(Base):
             Variable(variable["name"], table=self, properties=variable)
             for variable in variables
         ]
+
+    def add_file(self, name, data):
+        response = make_request(
+            method="POST",
+            path=f"{self.uri}/rawFiles",
+            query={"name": name},
+            payload=data,
+            parse_payload=False
+        )
+        return File(response["id"], table=self, properties=response)
 
     def list_files(self, max_results=None, *, file_id_variable=None):
         if file_id_variable:
