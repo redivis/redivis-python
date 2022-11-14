@@ -42,6 +42,23 @@ class Variable(Base):
 
         return self
 
+    def update(self, *, label=None, description=None, value_labels=None):
+        payload = {}
+        if label is not None:
+            payload["label"] = label
+        if description is not None:
+            payload["description"] = description
+        if value_labels is not None:
+            payload["valueLabels"] = value_labels
+
+        response = make_request(
+            method="PATCH",
+            path=f"{self.uri}",
+            payload=payload,
+        )
+        self.properties = response
+        return
+
     def exists(self):
         try:
             make_request(method="GET", path=self.uri)
