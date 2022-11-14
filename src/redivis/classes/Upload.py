@@ -2,6 +2,7 @@ import time
 import re
 import math
 import os
+import json
 import logging
 import requests
 from urllib.parse import quote as quote_uri
@@ -45,23 +46,19 @@ class Upload(Base):
         type=None,
         delimiter=None,
         schema=None,
+        metadata=None,
         has_header_row=True,
         skip_bad_records=False,
-        allow_quoted_newlines=None,
         has_quoted_newlines=None,
-        quote_character='"',
+        quote_character=None,
+        rename_on_conflict=False,
+        replace_on_conflict=False,
+        allow_jagged_rows=False,
         if_not_exists=False,
         remove_on_fail=False,
         wait_for_finish=True,
         raise_on_fail=True,
     ):
-        if allow_quoted_newlines is not None and allow_quoted_newlines is None:
-            has_quoted_newlines = allow_quoted_newlines
-            warnings.warn(
-                "The parameter allow_quoted_newlines has been renamed to has_quoted_newlines. Please update your script to ensure future compatability.",
-                DeprecationWarning,
-            )
-
         data_is_file = False
         resumable_upload_id = None
 
@@ -86,25 +83,45 @@ class Upload(Base):
                 "The schema option is ignored for uploads that aren't of type `stream`"
             )
 
-        if if_not_exists and self.exists():
+        exists = self.exists()
+
+        if if_not_exists and exists:
             return self
+
+        if replace_on_conflict is True and rename_on_conflict is True:
+            raise Exception("Invalid parameters. replace_on_conflict and rename_on_conflict cannot both be True.")
+
+        if exists:
+            if replace_on_conflict is True:
+                self.delete()
+            elif rename_on_conflict is not True:
+                raise Exception(f"An upload with the name {self.name} already exists on this version of the table. If you want to upload this file anyway, set the parameter rename_on_conflict=True or replace_on_conflict=True.")
+
+        files = None
+        payload = {
+            "name": self.name,
+            "type": type,
+            "schema": schema,
+            "metadata": metadata,
+            "hasHeaderRow": has_header_row,
+            "skipBadRecords": skip_bad_records,
+            "hasQuotedNewlines": has_quoted_newlines,
+            "allowJaggedRows": allow_jagged_rows,
+            "quoteCharacter": quote_character,
+            "delimiter": delimiter,
+            "resumableUploadId": resumable_upload_id
+        }
+
+        if data is not None:
+            files={'metadata': json.dumps(payload), 'data': data}
+            payload=None
 
         response = make_request(
             method="POST",
             path=f"{self.table.uri}/uploads",
             parse_payload=data is None,
-            payload={
-                "name": self.name,
-                "type": type,
-                "schema": schema,
-                "hasHeaderRow": has_header_row,
-                "skipBadRecords": skip_bad_records,
-                "hasQuotedNewlines": has_quoted_newlines,
-                "quoteCharacter": quote_character,
-                "delimiter": delimiter,
-                "resumableUploadId": resumable_upload_id
-            },
-            files={'data': data} if data is not None else None
+            payload=payload,
+            files=files
         )
         self.properties = response
         self.uri = self.properties["uri"]
