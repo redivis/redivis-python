@@ -27,9 +27,11 @@ def test_upload_remove_on_failure():
     )
 
     table.upload(name="tiny.csv",).create(
+        data='a,b\n1,2\n3,"4\n5"',
+        remove_on_fail=True,
         type="delimited",
-        allow_quoted_newlines=False,
-    ).upload_file(data='a,b\n1,2\n3,"4\n5"', remove_on_fail=True)
+        has_quoted_newlines=False,
+    )
 
 
 def test_upload_string():
