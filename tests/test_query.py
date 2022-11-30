@@ -32,6 +32,17 @@ def test_query_list_rows():
     ).list_rows()
     print(rows)
 
+def test_query_empty_result():
+    query = redivis.query(
+        """
+            SELECT * FROM (
+                SELECT 1 + 1 AS val
+            )sub
+            WHERE FALSE
+        """
+    )
+    print(query.list_rows())
+    print(query.to_dataframe())
 
 def test_check_type_parsing():
     query = redivis.query(

@@ -2,7 +2,6 @@
 import pandas as pd
 from collections import namedtuple
 import pyarrow
-import geopandas
 from tqdm.auto import tqdm
 from ..common.api_request import make_request
 
@@ -62,10 +61,14 @@ def list_rows(
 
         return res
     else:
-        df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
-        df = set_dataframe_types(df, mapped_variables, geography_variable)
-        if len(df.index) > max_results:
-            return df.iloc[0:max_results, :]
+        if len(stream_results) > 0:
+            df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
+            df = set_dataframe_types(df, mapped_variables, geography_variable)
+            if len(df.index) > max_results:
+                return df.iloc[0:max_results, :]
+        else:
+            df = pd.DataFrame(columns=[variable["name"] for variable in mapped_variables])
+            df = set_dataframe_types(df, mapped_variables, geography_variable)
 
         if progress:
             progressbar.close()
@@ -119,6 +122,7 @@ def set_dataframe_types(df, variables, geography_variable=None):
             # Pandas seems to throw errors if all the boolean values are NA, in which case we should just ignore and fall back to a string dtype
             df[name] = df[name].astype("boolean", errors="ignore")
         elif type == "geography" and geography_variable is not None:
+            import geopandas
             if geography_variable == "":
                 geography_variable = name
             df[name] = geopandas.GeoSeries.from_wkt(df[name])
@@ -126,6 +130,7 @@ def set_dataframe_types(df, variables, geography_variable=None):
             df[name] = df[name].astype("string")
 
     if geography_variable:
+        import geopandas
         return geopandas.GeoDataFrame(data=df, geometry=geography_variable, crs="EPSG:4326")
     else:
         return df
