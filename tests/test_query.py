@@ -44,6 +44,14 @@ def test_query_empty_result():
     print(query.list_rows())
     print(query.to_dataframe())
 
+def test_query_underscore_variable_name():
+    query = redivis.query(
+        """
+            SELECT 1 + 1 AS _val
+        """
+    )
+    print(query.list_rows())
+
 def test_check_type_parsing():
     query = redivis.query(
         """

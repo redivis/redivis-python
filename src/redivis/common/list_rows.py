@@ -1,7 +1,7 @@
 
 import pandas as pd
-from collections import namedtuple
 import pyarrow
+from ..classes.Row import Row
 from tqdm.auto import tqdm
 from ..common.api_request import make_request
 
@@ -44,17 +44,17 @@ def list_rows(
             stream_results.append(pyarrow.Table.from_batches(batches).to_pandas())
 
     if type == "tuple":
-        Row = namedtuple(
-            "Row",
-            [variable["name"] for variable in mapped_variables],
-        )
+        variable_name_to_index = {}
+        for index, variable in enumerate(mapped_variables):
+            variable_name_to_index[variable["name"]]=index
+
         res = []
         for pydict in stream_results:
             keys = list(pydict.keys())
             for i in range(len(pydict[keys[0]])):
                 if len(res) == max_results:
                     break
-                res.append(Row(*[format_tuple_type(pydict[variable["name"]][i], variable["type"]) if variable["name"] in pydict else None for variable in mapped_variables]))
+                res.append(Row([format_tuple_type(pydict[variable["name"]][i], variable["type"]) if variable["name"] in pydict else None for variable in mapped_variables], variable_name_to_index))
 
         if progress:
             progressbar.close()
@@ -134,3 +134,4 @@ def set_dataframe_types(df, variables, geography_variable=None):
         return geopandas.GeoDataFrame(data=df, geometry=geography_variable, crs="EPSG:4326")
     else:
         return df
+
