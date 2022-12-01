@@ -76,4 +76,4 @@ def populate_test_data(data_file_name="tiny.csv"):
         with open(
             os.path.join(os.path.dirname(__file__), f"../data/{data_file_name}"), "rb"
         ) as f:
-            table.upload(name=data_file_name).create().upload_file(data=f)
+            table.upload(name=data_file_name).create(data=f)

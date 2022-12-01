@@ -41,7 +41,7 @@ class Row(object):
                 The ``(key, value)`` pairs representing this row.
         """
         for key, index in self.__redivis_hidden_variable_name_to_index.items():
-            yield key, copy.deepcopy(self.__redivis_hidden_values[index])
+            yield key, self.__redivis_hidden_values[index]
 
     def get(self, key: str) -> Any:
         """Return a value for key, with a default value if it does not exist.
@@ -85,7 +85,12 @@ class Row(object):
         return not self == other
 
     def __repr__(self):
-        # sort field dict by value, for determinism
-        items = sorted(self.__redivis_hidden_variable_name_to_index.items(), key=operator.itemgetter(1))
-        f2i = "{" + ", ".join("%r: %d" % item for item in items) + "}"
-        return "Row({}, {})".format(self.__redivis_hidden_values, f2i)
+        column_index_to_variable_name = {}
+        for variable_name in self.__redivis_hidden_variable_name_to_index.keys():
+            column_index_to_variable_name[self.__redivis_hidden_variable_name_to_index[variable_name]]=variable_name
+        cells = []
+        for index, value in enumerate(self.__redivis_hidden_values):
+            cells.append(f"{column_index_to_variable_name[index]}: {value}")
+
+        f2i = "{" + ", ".join(cells) + "}"
+        return f"Row({f2i})"
