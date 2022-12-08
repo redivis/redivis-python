@@ -12,10 +12,9 @@ def test_linebreaks_in_cell():
 
     with open("tests/data/line_breaks.csv", "rb") as f:
         table.upload(name="test.csv",).create(
+            data=f,
             type="delimited",
             has_quoted_newlines=True,
-        ).upload_file(
-            data=f,
         )
 
 
