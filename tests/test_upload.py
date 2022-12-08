@@ -13,7 +13,7 @@ def test_linebreaks_in_cell():
     with open("tests/data/line_breaks.csv", "rb") as f:
         table.upload(name="test.csv",).create(
             type="delimited",
-            allow_quoted_newlines=True,
+            has_quoted_newlines=True,
         ).upload_file(
             data=f,
         )
@@ -44,9 +44,19 @@ def test_upload_string():
     table.upload(name="tiny.csv",).create(
         data='a,b\n1,2\n3,"4\n5"',
         type="delimited",
-        allow_quoted_newlines=True,
+        has_quoted_newlines=True,
     )
 
+def test_upload_large_string():
+    dataset = util.create_test_dataset()
+    util.clear_test_data()
+    table = util.get_table().create(
+        description="Some info", upload_merge_strategy="replace"
+    )
+
+    with open("tests/data/us_counties_500k.geojson", "rb") as f:
+        data = f.read()
+        table.upload(name="us_counties_500k.geojson").create(data=data, wait_for_finish=True)
 
 def test_upload_and_release():
     dataset = util.create_test_dataset()
@@ -64,7 +74,7 @@ def test_upload_and_release():
     table = dataset.table(util.get_table_name())
 
     with open("tests/data/tiny.csv", "rb") as f:
-        table.upload(name="tiny.csv", type="delimited", data=f)
+        table.upload(name="tiny.csv", type="delimited").create(data=f)
 
     dataset.release()
 
@@ -135,8 +145,8 @@ def test_resumable_upload():
     table = util.get_table()
     table.create(description="Some info", upload_merge_strategy="replace")
 
-    with open(os.path.join(os.path.dirname(__file__), "data/wide_test.csv"), "rb") as f:
-        table.upload(name="local.csv", type="delimited", data=f)
+    with open(os.path.join(os.path.dirname(__file__), "us_counties_500k.geojson"), "rb") as f:
+        table.upload(name="us_counties_500k.geojson", type="geojson", data=f)
 
     print(table.upload("local.csv").to_dataframe(100))
 

@@ -264,7 +264,7 @@ class Table(Base):
                 type=type,
                 has_header_row=has_header_row,
                 skip_bad_records=skip_bad_records,
-                allow_quoted_newlines=allow_quoted_newlines,
+                has_quoted_newlines=allow_quoted_newlines,
                 quote_character=quote_character,
                 delimiter=delimiter,
             )

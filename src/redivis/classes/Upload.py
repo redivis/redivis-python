@@ -59,23 +59,21 @@ class Upload(Base):
         wait_for_finish=True,
         raise_on_fail=True,
     ):
-        data_is_file = False
         resumable_upload_id = None
 
-        if data:
-            data_is_file = hasattr(data, "read")
-
-        if data and data_is_file:
-            if os.stat(data.name).st_size > 1e7:
-                resumable_upload_id = self.upload_file(
-                    data,
-                    remove_on_fail=remove_on_fail,
-                    wait_for_finish=wait_for_finish,
-                    raise_on_fail=raise_on_fail,
-                    use_legacy_endpoint=False
-                )
-                data = None
-        elif data:
+        if data and (
+            (hasattr(data, "read") and os.stat(data.name).st_size > 1e7)
+            or (hasattr(data, "__len__") and len(data) > 1e7)
+        ):
+            resumable_upload_id = self.upload_file(
+                data,
+                remove_on_fail=remove_on_fail,
+                wait_for_finish=wait_for_finish,
+                raise_on_fail=raise_on_fail,
+                use_legacy_endpoint=False
+            )
+            data = None
+        elif data and not hasattr(data, "read"):
             data = io.StringIO(data)
 
         if schema and type != "stream":

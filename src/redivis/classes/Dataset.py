@@ -110,10 +110,15 @@ class Dataset(Base):
         return Query(query, default_dataset=self.identifier)
 
     def release(self):
-        make_request(
+        res = make_request(
             method="POST",
             path=f"{self.uri}/versions/next/release",
         )
+        self.version = f'v{res["tag"]}'
+        self.identifier = (
+            f"{(self.organization or self.user).name}.{self.name}:{self.version}"
+        )
+        self.uri = f"/datasets/{quote_uri(self.identifier, '')}"
         return Dataset(
             name=self.name,
             user=self.user,
