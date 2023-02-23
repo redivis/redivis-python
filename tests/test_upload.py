@@ -32,6 +32,16 @@ def test_upload_remove_on_failure():
         has_quoted_newlines=False,
     )
 
+def test_external_transfer():
+    dataset = util.create_test_dataset()
+    util.clear_test_data()
+    table = util.get_table().create(
+        description="Some info", upload_merge_strategy="replace"
+    )
+
+    table.upload(name="test.csv", ).create(
+        transfer_specification={"sourceType": "gcs", "sourcePath": "redivis-data-dev/test.csv.gz", "identity": "iaan@redivis.com"},
+    )
 
 def test_upload_string():
     dataset = util.create_test_dataset()

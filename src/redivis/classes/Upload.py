@@ -44,6 +44,7 @@ class Upload(Base):
         data=None, # Old versions of the library didn't accept this param, and instead use the upload_file interface
         *,
         type=None,
+        transfer_specification=None,
         delimiter=None,
         schema=None,
         metadata=None,
@@ -107,7 +108,8 @@ class Upload(Base):
             "allowJaggedRows": allow_jagged_rows,
             "quoteCharacter": quote_character,
             "delimiter": delimiter,
-            "resumableUploadId": resumable_upload_id
+            "resumableUploadId": resumable_upload_id,
+            "transferSpecification": transfer_specification
         }
 
         if data is not None:
@@ -125,7 +127,7 @@ class Upload(Base):
         self.uri = self.properties["uri"]
 
         try:
-            if (data or resumable_upload_id) and wait_for_finish:
+            if (data or resumable_upload_id or transfer_specification) and wait_for_finish:
                 while True:
                     time.sleep(2)
                     self.get()
