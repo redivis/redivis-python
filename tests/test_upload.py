@@ -118,6 +118,15 @@ def test_streaming_upload():
     print(table.list_rows())
     print(upload.list_rows())
 
+def test_redivis_upload():
+    util.create_test_dataset()
+    util.clear_test_data()
+
+    table = util.get_table()
+
+    table.create(description="Some info", upload_merge_strategy="replace")
+    upload = table.upload(name="test")
+    upload.create(transfer_specification={"sourceType":'redivis', "sourcePath":"demo.novel_corona_virus_2019_dataset.covid_19_data"})
 
 def test_streaming_schema_upload():
     util.create_test_dataset()

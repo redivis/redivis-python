@@ -41,7 +41,7 @@ class Upload(Base):
 
     def create(
         self,
-        data=None, # Old versions of the library didn't accept this param, and instead use the upload_file interface
+        data=None,
         *,
         type=None,
         transfer_specification=None,
@@ -66,21 +66,13 @@ class Upload(Base):
             (hasattr(data, "read") and os.stat(data.name).st_size > 1e7)
             or (hasattr(data, "__len__") and len(data) > 1e7)
         ):
-            resumable_upload_id = self.upload_file(
-                data,
-                remove_on_fail=remove_on_fail,
-                wait_for_finish=wait_for_finish,
-                raise_on_fail=raise_on_fail,
-                use_legacy_endpoint=False
-            )
+            resumable_upload_id = upload_file(data, self.table.uri)
             data = None
         elif data and not hasattr(data, "read"):
             data = io.StringIO(data)
 
         if schema and type != "stream":
-            warnings.warn(
-                "The schema option is ignored for uploads that aren't of type `stream`"
-            )
+            warnings.warn("The schema option is ignored for uploads that aren't of type `stream`")
 
         exists = self.exists()
 
@@ -226,113 +218,67 @@ class Upload(Base):
             progress=progress
         )
 
-    def upload_file(
-        self,
-        data,
-        *,
-        remove_on_fail=False,
-        wait_for_finish=True,
-        raise_on_fail=True,
-        #     TODO: remove in 1.0
-        use_legacy_endpoint=True
-    ):
-        try:
-            start_byte = 0
-            retry_count = 0
-            chunk_size = MAX_CHUNK_SIZE
-            is_file = True if hasattr(data, "read") else False
-            file_size = os.stat(data.name).st_size if is_file else len(data)
-            resumable_upload_id = None
-
-            if use_legacy_endpoint:
-                res = make_request(
-                    path=f"{self.uri}/resumableUri",
-                    method="POST",
-                    payload={"size": file_size},
-                )
-                resumable_uri = res["uri"]
-            else:
-                res = make_request(
-                    path=f"{self.table.uri}/resumableUpload",
-                    method="POST",
-                    payload={"size": file_size},
-                )
-                resumable_uri = res["url"]
-                resumable_upload_id = res["id"]
-
-            while start_byte < file_size:
-                end_byte = min(start_byte + chunk_size - 1, file_size - 1)
-                if is_file:
-                    data.seek(start_byte)
-                    chunk = data.read(end_byte - start_byte + 1)
-                else:
-                    chunk = data[start_byte : end_byte + 1]
-
-                try:
-                    res = requests.put(
-                        url=resumable_uri,
-                        headers={
-                            "Content-Length": f"{end_byte - start_byte + 1}",
-                            "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
-                        },
-                        data=chunk,
-                    )
-                    res.raise_for_status()
-
-                    start_byte += chunk_size
-
-                    if use_legacy_endpoint:
-                        make_request(
-                            path=self.uri,
-                            method="PATCH",
-                            payload={"percentCompleted": (end_byte + 1) / file_size * 100},
-                        )
-                    retry_count = 0
-                except Exception as e:
-                    if retry_count > 20:
-                        print(
-                            "A network error occurred. Upload failed after too many retries."
-                        )
-
-                        if use_legacy_endpoint:
-                            self.properties = make_request(
-                                path=self.uri,
-                                method="PATCH",
-                                payload={
-                                    "errorMessage": "A network error occurred. Upload failed after too many retries."
-                                },
-                            )
-
-                        raise e
-
-                    retry_count += 1
-                    time.sleep(retry_count)
-                    print("An error occurred. Retrying last chunk of resumable upload")
-                    start_byte = retry_partial_upload(
-                        file_size=file_size, resumable_uri=resumable_uri
-                    )
-            if wait_for_finish and use_legacy_endpoint:
-                while True:
-                    time.sleep(2)
-                    self.get()
-                    if self["status"] == "completed" or self["status"] == "failed":
-                        if self["status"] == "failed" and raise_on_fail:
-                            raise Exception(self["errorMessage"])
-                        break
-                    else:
-                        logging.debug("Upload is still in progress...")
-            elif use_legacy_endpoint == False:
-                return resumable_upload_id
-
-        except Exception as e:
-            if remove_on_fail and use_legacy_endpoint:
-                self.delete()
-            raise Exception(str(e))
-        return
-
     def variable(self, name):
         return Variable(name, upload=self)
 
+
+def upload_file(data, table_uri):
+    start_byte = 0
+    retry_count = 0
+    chunk_size = MAX_CHUNK_SIZE
+    did_reopen_file = False
+    is_file = True if hasattr(data, "read") else False
+    file_size = os.stat(data.name).st_size if is_file else len(data)
+
+    if (is_file and hasattr(data, 'mode') and 'b' not in data.mode):
+        data = open(data.name, 'rb')
+        did_reopen_file = True
+
+    res = make_request(
+        path=f"{table_uri}/resumableUpload",
+        method="POST",
+        payload={"size": file_size},
+    )
+    resumable_uri = res["url"]
+    resumable_upload_id = res["id"]
+
+    while start_byte < file_size:
+        end_byte = min(start_byte + chunk_size - 1, file_size - 1)
+        if is_file:
+            data.seek(start_byte)
+            chunk = data.read(end_byte - start_byte + 1)
+        else:
+            chunk = data[start_byte : end_byte + 1]
+
+        try:
+            res = requests.put(
+                url=resumable_uri,
+                headers={
+                    "Content-Length": f"{end_byte - start_byte + 1}",
+                    "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
+                },
+                data=chunk,
+            )
+            res.raise_for_status()
+
+            start_byte += chunk_size
+            retry_count = 0
+        except Exception as e:
+            if retry_count > 20:
+                print("A network error occurred. Upload failed after too many retries.")
+                raise e
+
+            retry_count += 1
+            time.sleep(retry_count)
+            print("A network error occurred. Retrying last chunk of resumable upload.")
+            start_byte = retry_partial_upload(
+                file_size=file_size, resumable_uri=resumable_uri
+            )
+
+    if did_reopen_file:
+        data.close()
+
+    return resumable_upload_id
 
 def retry_partial_upload(*, retry_count=0, file_size, resumable_uri):
     logging.debug("Attempting to resume upload")
@@ -340,7 +286,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_uri):
     try:
         res = requests.put(
             url=resumable_uri,
-            headers={"Content-Range": f"bytes */{file_size}"},
+            headers={"Content-Length": "0", "Content-Range": f"bytes */{file_size}"},
         )
 
         if res.status_code == 404:
@@ -366,6 +312,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_uri):
         if retry_count > 10:
             raise e
 
+        time.sleep(retry_count / 10)
         retry_partial_upload(
             retry_count=retry_count + 1,
             file_size=file_size,
