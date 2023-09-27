@@ -26,7 +26,7 @@ class Notebook(Base):
                     geography_variables = list(data.select_dtypes('geometry'))
                 data = data.to_wkt()
 
-            data.to_parquet(path=temp_file_path)
+            data.to_parquet(path=temp_file_path, index=False)
 
         with open(temp_file_path, 'rb') as f:
             res = make_request(
