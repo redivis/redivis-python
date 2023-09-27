@@ -5,7 +5,7 @@ import util
 def test_run_global_query():
     util.populate_test_data()
     query = redivis.query(
-        f"SELECT * EXCEPT(__isUpload) FROM `{util.get_user_name()}.{util.get_dataset_name()}:next.{util.get_table_name()}` LIMIT 100"
+        f"SELECT * EXCEPT(_upload_name) FROM `{util.get_user_name()}.{util.get_dataset_name()}:next.{util.get_table_name()}` LIMIT 100"
     )
     print(query.list_rows(max_results=10))
     print(query.to_dataframe(max_results=10))
@@ -14,13 +14,12 @@ def test_run_global_query():
 
 def test_run_scoped_query():
     query = util.get_dataset().query(
-        f"SELECT * EXCEPT(__isUpload) FROM `{util.get_table_name()}` LIMIT 100"
+        f"SELECT * EXCEPT(__upload_name) FROM `{util.get_table_name()}` LIMIT 100"
     )
 
     print(query.list_rows(max_results=10))
     print(query.to_dataframe(max_results=10))
     assert True
-
 
 def test_query_list_rows():
     rows = redivis.query(
