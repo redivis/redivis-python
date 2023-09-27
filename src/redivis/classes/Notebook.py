@@ -32,7 +32,7 @@ class Notebook(Base):
             res = make_request(
                 method="PUT",
                 path=f"/notebookJobs/{self.current_notebook_job_id}/outputTable",
-                query={"name": name, "append": append, geography_variables: geography_variables},
+                query={"name": name, "append": append, "geography_variables": geography_variables},
                 payload=f,
                 parse_payload=False
             )
