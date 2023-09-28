@@ -1,6 +1,7 @@
 
 import pandas as pd
 import pyarrow
+import polars
 from ..classes.Row import Row
 from tqdm.auto import tqdm
 from ..common.api_request import make_request
@@ -27,9 +28,12 @@ def list_rows(
         arrow_response = make_request(
             method="get",
             path=f'/readStreams/{stream["id"]}',
-            stream=True,
+            # stream=True,
             parse_response=False,
         )
+
+        return arrow_response
+        # return polars.read_ipc_stream(source=arrow_response.raw, n_rows=max_results, use_pyarrow=True)
 
         reader = pyarrow.ipc.open_stream(arrow_response.raw)
         batches = []
