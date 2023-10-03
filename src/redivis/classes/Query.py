@@ -1,9 +1,13 @@
-from ..common.api_request import make_request
 from .Base import Base
 import os
 import time
-from ..common.list_rows import list_rows
 import warnings
+import pyarrow as pa
+import pandas as pd
+
+from ..common.api_request import make_request
+from ..common.list_rows import list_rows
+from ..common.util import get_geography_variable
 
 
 class Query(Base):
@@ -35,55 +39,110 @@ class Query(Base):
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def list_rows(self, max_results=None, *, limit=None, progress=True):
-        if limit and max_results is None:
-            warnings.warn(
-                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
-                DeprecationWarning,
-            )
-            max_results = limit
-
+    def to_arrow_dataset(self, max_results=None, *, progress=True):
         self._wait_for_finish()
-        variables = self.properties["outputSchema"]
-
-        max_results = (
-            min(max_results, int(self.properties["outputNumRows"]))
-            if max_results is not None
-            else self.properties["outputNumRows"]
-        )
 
         return list_rows(
             uri=self.uri,
-            max_results=max_results,
-            mapped_variables=variables,
-            type="tuple",
-            progress=progress
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
+                self.properties["outputNumRows"])),
+            mapped_variables=self.properties["outputSchema"],
+            output_type="arrow_dataset",
+            progress=progress,
+            coerce_schema=False
         )
 
-    def to_dataframe(self, max_results=None, *, limit=None, geography_variable="", progress=True):
-        if limit and max_results is None:
-            warnings.warn(
-                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
-                DeprecationWarning,
-            )
-            max_results = limit
-
+    def to_arrow_table(self, max_results=None, *, progress=True):
         self._wait_for_finish()
-        variables = self.properties["outputSchema"]
-
-        max_results = (
-            min(max_results, int(self.properties["outputNumRows"]))
-            if max_results is not None
-            else self.properties["outputNumRows"]
-        )
 
         return list_rows(
             uri=self.uri,
-            max_results=max_results,
-            mapped_variables=variables,
-            type="dataframe",
-            geography_variable=geography_variable,
-            progress=progress
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
+                self.properties["outputNumRows"])),
+            mapped_variables=self.properties["outputSchema"],
+            output_type="arrow_table",
+            progress=progress,
+            coerce_schema=False
+        )
+
+    def to_polars_lazyframe(self, max_results=None, *, progress=True):
+        self._wait_for_finish()
+
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
+                self.properties["outputNumRows"])),
+            mapped_variables=self.properties["outputSchema"],
+            output_type="polars_lazyframe",
+            progress=progress,
+            coerce_schema=False
+        )
+
+    def to_dask_dataframe(self, max_results=None, *, progress=True):
+        self._wait_for_finish()
+
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
+                self.properties["outputNumRows"])),
+            mapped_variables=self.properties["outputSchema"],
+            output_type="dask_dataframe",
+            progress=progress,
+            coerce_schema=False
+        )
+
+    def to_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend=None, date_as_object=False):
+        if dtype_backend is None:
+            warnings.warn("No dtype_backend was provided: it is highly recommended to specify dtype_backend=pyarrow to reduce memory usage and improve performance. This may become the default in the future.", DeprecationWarning)
+
+        self._wait_for_finish()
+
+        arrow_table = list_rows(
+            uri=self.uri,
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(self.properties["outputNumRows"])),
+            mapped_variables=self.properties["outputSchema"],
+            output_type="arrow_table",
+            progress=progress,
+            coerce_schema=False
+        )
+
+        if dtype_backend == 'numpy_nullable':
+            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
+                pa.int64(): pd.Int64Dtype(),
+                pa.bool_(): pd.BooleanDtype(),
+                pa.float64(): pd.Float64Dtype(),
+                pa.string(): pd.StringDtype(),
+            }.get)
+        elif dtype_backend == 'pyarrow':
+            df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
+        elif dtype_backend is None:
+            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
+        else:
+            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|None")
+
+        if geography_variable is not None:
+            geography_variable = get_geography_variable(self.properties["outputSchema"], geography_variable)
+
+        if geography_variable is not None:
+            import geopandas
+            df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(df[geography_variable["name"]])
+            df = geopandas.GeoDataFrame(data=df, geometry=geography_variable["name"], crs="EPSG:4326")
+
+        return df
+
+    def list_rows(self, max_results=None, *, progress=True):
+        warnings.warn("The list_rows method is deprecated. Please use query.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", DeprecationWarning)
+
+        self._wait_for_finish()
+
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
+                self.properties["outputNumRows"])),
+            mapped_variables=self.properties["outputSchema"],
+            output_type="tuple",
+            progress=progress,
+            coerce_schema=False
         )
 
     def _wait_for_finish(self):

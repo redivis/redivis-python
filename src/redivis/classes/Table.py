@@ -4,6 +4,8 @@ import warnings
 import os
 import concurrent.futures
 import pathlib
+import pyarrow as pa
+import pandas as pd
 from tqdm.auto import tqdm
 
 from .Upload import Upload
@@ -11,6 +13,7 @@ from .Variable import Variable
 from .File import File
 from ..common.list_rows import list_rows
 from ..common.api_request import make_request, make_paginated_request
+from ..common.util import get_geography_variable
 
 
 class Table(Base):
@@ -79,34 +82,6 @@ class Table(Base):
             if err.args[0]["status"] != 404:
                 raise err
             return False
-
-    def list_rows(self, max_results=None, *, limit=None, variables=None, progress=True):
-        if limit and max_results is None:
-            warnings.warn(
-                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
-                DeprecationWarning,
-            )
-            max_results = limit
-
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
-        max_results = (
-            min(max_results, int(self.properties["numRows"]))
-            if max_results is not None
-            else self.properties["numRows"]
-        )
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            type="tuple",
-            progress=progress
-        )
 
     def list_uploads(self, *, max_results=None):
         uploads = make_paginated_request(
@@ -190,32 +165,130 @@ class Table(Base):
             pbar_count.close()
             pbar_bytes.close()
 
-    def to_dataframe(self, max_results=None, *, limit=None, variables=None, geography_variable="", progress=True):
-        if limit and max_results is None:
-            warnings.warn(
-                "The limit parameter has been renamed to max_results, and will be removed in a future version of this library",
-                DeprecationWarning,
-            )
-            max_results = limit
+    def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True, target_parallelization = None):
+        if not self.properties or not hasattr(self.properties, "numRows"):
+            self.get()
+
+        mapped_variables = get_mapped_variables(variables, self.uri)
+
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            selected_variables=variables,
+            mapped_variables=mapped_variables,
+            output_type="arrow_dataset",
+            progress=progress,
+            target_parallelization=target_parallelization,
+            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
+        )
+
+    def to_arrow_table(self, max_results=None, *, variables=None, progress=True):
+        if not self.properties or not hasattr(self.properties, "numRows"):
+            self.get()
+
+        mapped_variables = get_mapped_variables(variables, self.uri)
+
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            selected_variables=variables,
+            mapped_variables=mapped_variables,
+            output_type="arrow_table",
+            progress=progress,
+            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
+        )
+
+    def to_polars_lazyframe(self, max_results=None, *, variables=None, progress=True):
+        if not self.properties or not hasattr(self.properties, "numRows"):
+            self.get()
+
+        mapped_variables = get_mapped_variables(variables, self.uri)
+
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            selected_variables=variables,
+            mapped_variables=mapped_variables,
+            output_type="polars_lazyframe",
+            progress=progress,
+            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
+        )
+
+    def to_dask_dataframe(self, max_results=None, *, variables=None, progress=True):
+        if not self.properties or not hasattr(self.properties, "numRows"):
+            self.get()
+
+        mapped_variables = get_mapped_variables(variables, self.uri)
+
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            selected_variables=variables,
+            mapped_variables=mapped_variables,
+            output_type="dask_dataframe",
+            progress=progress,
+            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
+        )
+
+    def to_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True, dtype_backend=None, date_as_object=False):
+        if dtype_backend is None:
+            warnings.warn("No dtype_backend was provided: it is highly recommended to specify dtype_backend=pyarrow to reduce memory usage and improve performance. This may become the default in the future.", DeprecationWarning)
 
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
-        max_results = (
-            min(max_results, int(self.properties["numRows"]))
-            if max_results is not None
-            else self.properties["numRows"]
+        mapped_variables = get_mapped_variables(variables, self.uri)
+        arrow_table = list_rows(
+            uri=self.uri,
+            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            selected_variables=variables,
+            mapped_variables=mapped_variables,
+            output_type="arrow_table",
+            progress=progress,
+            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
+                "kind"] == 'dataset'
         )
+
+        if dtype_backend == 'numpy_nullable':
+            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
+                pa.int64(): pd.Int64Dtype(),
+                pa.bool_(): pd.BooleanDtype(),
+                pa.float64(): pd.Float64Dtype(),
+                pa.string(): pd.StringDtype(),
+            }.get)
+        elif dtype_backend == 'pyarrow':
+            df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
+        elif dtype_backend is None:
+            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
+        else:
+            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|None")
+
+        if geography_variable is not None:
+            geography_variable = get_geography_variable(mapped_variables, geography_variable)
+
+        if geography_variable is not None:
+            import geopandas
+            df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(df[geography_variable["name"]])
+            df = geopandas.GeoDataFrame(data=df, geometry=geography_variable["name"], crs="EPSG:4326")
+
+        return df
+
+
+    def list_rows(self, max_results=None, *, limit=None, variables=None, progress=True):
+        warnings.warn("The list_rows method is deprecated. Please use table.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", DeprecationWarning)
+
+        if not self.properties or not hasattr(self.properties, "numRows"):
+            self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
         return list_rows(
             uri=self.uri,
-            max_results=max_results,
+            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
             selected_variables=variables,
             mapped_variables=mapped_variables,
-            geography_variable=geography_variable,
-            type="dataframe",
-            progress=progress
+            type="tuple",
+            progress=progress,
+            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
         )
 
     def update(self, *, name=None, description=None, upload_merge_strategy=None):

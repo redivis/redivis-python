@@ -1,13 +1,18 @@
-
-import pandas as pd
+import concurrent.futures
+import multiprocessing as mp
 import pyarrow
+import pyarrow.dataset as pyarrow_dataset # need to import separately, it's not on the pyarrow import
+import tempfile
+import uuid
 import polars
+import pathlib
 from ..classes.Row import Row
 from tqdm.auto import tqdm
+import shutil
 from ..common.api_request import make_request
 
 def list_rows(
-    *, uri, type="tuple", max_results=None, selected_variables=None, mapped_variables=None, geography_variable=None, progress=True
+    *, uri, output_type="dataframe", max_results=None, selected_variables=None, mapped_variables=None, target_parallelization=None, progress=True, coerce_schema
 ):
     read_session = make_request(
         method="post",
@@ -16,67 +21,131 @@ def list_rows(
         payload={
             "selectedVariables": selected_variables,
             "maxResults": max_results,
-            "format": "arrow"
+            "format": "arrow",
+            "requestedStreamCount": min(mp.cpu_count(), 16) if target_parallelization is None else target_parallelization
         },
     )
 
+    folder = f'/{tempfile.gettempdir()}/redivis/tables/{uuid.uuid4()}'
+    pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+
+    progressbar = None
     if progress:
         progressbar = tqdm(total=max_results, leave=False)
 
-    stream_results = []
-    for stream in read_session["streams"]:
-        arrow_response = make_request(
-            method="get",
-            path=f'/readStreams/{stream["id"]}',
-            # stream=True,
-            parse_response=False,
+    # Code to use multiprocess... doesn't seem to give us any advantage, and progress doesn't currently work
+    # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(read_session["streams"])) as executor:
+        for stream in read_session["streams"]:
+            executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar)
+
+    if progress:
+        progressbar.close()
+
+    arrow_dataset = pyarrow_dataset.dataset(folder, format="feather", schema = pyarrow.schema(map(variable_to_field, mapped_variables)))
+
+    if output_type == 'arrow_dataset':
+        return arrow_dataset
+    elif output_type == 'polars_lazyframe':
+        return polars.scan_ipc(f'{folder}/*', memory_map=True)
+    elif output_type == 'dask_dataframe':
+        import dask.dataframe as dd
+        # TODO: simplify once dask supports reading from feather: https://github.com/dask/dask/issues/6865
+        parquet_base_dir = f'/{tempfile.gettempdir()}/redivis/tables/{uuid.uuid4()}'
+        pyarrow_dataset.write_dataset(arrow_dataset, parquet_base_dir, format='parquet')
+        shutil.rmtree(folder)
+        return dd.read_parquet(parquet_base_dir, dtype_backend='pyarrow')
+    else:
+        # TODO: remove head() once BE is sorted, instead use dataset.to_table()
+        arrow_table = pyarrow_dataset.Scanner.from_dataset(arrow_dataset).head(max_results)
+        shutil.rmtree(folder)
+        if output_type == 'arrow_table':
+            return arrow_table
+        elif output_type == 'tuple':
+            variable_name_to_index = {}
+            for index, variable in enumerate(mapped_variables):
+                variable_name_to_index[variable["name"]] = index
+
+            pydict = arrow_table.to_pydict()
+            keys = list(pydict.keys())
+
+            return [
+                Row([pydict[variable["name"]][i] for variable in mapped_variables], variable_name_to_index)
+                for i in range(len(pydict[keys[0]]))
+            ]
+
+
+def variable_to_field(variable):
+    if variable["type"] == 'string' or variable["type"] == 'geography':
+        return pyarrow.field(variable["name"], pyarrow.string())
+    elif variable["type"] == 'integer':
+        return pyarrow.field(variable["name"], pyarrow.int64())
+    elif variable["type"] == 'float':
+        return pyarrow.field(variable["name"], pyarrow.float64())
+    elif variable["type"] == 'date':
+        return pyarrow.field(variable["name"], pyarrow.date32())
+    elif variable["type"] == 'dateTime':
+        return pyarrow.field(variable["name"], pyarrow.timestamp('us'))
+    elif variable["type"] == 'time':
+        return pyarrow.field(variable["name"], pyarrow.time64('us'))
+    elif variable["type"] == 'boolean':
+        return pyarrow.field(variable["name"], pyarrow.bool_())
+
+
+def coerce_string_variable(pyarrow_array, variable):
+    if variable["type"] == 'string' or variable["type"] == 'geography':
+        return pyarrow_array
+    elif variable["type"] == 'integer':
+        return pyarrow.compute.cast(pyarrow_array, pyarrow.int64())
+    elif variable["type"] == 'float':
+        return pyarrow.compute.cast(pyarrow_array, pyarrow.float64())
+    elif variable["type"] == 'date':
+        return pyarrow.compute.cast(pyarrow.compute.cast(pyarrow_array, pyarrow.timestamp('us')), pyarrow.date32())
+    elif variable["type"] == 'dateTime':
+        return pyarrow.compute.cast(pyarrow_array, pyarrow.timestamp('us'))
+    elif variable["type"] == 'time':
+        return pyarrow.compute.cast(
+            pyarrow.compute.cast(
+                pyarrow.compute.utf8_replace_slice(pyarrow_array,start=0,stop=0,replacement='2020-01-01T'),
+                pyarrow.timestamp('us')
+            ),
+            pyarrow.time64('us')
         )
 
-        return arrow_response
-        # return polars.read_ipc_stream(source=arrow_response.raw, n_rows=max_results, use_pyarrow=True)
+    elif variable["type"] == 'boolean':
+        return pyarrow.compute.cast(pyarrow_array, pyarrow.bool_())
 
-        reader = pyarrow.ipc.open_stream(arrow_response.raw)
-        batches = []
+
+def process_stream(stream,folder, mapped_variables, coerce_schema, progressbar):
+    arrow_response = make_request(
+        method="get",
+        path=f'/readStreams/{stream["id"]}',
+        stream=True,
+        parse_response=False,
+    )
+
+    reader = pyarrow.ipc.RecordBatchStreamReader(arrow_response.raw)
+
+    if coerce_schema:
+        variables_in_stream = list(map(lambda field_name: next(x for x in mapped_variables if x["name"] == field_name), reader.schema.names))
+        output_schema = pyarrow.schema(map(variable_to_field, variables_in_stream))
+    else:
+        output_schema = reader.schema
+
+    with open(f"{folder}/{stream['id']}", "wb") as f:
+        writer = pyarrow.ipc.RecordBatchFileWriter(f, output_schema)
         for batch in reader:
-            batches.append(batch)
-            if progress:
+            if coerce_schema:
+                batch = pyarrow.RecordBatch.from_arrays(list(map(coerce_string_variable, batch.columns, variables_in_stream)), schema=output_schema)
+
+            writer.write_batch(batch)
+
+            if progressbar is not None:
                 progressbar.update(batch.num_rows)
 
-        if type == "tuple":
-            stream_results.append(pyarrow.Table.from_batches(batches).to_pydict())
-        else:
-            stream_results.append(pyarrow.Table.from_batches(batches).to_pandas())
+        writer.close()
 
-    if type == "tuple":
-        variable_name_to_index = {}
-        for index, variable in enumerate(mapped_variables):
-            variable_name_to_index[variable["name"]]=index
-
-        res = []
-        for pydict in stream_results:
-            keys = list(pydict.keys())
-            for i in range(len(pydict[keys[0]])):
-                if len(res) == max_results:
-                    break
-                res.append(Row([format_tuple_type(pydict[variable["name"]][i], variable["type"]) if variable["name"] in pydict else None for variable in mapped_variables], variable_name_to_index))
-
-        if progress:
-            progressbar.close()
-
-        return res
-    else:
-        if len(stream_results) > 0:
-            df = pd.concat(stream_results) if len(stream_results) > 1 else stream_results[0]
-            df = set_dataframe_types(df, mapped_variables, geography_variable)
-            if len(df.index) > max_results:
-                return df.iloc[0:max_results, :]
-        else:
-            df = pd.DataFrame(columns=[variable["name"] for variable in mapped_variables])
-            df = set_dataframe_types(df, mapped_variables, geography_variable)
-
-        if progress:
-            progressbar.close()
-        return df
+    reader.close()
 
 
 def format_tuple_type(val, type):
@@ -97,45 +166,4 @@ def format_tuple_type(val, type):
     else:
         return str(val)
 
-
-def set_dataframe_types(df, variables, geography_variable=None):
-    for variable in variables:
-        name = variable["name"]
-        type = variable["type"]
-
-        if name not in df.columns:
-            continue
-
-        # TODO: need to finalize what types we're returning
-        if type == "integer":
-            df[name] = pd.to_numeric(df[name])
-            # df[name] = df[name].astype("Int64")
-        elif type == "float":
-            df[name] = df[name].astype("float64")
-            # df[name] = df[name].astype("Float64")
-        elif type == "date":
-            df[name] = pd.to_datetime(df[name], errors="coerce")
-        elif type == "dateTime":
-            df[name] = pd.to_datetime(df[name], errors="coerce")
-        elif type == "time":
-            df[name] = pd.to_timedelta(df[name], errors="coerce")
-        elif type == "boolean":
-            df[name].replace(
-                to_replace=["TRUE", "FALSE"], value=[True, False], inplace=True
-            )
-            # Pandas seems to throw errors if all the boolean values are NA, in which case we should just ignore and fall back to a string dtype
-            df[name] = df[name].astype("boolean", errors="ignore")
-        elif type == "geography" and geography_variable is not None:
-            import geopandas
-            if geography_variable == "":
-                geography_variable = name
-            df[name] = geopandas.GeoSeries.from_wkt(df[name])
-        else:
-            df[name] = df[name].astype("string")
-
-    if geography_variable:
-        import geopandas
-        return geopandas.GeoDataFrame(data=df, geometry=geography_variable, crs="EPSG:4326")
-    else:
-        return df
 
