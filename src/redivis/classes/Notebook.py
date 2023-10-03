@@ -4,7 +4,6 @@ from ..common.api_request import make_request
 import pathlib
 import uuid
 import os
-import geopandas
 
 
 class Notebook(Base):
@@ -20,6 +19,8 @@ class Notebook(Base):
         else:
             temp_file_path = f"/tmp/redivis/out/{uuid.uuid4()}"
             pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
+            
+            import geopandas
 
             if isinstance(data, geopandas.GeoDataFrame):
                 if geography_variables is None:

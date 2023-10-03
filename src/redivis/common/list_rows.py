@@ -4,7 +4,6 @@ import pyarrow
 import pyarrow.dataset as pyarrow_dataset # need to import separately, it's not on the pyarrow import
 import tempfile
 import uuid
-import polars
 import pathlib
 from ..classes.Row import Row
 from tqdm.auto import tqdm
@@ -47,6 +46,7 @@ def list_rows(
     if output_type == 'arrow_dataset':
         return arrow_dataset
     elif output_type == 'polars_lazyframe':
+        import polars
         return polars.scan_ipc(f'{folder}/*', memory_map=True)
     elif output_type == 'dask_dataframe':
         import dask.dataframe as dd
