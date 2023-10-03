@@ -33,13 +33,11 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # Required dependencies
-REQUIRED = ["requests >= 2.0.0", "pandas >= 2.0.0", "tqdm == 4.64.0", "pyarrow >= 13.0.0"]
+REQUIRED = ["requests >= 2.0.0", "pandas >= 2.0.0", "tqdm == 4.64.0", "pyarrow >= 13.0.0", "geopandas >= 0.14.0", "dask >= 2023.5.0", "polars >= 0.19"]
 
 # What packages are optional?
 EXTRAS = {
-    'geopandas': ['geopandas >= 0.14.0'],
-    'dask': ['dask >= 2023.5.0'],
-    'polars': ['polars >= 0.19']
+    # 'fancy feature': ['django'],
 }
 
 # The rest you shouldn't have to touch too much :)
