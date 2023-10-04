@@ -13,7 +13,7 @@ from .Variable import Variable
 from .File import File
 from ..common.list_rows import list_rows
 from ..common.api_request import make_request, make_paginated_request
-from ..common.util import get_geography_variable
+from ..common.util import get_geography_variable, get_warning
 
 
 class Table(Base):
@@ -233,7 +233,7 @@ class Table(Base):
     def to_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True, dtype_backend=None, date_as_object=False):
         if dtype_backend is None:
             dtype_backend = 'numpy'
-            warnings.warn("No dtype_backend was provided, defaulting to 'numpy'. However, it is recommended to specify dtype_backend='pyarrow' to reduce memory usage and improve performance. This may become the default in the future.", FutureWarning, stacklevel=2)
+            warnings.warn(get_warning('dataframe_dtype'), FutureWarning)
 
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
             raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'")
@@ -278,7 +278,7 @@ class Table(Base):
 
 
     def list_rows(self, max_results=None, *, limit=None, variables=None, progress=True):
-        warnings.warn("The list_rows method is deprecated. Please use table.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", FutureWarning, stacklevel=2)
+        warnings.warn("The list_rows method is deprecated. Please use table.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", FutureWarning)
 
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
@@ -333,8 +333,7 @@ class Table(Base):
         if data is not None:
             warnings.warn(
                 "Passing data directly to the upload constructor is deprecated. Please call table.upload('filename').create(data) instead.",
-                FutureWarning,
-                stacklevel=2
+                FutureWarning
             )
             upload.create(
                 schema=schema,

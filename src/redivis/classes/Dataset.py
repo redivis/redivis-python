@@ -56,8 +56,7 @@ class Dataset(Base):
         if ignore_if_exists is not None:
             warnings.warn(
                 "The ignore_if_exists parameter has been renamed to if_not_exists, and will be removed in a future version of this library",
-                FutureWarning,
-                stacklevel=2
+                FutureWarning
             )
             if_not_exists = ignore_if_exists
 
