@@ -33,7 +33,7 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # Required dependencies
-REQUIRED = ["requests >= 2.0.0", "pandas >= 2.0.0", "tqdm == 4.64.0", "pyarrow >= 13.0.0", "geopandas >= 0.14.0", "dask >= 2023.5.0", "polars >= 0.19"]
+REQUIRED = ["requests >= 2.0.0", "pandas >= 2.0.0", "tqdm == 4.64.0", "pyarrow >= 13.0.0", "geopandas >= 0.14.0", "dask >= 2023.9.3", "polars >= 0.19", "shapely >= 2.0.1"]
 
 # What packages are optional?
 EXTRAS = {
@@ -127,6 +127,11 @@ setuptools.setup(
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
     ],

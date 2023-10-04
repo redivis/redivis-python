@@ -32,11 +32,35 @@ def list_rows(
     if progress:
         progressbar = tqdm(total=max_results, leave=False)
 
-    # Code to use multiprocess... doesn't seem to give us any advantage, and progress doesn't currently work
+
+    # Use download_state to notify worker threads when to quit.
+    # See: https://stackoverflow.com/a/29237343/101923
+    download_state = {"done": False}
+
+    # Code to use multiprocess... would simplify exiting on stop, but progress doesn't currently work
     # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
+
+    # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(read_session["streams"])) as executor:
-        for stream in read_session["streams"]:
-            executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar)
+        futures = [executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar, download_state)
+                   for stream in read_session["streams"]]
+
+        not_done = futures
+
+        try:
+            while not_done:
+                # next line 'sleeps' this main thread, letting the thread pool run
+                freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.2)
+                for future in freshly_done:
+                    # Call result() on any finished threads to raise any exceptions encountered.
+                    future.result()
+        finally:
+            for future in not_done:
+                # Only cancels futures that were never started
+                future.cancel()
+            download_state["done"] = True
+            # Shutdown all background threads, now that they should know to exit early.
+            executor.shutdown(wait=True)
 
     if progress:
         progressbar.close()
@@ -116,7 +140,7 @@ def coerce_string_variable(pyarrow_array, variable):
         return pyarrow.compute.cast(pyarrow_array, pyarrow.bool_())
 
 
-def process_stream(stream,folder, mapped_variables, coerce_schema, progressbar):
+def process_stream(stream,folder, mapped_variables, coerce_schema, progressbar, download_state):
     arrow_response = make_request(
         method="get",
         path=f'/readStreams/{stream["id"]}',
@@ -135,6 +159,10 @@ def process_stream(stream,folder, mapped_variables, coerce_schema, progressbar):
     with open(f"{folder}/{stream['id']}", "wb") as f:
         writer = pyarrow.ipc.RecordBatchFileWriter(f, output_schema)
         for batch in reader:
+            # exit out of thread
+            if download_state["done"]:
+                break
+
             if coerce_schema:
                 batch = pyarrow.RecordBatch.from_arrays(list(map(coerce_string_variable, batch.columns, variables_in_stream)), schema=output_schema)
 
