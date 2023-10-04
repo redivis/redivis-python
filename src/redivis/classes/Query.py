@@ -94,7 +94,7 @@ class Query(Base):
     def to_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend=None, date_as_object=False):
         if dtype_backend is None:
             dtype_backend = 'numpy'
-            warnings.warn(get_warning('dataframe_dtype'), FutureWarning)
+            warnings.warn(get_warning('dataframe_dtype'), FutureWarning, stacklevel=2)
 
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
             raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'")
@@ -133,7 +133,7 @@ class Query(Base):
         return df
 
     def list_rows(self, max_results=None, *, progress=True):
-        warnings.warn("The list_rows method is deprecated. Please use query.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", FutureWarning)
+        warnings.warn("The list_rows method is deprecated. Please use query.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", FutureWarning, stacklevel=2)
 
         self._wait_for_finish()
 
