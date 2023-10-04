@@ -12,8 +12,11 @@ from ..common.api_request import make_request
 
 
 def list_rows(
-    *, uri, output_type="dataframe", max_results=None, selected_variables=None, mapped_variables=None, target_parallelization=mp.cpu_count(), progress=True, coerce_schema
+    *, uri, output_type="dataframe", max_results=None, selected_variables=None, mapped_variables=None, target_parallelization=None, progress=True, coerce_schema
 ):
+    if target_parallelization is None:
+        target_parallelization = mp.cpu_count()
+
     read_session = make_request(
         method="post",
         path=f'{uri}/readSessions',

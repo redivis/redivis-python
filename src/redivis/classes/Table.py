@@ -165,7 +165,7 @@ class Table(Base):
             pbar_count.close()
             pbar_bytes.close()
 
-    def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True, target_parallelization = None):
+    def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -178,7 +178,6 @@ class Table(Base):
             mapped_variables=mapped_variables,
             output_type="arrow_dataset",
             progress=progress,
-            target_parallelization=target_parallelization,
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
         )
 
