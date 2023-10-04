@@ -234,6 +234,9 @@ class Table(Base):
         if dtype_backend == 'numpy':
             warnings.warn("No dtype_backend was provided, defaulting to 'numpy'. However, it is highly recommended to specify dtype_backend='pyarrow' to reduce memory usage and improve performance. This may become the default in the future.", DeprecationWarning)
 
+        if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
+            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'")
+
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -258,10 +261,9 @@ class Table(Base):
             }.get)
         elif dtype_backend == 'pyarrow':
             df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
-        elif dtype_backend == 'numpy':
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
         else:
-            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'")
+            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
+
 
         if geography_variable is not None:
             geography_variable = get_geography_variable(mapped_variables, geography_variable)
