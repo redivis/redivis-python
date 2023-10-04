@@ -29,8 +29,7 @@ class Notebook(Base):
             if isinstance(data, geopandas.GeoDataFrame):
                 if geography_variables is None:
                     geography_variables = list(data.select_dtypes('geometry'))
-                data = data.to_wkt()
-                data.to_parquet(path=temp_file_path, index=False)
+                data.to_wkt().to_parquet(path=temp_file_path, index=False)
             elif isinstance(data, pd.DataFrame):
                 data.to_parquet(path=temp_file_path, index=False)
             elif isinstance(data, pa_dataset.Dataset):
@@ -54,6 +53,7 @@ class Notebook(Base):
                 parse_payload=False
             )
 
-        os.remove(temp_file_path)
+        if type(data) != str:
+            os.remove(temp_file_path)
 
         return Table(name=res["name"], properties=res)

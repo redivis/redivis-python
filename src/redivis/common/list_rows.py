@@ -12,7 +12,7 @@ from ..common.api_request import make_request
 
 
 def list_rows(
-    *, uri, output_type="dataframe", max_results=None, selected_variables=None, mapped_variables=None, target_parallelization=None, progress=True, coerce_schema
+    *, uri, output_type="dataframe", max_results=None, selected_variables=None, mapped_variables=None, target_parallelization=mp.cpu_count(), progress=True, coerce_schema
 ):
     read_session = make_request(
         method="post",
@@ -22,7 +22,7 @@ def list_rows(
             "selectedVariables": selected_variables,
             "maxResults": max_results,
             "format": "arrow",
-            "requestedStreamCount": min(mp.cpu_count(), 16) if target_parallelization is None else target_parallelization
+            "requestedStreamCount": min(target_parallelization, 16)
         },
     )
 
@@ -61,7 +61,7 @@ def list_rows(
                 future.cancel()
             download_state["done"] = True
             # Shutdown all background threads, now that they should know to exit early.
-            executor.shutdown(wait=True)
+            executor.shutdown(wait=True, cancel_futures=True)
 
     if progress:
         progressbar.close()

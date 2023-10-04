@@ -230,9 +230,9 @@ class Table(Base):
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
         )
 
-    def to_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True, dtype_backend=None, date_as_object=False):
+    def to_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True, dtype_backend='numpy', date_as_object=False):
         if dtype_backend is None:
-            warnings.warn("No dtype_backend was provided: it is highly recommended to specify dtype_backend=pyarrow to reduce memory usage and improve performance. This may become the default in the future.", DeprecationWarning)
+            warnings.warn("No dtype_backend was provided, defaulting to 'numpy'. However, it is highly recommended to specify dtype_backend='pyarrow' to reduce memory usage and improve performance. This may become the default in the future.", DeprecationWarning)
 
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
@@ -258,10 +258,10 @@ class Table(Base):
             }.get)
         elif dtype_backend == 'pyarrow':
             df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
-        elif dtype_backend is None:
+        elif dtype_backend == 'numpy':
             df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
         else:
-            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|None")
+            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'")
 
         if geography_variable is not None:
             geography_variable = get_geography_variable(mapped_variables, geography_variable)
@@ -286,7 +286,7 @@ class Table(Base):
             max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
             selected_variables=variables,
             mapped_variables=mapped_variables,
-            type="tuple",
+            output_type="tuple",
             progress=progress,
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
         )
