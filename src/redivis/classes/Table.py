@@ -231,7 +231,7 @@ class Table(Base):
         )
 
     def to_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True, dtype_backend='numpy', date_as_object=False):
-        if dtype_backend is None:
+        if dtype_backend == 'numpy':
             warnings.warn("No dtype_backend was provided, defaulting to 'numpy'. However, it is highly recommended to specify dtype_backend='pyarrow' to reduce memory usage and improve performance. This may become the default in the future.", DeprecationWarning)
 
         if not self.properties or not hasattr(self.properties, "numRows"):
