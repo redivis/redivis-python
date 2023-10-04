@@ -10,6 +10,7 @@ from tqdm.auto import tqdm
 import shutil
 from ..common.api_request import make_request
 
+
 def list_rows(
     *, uri, output_type="dataframe", max_results=None, selected_variables=None, mapped_variables=None, target_parallelization=None, progress=True, coerce_schema
 ):
