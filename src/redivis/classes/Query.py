@@ -93,7 +93,7 @@ class Query(Base):
 
     def to_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend=None, date_as_object=False):
         if dtype_backend is None:
-            warnings.warn("No dtype_backend was provided: it is highly recommended to specify dtype_backend=pyarrow to reduce memory usage and improve performance. This may become the default in the future.", FutureWarning)
+            warnings.warn("No dtype_backend was provided: it is highly recommended to specify dtype_backend=pyarrow to reduce memory usage and improve performance. This may become the default in the future.", FutureWarning, stacklevel=2)
 
         self._wait_for_finish()
 
@@ -131,7 +131,7 @@ class Query(Base):
         return df
 
     def list_rows(self, max_results=None, *, progress=True):
-        warnings.warn("The list_rows method is deprecated. Please use query.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", FutureWarning)
+        warnings.warn("The list_rows method is deprecated. Please use query.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", FutureWarning, stacklevel=2)
 
         self._wait_for_finish()
 
