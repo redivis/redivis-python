@@ -139,7 +139,6 @@ def coerce_string_variable(pyarrow_array, variable):
             ),
             pyarrow.time64('us')
         )
-
     elif variable["type"] == 'boolean':
         return pyarrow.compute.cast(pyarrow_array, pyarrow.bool_())
 

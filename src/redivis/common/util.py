@@ -15,9 +15,10 @@ def get_geography_variable(variables, geography_variable_name):
         )
 
 
-
 def get_warning(kind):
-    if kind == 'dataframe_dtype':
-        return 'No dtype_backend was provided: it is highly recommended to specify dtype_backend=pyarrow to reduce memory usage and improve performance. This may become the default in the future.'
+    if kind == 'dataframe_deprecation':
+        return 'The to_dataframe() method is deprecated, and has been superceded by to_pandas_dataframe().\nBy default, this new method uses the "pyarrow" dtype_backend, which is more performant and will generally work with existing code.\nTo replicate historic behavior, use to_pandas_dataframe(dtype_backend="numpy").'
+    elif kind == 'geodataframe_deprecation':
+        return 'Please use the to_geopandas_dataframe() method to ensure future compatability.'
     else:
         return 'WARNING'

@@ -91,13 +91,9 @@ class Query(Base):
             coerce_schema=False
         )
 
-    def to_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend=None, date_as_object=False):
-        if dtype_backend is None:
-            dtype_backend = 'numpy'
-            warnings.warn(get_warning('dataframe_dtype'), FutureWarning, stacklevel=2)
-
+    def to_pandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False):
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
-            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'")
+            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
 
         self._wait_for_finish()
 
@@ -127,6 +123,72 @@ class Query(Base):
 
         if geography_variable is not None:
             import geopandas
+            df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(df[geography_variable["name"]])
+            df = geopandas.GeoDataFrame(data=df, geometry=geography_variable["name"], crs="EPSG:4326")
+
+        return df
+
+    def to_geopandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False):
+        import geopandas
+
+        if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
+            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
+
+        self._wait_for_finish()
+
+        arrow_table = list_rows(
+            uri=self.uri,
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(self.properties["outputNumRows"])),
+            mapped_variables=self.properties["outputSchema"],
+            output_type="arrow_table",
+            progress=progress,
+            coerce_schema=False
+        )
+
+        if dtype_backend == 'numpy_nullable':
+            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
+                pa.int64(): pd.Int64Dtype(),
+                pa.bool_(): pd.BooleanDtype(),
+                pa.float64(): pd.Float64Dtype(),
+                pa.string(): pd.StringDtype(),
+            }.get)
+        elif dtype_backend == 'pyarrow':
+            df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
+        else:
+            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
+
+        if geography_variable is not None:
+            geography_variable = get_geography_variable(self.properties["outputSchema"], geography_variable)
+            if geography_variable is None:
+                raise Exception('Unable to find a variable with type=="geography" in the query results')
+
+        df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(df[geography_variable["name"]])
+        df = geopandas.GeoDataFrame(data=df, geometry=geography_variable["name"], crs="EPSG:4326")
+
+        return df
+
+    def to_dataframe(self, max_results=None, *, geography_variable="", progress=True):
+        warnings.warn(get_warning('dataframe_deprecation'), FutureWarning, stacklevel=2)
+        self._wait_for_finish()
+
+        arrow_table = list_rows(
+            uri=self.uri,
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
+                self.properties["outputNumRows"])),
+            mapped_variables=self.properties["outputSchema"],
+            output_type="arrow_table",
+            progress=progress,
+            coerce_schema=False
+        )
+
+        df = arrow_table.to_pandas(self_destruct=True)
+
+        if geography_variable is not None:
+            geography_variable = get_geography_variable(self.properties["outputSchema"], geography_variable)
+
+        if geography_variable is not None:
+            import geopandas
+            warnings.warn(get_warning('geodataframe_deprecation'), FutureWarning, stacklevel=2)
             df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(df[geography_variable["name"]])
             df = geopandas.GeoDataFrame(data=df, geometry=geography_variable["name"], crs="EPSG:4326")
 
