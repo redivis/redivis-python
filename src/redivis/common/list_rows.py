@@ -4,15 +4,72 @@ import pyarrow
 import pyarrow.dataset as pyarrow_dataset # need to import separately, it's not on the pyarrow import
 import tempfile
 import uuid
+import os
 import pathlib
 from ..classes.Row import Row
 from tqdm.auto import tqdm
 import shutil
 from ..common.api_request import make_request
 
+class RedivisArrowIterator:
+    def __init__(self, streams, mapped_variables, progressbar, coerce_schema):
+        self.streams = streams
+        self.mapped_variables = mapped_variables
+        self.progressbar = progressbar
+        self.coerce_schema = coerce_schema
+        self.current_stream_index = 0
+        self.__get_next_reader__()
+
+    def __get_next_reader__(self):
+        arrow_response = make_request(
+            method="get",
+            path=f'/readStreams/{self.streams[self.current_stream_index]["id"]}',
+            stream=True,
+            parse_response=False,
+        )
+        self.current_record_batch_reader = pyarrow.ipc.RecordBatchStreamReader(arrow_response.raw)
+        if self.coerce_schema:
+            self.variables_in_stream = list(
+                map(lambda field_name: next(x for x in self.mapped_variables if x["name"] == field_name),
+                    self.current_record_batch_reader.schema.names))
+            self.output_schema = pyarrow.schema(map(variable_to_field, self.variables_in_stream))
+        else:
+            self.output_schema = self.current_record_batch_reader.schema
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            batch = self.current_record_batch_reader.read_next_batch()
+            if self.coerce_schema:
+                batch = pyarrow.RecordBatch.from_arrays(
+                    list(map(coerce_string_variable, batch.columns, self.variables_in_stream)), schema=self.output_schema)
+
+            if self.progressbar is not None:
+                self.progressbar.update(batch.num_rows)
+
+            return batch
+        except StopIteration:
+            if self.current_stream_index == len(self.streams) - 1:
+                if self.progressbar:
+                    self.progressbar.close()
+                raise StopIteration
+            else:
+                self.current_stream_index += 1
+                self.__get_next_reader__()
 
 def list_rows(
-    *, uri, output_type="dataframe", max_results=None, selected_variables=None, mapped_variables=None, target_parallelization=None, progress=True, coerce_schema
+    *,
+    uri,
+    output_type="dataframe",
+    max_results=None,
+    selected_variables=None,
+    mapped_variables=None,
+    target_parallelization=None,
+    progress=True,
+    coerce_schema = False,
+    batch_preprocessor = None
 ):
     if target_parallelization is None:
         target_parallelization = mp.cpu_count()
@@ -36,6 +93,9 @@ def list_rows(
     if progress:
         progressbar = tqdm(total=max_results, leave=False)
 
+    if output_type == 'arrow_iterator':
+        return RedivisArrowIterator(streams=read_session["streams"], mapped_variables=mapped_variables, progressbar=progressbar, coerce_schema=coerce_schema )
+
 
     # Use download_state to notify worker threads when to quit.
     # See: https://stackoverflow.com/a/29237343/101923
@@ -46,7 +106,7 @@ def list_rows(
 
     # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(read_session["streams"])) as executor:
-        futures = [executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar, download_state)
+        futures = [executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar, download_state, batch_preprocessor)
                    for stream in read_session["streams"]]
 
         not_done = futures
@@ -69,7 +129,7 @@ def list_rows(
     if progress:
         progressbar.close()
 
-    arrow_dataset = pyarrow_dataset.dataset(folder, format="feather", schema = pyarrow.schema(map(variable_to_field, mapped_variables)))
+    arrow_dataset = pyarrow_dataset.dataset(folder, format="feather", schema = pyarrow.schema(map(variable_to_field, mapped_variables)) if batch_preprocessor is None else None)
 
     if output_type == 'arrow_dataset':
         return arrow_dataset
@@ -143,7 +203,7 @@ def coerce_string_variable(pyarrow_array, variable):
         return pyarrow.compute.cast(pyarrow_array, pyarrow.bool_())
 
 
-def process_stream(stream,folder, mapped_variables, coerce_schema, progressbar, download_state):
+def process_stream(stream, folder, mapped_variables, coerce_schema, progressbar, download_state, batch_preprocessor):
     arrow_response = make_request(
         method="get",
         path=f'/readStreams/{stream["id"]}',
@@ -159,8 +219,9 @@ def process_stream(stream,folder, mapped_variables, coerce_schema, progressbar, 
     else:
         output_schema = reader.schema
 
+    has_content = False
     with open(f"{folder}/{stream['id']}", "wb") as f:
-        writer = pyarrow.ipc.RecordBatchFileWriter(f, output_schema)
+        writer = None
         for batch in reader:
             # exit out of thread
             if download_state["done"]:
@@ -169,12 +230,25 @@ def process_stream(stream,folder, mapped_variables, coerce_schema, progressbar, 
             if coerce_schema:
                 batch = pyarrow.RecordBatch.from_arrays(list(map(coerce_string_variable, batch.columns, variables_in_stream)), schema=output_schema)
 
-            writer.write_batch(batch)
+            num_rows = batch.num_rows
+            if batch_preprocessor:
+                batch = batch_preprocessor(batch)
+
+            if batch is not None:
+                has_content = True
+                if writer is None:
+                    writer = pyarrow.ipc.RecordBatchFileWriter(f, output_schema if batch_preprocessor is None else batch.schema)
+
+                writer.write_batch(batch)
 
             if progressbar is not None:
-                progressbar.update(batch.num_rows)
+                progressbar.update(num_rows)
 
-        writer.close()
+        if writer is not None:
+            writer.close()
+
+    if has_content == False:
+        os.remove(f"{folder}/{stream['id']}")
 
     reader.close()
 

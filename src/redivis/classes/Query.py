@@ -39,7 +39,7 @@ class Query(Base):
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def to_arrow_dataset(self, max_results=None, *, progress=True):
+    def to_arrow_dataset(self, max_results=None, *, progress=True, batch_preprocessor=None):
         self._wait_for_finish()
 
         return list_rows(
@@ -49,10 +49,11 @@ class Query(Base):
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_dataset",
             progress=progress,
-            coerce_schema=False
+            coerce_schema=False,
+            batch_preprocessor=batch_preprocessor
         )
 
-    def to_arrow_table(self, max_results=None, *, progress=True):
+    def to_arrow_table(self, max_results=None, *, progress=True, batch_preprocessor=None):
         self._wait_for_finish()
 
         return list_rows(
@@ -62,10 +63,11 @@ class Query(Base):
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=False
+            coerce_schema=False,
+            batch_preprocessor=batch_preprocessor
         )
 
-    def to_polars_lazyframe(self, max_results=None, *, progress=True):
+    def to_polars_lazyframe(self, max_results=None, *, progress=True, batch_preprocessor=None):
         self._wait_for_finish()
 
         return list_rows(
@@ -75,10 +77,11 @@ class Query(Base):
             mapped_variables=self.properties["outputSchema"],
             output_type="polars_lazyframe",
             progress=progress,
-            coerce_schema=False
+            coerce_schema=False,
+            batch_preprocessor=batch_preprocessor
         )
 
-    def to_dask_dataframe(self, max_results=None, *, progress=True):
+    def to_dask_dataframe(self, max_results=None, *, progress=True, batch_preprocessor=None):
         self._wait_for_finish()
 
         return list_rows(
@@ -88,10 +91,11 @@ class Query(Base):
             mapped_variables=self.properties["outputSchema"],
             output_type="dask_dataframe",
             progress=progress,
-            coerce_schema=False
+            coerce_schema=False,
+            batch_preprocessor=batch_preprocessor
         )
 
-    def to_pandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False):
+    def to_pandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None):
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
             raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
 
@@ -103,7 +107,8 @@ class Query(Base):
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=False
+            coerce_schema=False,
+            batch_preprocessor=batch_preprocessor
         )
 
         if dtype_backend == 'numpy_nullable':
@@ -128,7 +133,7 @@ class Query(Base):
 
         return df
 
-    def to_geopandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False):
+    def to_geopandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None):
         import geopandas
 
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
@@ -142,7 +147,8 @@ class Query(Base):
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=False
+            coerce_schema=False,
+            batch_preprocessor=batch_preprocessor
         )
 
         if dtype_backend == 'numpy_nullable':
@@ -194,8 +200,24 @@ class Query(Base):
 
         return df
 
+    def to_arrow_batch_iterator(self, max_results=None, *, variables=None, progress=True):
+        self._wait_for_finish()
+
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            selected_variables=variables,
+            mapped_variables=self.properties["outputSchema"],
+            output_type="arrow_iterator",
+            progress=progress,
+            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
+                "kind"] == 'dataset'
+        )
+
     def list_rows(self, max_results=None, *, progress=True):
-        warnings.warn("The list_rows method is deprecated. Please use query.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.", FutureWarning, stacklevel=2)
+        warnings.warn(
+            "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
+            FutureWarning, stacklevel=2)
 
         self._wait_for_finish()
 

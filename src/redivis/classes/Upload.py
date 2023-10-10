@@ -178,7 +178,7 @@ class Upload(Base):
             for variable in variables
         ]
 
-    def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True):
+    def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -193,10 +193,11 @@ class Upload(Base):
             output_type="arrow_dataset",
             progress=progress,
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+                "kind"] == 'dataset',
+            batch_preprocessor=batch_preprocessor
         )
 
-    def to_arrow_table(self, max_results=None, *, variables=None, progress=True):
+    def to_arrow_table(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -211,10 +212,11 @@ class Upload(Base):
             output_type="arrow_table",
             progress=progress,
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+                "kind"] == 'dataset',
+            batch_preprocessor=batch_preprocessor
         )
 
-    def to_polars_lazyframe(self, max_results=None, *, variables=None, progress=True):
+    def to_polars_lazyframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -229,10 +231,11 @@ class Upload(Base):
             output_type="polars_lazyframe",
             progress=progress,
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+                "kind"] == 'dataset',
+            batch_preprocessor=batch_preprocessor
         )
 
-    def to_dask_dataframe(self, max_results=None, *, variables=None, progress=True):
+    def to_dask_dataframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
         if not self.properties or not hasattr(self.properties, "numRows"):
             self.get()
 
@@ -247,11 +250,12 @@ class Upload(Base):
             output_type="dask_dataframe",
             progress=progress,
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+                "kind"] == 'dataset',
+            batch_preprocessor=batch_preprocessor
         )
 
     def to_pandas_dataframe(self, max_results=None, *, variables=None, progress=True, dtype_backend='pyarrow',
-                            date_as_object=False):
+                            date_as_object=False, batch_preprocessor=None):
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
             raise Exception(
                 f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
@@ -269,7 +273,8 @@ class Upload(Base):
             output_type="arrow_table",
             progress=progress,
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+                "kind"] == 'dataset',
+            batch_preprocessor=batch_preprocessor
         )
 
         if dtype_backend == 'numpy_nullable':
@@ -287,7 +292,7 @@ class Upload(Base):
         return df
 
     def to_geopandas_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True,
-                               dtype_backend='pyarrow', date_as_object=False):
+                               dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None):
         import geopandas
 
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
@@ -307,7 +312,8 @@ class Upload(Base):
             output_type="arrow_table",
             progress=progress,
             coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+                "kind"] == 'dataset',
+            batch_preprocessor=batch_preprocessor
         )
 
         if dtype_backend == 'numpy_nullable':
@@ -365,9 +371,25 @@ class Upload(Base):
 
         return df
 
-    def list_rows(self, max_results=None, *, limit=None, variables=None, progress=True):
+    def to_arrow_batch_iterator(self, max_results=None, *, variables=None, progress=True):
+        if not self.properties or not hasattr(self.properties, "numRows"):
+            self.get()
+
+        mapped_variables = get_mapped_variables(variables, self.uri)
+        return list_rows(
+            uri=self.uri,
+            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            selected_variables=variables,
+            mapped_variables=mapped_variables,
+            output_type="arrow_iterator",
+            progress=progress,
+            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
+                "kind"] == 'dataset'
+        )
+
+    def list_rows(self, max_results=None, *, variables=None, progress=True):
         warnings.warn(
-            "The list_rows method is deprecated. Please use table.to_arrow_table().to_pylist()|to_pydict() for better performance and memory utilization.",
+            "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
             FutureWarning, stacklevel=2)
 
         if not self.properties or not hasattr(self.properties, "numRows"):
