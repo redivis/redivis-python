@@ -63,7 +63,6 @@ def make_request(
         if r.status_code >= 400 or (parse_response and r.text != "OK"):
             response_json = r.json()
     except Exception:
-        print(r)
         raise Exception(r.text)
 
     if r.status_code >= 400:
