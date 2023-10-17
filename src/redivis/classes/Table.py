@@ -124,9 +124,9 @@ class Table(Base):
 
             file_id_variable = variables[0]["name"]
 
-        rows = self.list_rows(max_results, variables=[file_id_variable], progress=False)
+        rows = self.to_arrow_table(max_results=max_results, variables=[file_id_variable], progress=False).to_pylist()
         return [
-            File(row.__getattribute__(file_id_variable), table=self)
+            File(row[file_id_variable], table=self)
             for row in rows
         ]
 

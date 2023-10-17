@@ -220,7 +220,7 @@ def process_stream(stream, folder, mapped_variables, coerce_schema, progressbar,
         output_schema = reader.schema
 
     has_content = False
-    with open(f"{folder}/{stream['id']}", "wb") as f:
+    with pyarrow.OSFile(f"{folder}/{stream['id']}", mode="wb") as f:
         writer = None
         for batch in reader:
             # exit out of thread
