@@ -205,7 +205,7 @@ class Query(Base):
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(self.properties["outputNumRows"])),
             selected_variables=variables,
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_iterator",
