@@ -58,6 +58,7 @@ class RedivisArrowIterator:
             else:
                 self.current_stream_index += 1
                 self.__get_next_reader__()
+                return self.__next__()
 
 def list_rows(
     *,
