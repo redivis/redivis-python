@@ -87,9 +87,6 @@ def list_rows(
         },
     )
 
-    folder = f'/{tempfile.gettempdir()}/redivis/tables/{uuid.uuid4()}'
-    pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
-
     progressbar = None
     if progress:
         progressbar = tqdm(total=max_results, leave=False)
@@ -97,71 +94,76 @@ def list_rows(
     if output_type == 'arrow_iterator':
         return RedivisArrowIterator(streams=read_session["streams"], mapped_variables=mapped_variables, progressbar=progressbar, coerce_schema=coerce_schema )
 
+    folder = f'/{tempfile.gettempdir()}/redivis/tables/{uuid.uuid4()}'
+    pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
 
-    # Use download_state to notify worker threads when to quit.
-    # See: https://stackoverflow.com/a/29237343/101923
-    download_state = {"done": False}
+    try:
+        # Use download_state to notify worker threads when to quit.
+        # See: https://stackoverflow.com/a/29237343/101923
+        download_state = {"done": False}
 
-    # Code to use multiprocess... would simplify exiting on stop, but progress doesn't currently work
-    # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
+        # Code to use multiprocess... would simplify exiting on stop, but progress doesn't currently work
+        # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
 
-    # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(read_session["streams"])) as executor:
-        futures = [executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar, download_state, batch_preprocessor)
-                   for stream in read_session["streams"]]
+        # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(read_session["streams"])) as executor:
+            futures = [executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar, download_state, batch_preprocessor)
+                       for stream in read_session["streams"]]
 
-        not_done = futures
+            not_done = futures
 
-        try:
-            while not_done:
-                # next line 'sleeps' this main thread, letting the thread pool run
-                freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.2)
-                for future in freshly_done:
-                    # Call result() on any finished threads to raise any exceptions encountered.
-                    future.result()
-        finally:
-            for future in not_done:
-                # Only cancels futures that were never started
-                future.cancel()
-            download_state["done"] = True
-            # Shutdown all background threads, now that they should know to exit early.
-            executor.shutdown(wait=True, cancel_futures=True)
+            try:
+                while not_done:
+                    # next line 'sleeps' this main thread, letting the thread pool run
+                    freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.2)
+                    for future in freshly_done:
+                        # Call result() on any finished threads to raise any exceptions encountered.
+                        future.result()
+            finally:
+                for future in not_done:
+                    # Only cancels futures that were never started
+                    future.cancel()
+                download_state["done"] = True
+                # Shutdown all background threads, now that they should know to exit early.
+                executor.shutdown(wait=True, cancel_futures=True)
 
-    if progress:
-        progressbar.close()
+        if progress:
+            progressbar.close()
 
-    arrow_dataset = pyarrow_dataset.dataset(folder, format="feather", schema = pyarrow.schema(map(variable_to_field, mapped_variables)) if batch_preprocessor is None else None)
+        arrow_dataset = pyarrow_dataset.dataset(folder, format="feather", schema = pyarrow.schema(map(variable_to_field, mapped_variables)) if batch_preprocessor is None else None)
 
-    if output_type == 'arrow_dataset':
-        return arrow_dataset
-    elif output_type == 'polars_lazyframe':
-        import polars
-        return polars.scan_ipc(f'{folder}/*', memory_map=True)
-    elif output_type == 'dask_dataframe':
-        import dask.dataframe as dd
-        # TODO: simplify once dask supports reading from feather: https://github.com/dask/dask/issues/6865
-        parquet_base_dir = f'/{tempfile.gettempdir()}/redivis/tables/{uuid.uuid4()}'
-        pyarrow_dataset.write_dataset(arrow_dataset, parquet_base_dir, format='parquet')
-        shutil.rmtree(folder)
-        return dd.read_parquet(parquet_base_dir, dtype_backend='pyarrow')
-    else:
-        # TODO: remove head() once BE is sorted, instead use dataset.to_table()
-        arrow_table = pyarrow_dataset.Scanner.from_dataset(arrow_dataset).head(max_results)
-        shutil.rmtree(folder)
-        if output_type == 'arrow_table':
-            return arrow_table
-        elif output_type == 'tuple':
-            variable_name_to_index = {}
-            for index, variable in enumerate(mapped_variables):
-                variable_name_to_index[variable["name"]] = index
+        if output_type == 'arrow_dataset':
+            return arrow_dataset
+        elif output_type == 'polars_lazyframe':
+            import polars
+            return polars.scan_ipc(f'{folder}/*', memory_map=True)
+        elif output_type == 'dask_dataframe':
+            import dask.dataframe as dd
+            # TODO: simplify once dask supports reading from feather: https://github.com/dask/dask/issues/6865
+            # Make sure we no longer remove the folder in the finally clause after making this change
+            parquet_base_dir = f'/{tempfile.gettempdir()}/redivis/tables/{uuid.uuid4()}'
+            pyarrow_dataset.write_dataset(arrow_dataset, parquet_base_dir, format='parquet')
+            return dd.read_parquet(parquet_base_dir, dtype_backend='pyarrow')
+        else:
+            # TODO: remove head() once BE is sorted, instead use dataset.to_table()
+            arrow_table = pyarrow_dataset.Scanner.from_dataset(arrow_dataset).head(max_results)
+            if output_type == 'arrow_table':
+                return arrow_table
+            elif output_type == 'tuple':
+                variable_name_to_index = {}
+                for index, variable in enumerate(mapped_variables):
+                    variable_name_to_index[variable["name"]] = index
 
-            pydict = arrow_table.to_pydict()
-            keys = list(pydict.keys())
+                pydict = arrow_table.to_pydict()
+                keys = list(pydict.keys())
 
-            return [
-                Row([pydict[variable["name"]][i] for variable in mapped_variables], variable_name_to_index)
-                for i in range(len(pydict[keys[0]]))
-            ]
+                return [
+                    Row([pydict[variable["name"]][i] for variable in mapped_variables], variable_name_to_index)
+                    for i in range(len(pydict[keys[0]]))
+                ]
+    finally:
+        if output_type != 'arrow_dataset' and output_type != "polars_lazyframe":
+            shutil.rmtree(folder)
 
 
 def variable_to_field(variable):
