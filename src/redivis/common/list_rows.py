@@ -70,7 +70,8 @@ def list_rows(
     target_parallelization=None,
     progress=True,
     coerce_schema = False,
-    batch_preprocessor = None
+    batch_preprocessor = None,
+    folder = None,
 ):
     if target_parallelization is None:
         target_parallelization = mp.cpu_count()
@@ -92,10 +93,30 @@ def list_rows(
         progressbar = tqdm(total=max_results, leave=False)
 
     if output_type == 'arrow_iterator':
-        return RedivisArrowIterator(streams=read_session["streams"], mapped_variables=mapped_variables, progressbar=progressbar, coerce_schema=coerce_schema )
+        return RedivisArrowIterator(
+            streams=read_session["streams"],
+            mapped_variables=mapped_variables,
+            progressbar=progressbar,
+            coerce_schema=coerce_schema
+        )
 
-    folder = f'/{tempfile.gettempdir()}/redivis/tables/{uuid.uuid4()}'
-    pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+    if folder is None:
+        folder = (
+            pathlib.Path("/")
+                .joinpath(
+                    f"{tempfile.gettempdir()}",
+                    "redivis",
+                    "tables",
+                    f"{uuid.uuid4()}"
+
+                )
+        )
+    else:
+        folder = pathlib.Path(folder)
+    # create the folder, if it doesn't exist
+    folder.mkdir(parents=True, exist_ok=True)
+    # get the absolute folder path, as a string
+    folder = str(folder.absolute())
 
     try:
         # Use download_state to notify worker threads when to quit.
@@ -141,7 +162,18 @@ def list_rows(
             import dask.dataframe as dd
             # TODO: simplify once dask supports reading from feather: https://github.com/dask/dask/issues/6865
             # Make sure we no longer remove the folder in the finally clause after making this change
-            parquet_base_dir = f'/{tempfile.gettempdir()}/redivis/tables/{uuid.uuid4()}'
+            # Create the Parquet base directory
+            parquet_base_dir = str(
+                pathlib.Path("/")
+                    .joinpath(
+                        f"{tempfile.gettempdir()}",
+                        "redivis",
+                        "tables",
+                        f"{uuid.uuid4()}"
+
+                    )
+                    .absolute()
+            )
             pyarrow_dataset.write_dataset(arrow_dataset, parquet_base_dir, format='parquet')
             return dd.read_parquet(parquet_base_dir, dtype_backend='pyarrow')
         else:
@@ -223,7 +255,10 @@ def process_stream(stream, folder, mapped_variables, coerce_schema, progressbar,
         output_schema = reader.schema
 
     has_content = False
-    with pyarrow.OSFile(f"{folder}/{stream['id']}", mode="wb") as f:
+    # create the os_file path
+    os_file = pathlib.Path(folder).joinpath(f"{stream['id']}").absolute()
+    os_file = str(os_file)
+    with pyarrow.OSFile(os_file, mode="wb") as f:
         writer = None
         for batch in reader:
             # exit out of thread
@@ -251,7 +286,7 @@ def process_stream(stream, folder, mapped_variables, coerce_schema, progressbar,
             writer.close()
 
     if has_content == False:
-        os.remove(f"{folder}/{stream['id']}")
+        os.remove(os_file)
 
     reader.close()
 
