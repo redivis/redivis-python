@@ -33,7 +33,7 @@ class File(Base):
         if path is None:
             path = os.getcwd()
             is_dir = True
-        elif path.endswith('/'):
+        elif path.endswith(os.sep):
             is_dir = True
         elif os.path.exists(path) and os.path.isdir(path):
             is_dir = True
