@@ -69,9 +69,8 @@ def list_rows(
     mapped_variables=None,
     target_parallelization=None,
     progress=True,
-    coerce_schema = False,
-    batch_preprocessor = None,
-    folder = None,
+    coerce_schema=False,
+    batch_preprocessor=None
 ):
     if target_parallelization is None:
         target_parallelization = mp.cpu_count()
@@ -100,19 +99,17 @@ def list_rows(
             coerce_schema=coerce_schema
         )
 
-    if folder is None:
-        folder = (
-            pathlib.Path("/")
-                .joinpath(
-                    f"{tempfile.gettempdir()}",
-                    "redivis",
-                    "tables",
-                    f"{uuid.uuid4()}"
+    folder = (
+        pathlib.Path("/")
+            .joinpath(
+                os.getenv("REDIVIS_TMPDIR") or tempfile.gettempdir(),
+                "redivis",
+                "tables",
+                f"{uuid.uuid4()}"
 
-                )
-        )
-    else:
-        folder = pathlib.Path(folder)
+            )
+    )
+
     # create the folder, if it doesn't exist
     folder.mkdir(parents=True, exist_ok=True)
     # get the absolute folder path, as a string
@@ -166,7 +163,7 @@ def list_rows(
             parquet_base_dir = str(
                 pathlib.Path("/")
                     .joinpath(
-                        f"{tempfile.gettempdir()}",
+                        os.getenv("REDIVIS_TMPDIR") or tempfile.gettempdir(),
                         "redivis",
                         "tables",
                         f"{uuid.uuid4()}"
@@ -256,9 +253,8 @@ def process_stream(stream, folder, mapped_variables, coerce_schema, progressbar,
 
     has_content = False
     # create the os_file path
-    os_file = pathlib.Path(folder).joinpath(f"{stream['id']}").absolute()
-    os_file = str(os_file)
-    with pyarrow.OSFile(os_file, mode="wb") as f:
+    os_file = pathlib.Path(folder).joinpath(f"{stream['id']}.feather").absolute()
+    with pyarrow.OSFile(str(os_file), mode="wb") as f:
         writer = None
         for batch in reader:
             # exit out of thread
