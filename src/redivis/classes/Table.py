@@ -397,6 +397,7 @@ class Table(Base):
     def upload(
         self,
         name,
+        #  The rest is deprecated
         *,
         type=None,
         schema=None,
@@ -405,7 +406,6 @@ class Table(Base):
         allow_quoted_newlines=False,
         quote_character='"',
         delimiter=None,
-        #     This is deprecated
         data=None,
         remove_on_fail=True,
     ):
@@ -415,7 +415,7 @@ class Table(Base):
         )
         if data is not None:
             warnings.warn(
-                "Passing data directly to the upload constructor is deprecated. Please call table.upload('filename').create(data) instead.",
+                "Passing data directly to the upload constructor is deprecated. Please call table.upload('upload name').create(data) instead.",
                 FutureWarning,
                 stacklevel=2
             )
