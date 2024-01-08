@@ -52,15 +52,7 @@ class Dataset(Base):
         )
         return self
 
-    def create_next_version(self, *, if_not_exists=False, ignore_if_exists=None):
-        if ignore_if_exists is not None:
-            warnings.warn(
-                "The ignore_if_exists parameter has been renamed to if_not_exists, and will be removed in a future version of this library",
-                FutureWarning,
-                stacklevel=2
-            )
-            if_not_exists = ignore_if_exists
-
+    def create_next_version(self, *, if_not_exists=False):
         if not self.properties or not hasattr(self.properties, "nextVersion"):
             self.get()
 
@@ -68,7 +60,7 @@ class Dataset(Base):
             make_request(method="POST", path=f"{self.uri}/versions")
         elif not if_not_exists:
             raise Exception(
-                f"Next version already exists at {self.properties['nextVersion']['datasetUri']}. To avoid this error, set argument ignore_if_exists to True"
+                f"Next version already exists at {self.properties['nextVersion']['datasetUri']}. To avoid this error, set argument if_not_exists to True"
             )
 
         return Dataset(
@@ -140,7 +132,7 @@ class Dataset(Base):
             payload["description"] = description
 
         self.properties = make_request(
-            method="POST",
+            method="PATCH",
             path=self.uri,
             payload=payload,
         )

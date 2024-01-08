@@ -229,7 +229,7 @@ def coerce_string_variable(pyarrow_array, variable):
     elif variable["type"] == 'time':
         return pyarrow.compute.cast(
             pyarrow.compute.cast(
-                pyarrow.compute.utf8_replace_slice(pyarrow_array,start=0,stop=0,replacement='2020-01-01T'),
+                pyarrow.compute.utf8_replace_slice(pyarrow_array, start=0, stop=0, replacement='2020-01-01T'),
                 pyarrow.timestamp('us')
             ),
             pyarrow.time64('us')
