@@ -31,3 +31,11 @@ class User(Base):
         return [
             Dataset(dataset["name"], user=self, properties=dataset) for dataset in datasets
         ]
+
+    def list_projects(self, max_results=None):
+        projects = make_paginated_request(
+            path=f"{self.uri}/projects", page_size=100, max_results=max_results
+        )
+        return [
+            Project(project["name"], user=self, properties=project) for project in projects
+        ]

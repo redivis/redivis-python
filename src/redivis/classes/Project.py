@@ -2,7 +2,7 @@ from .Query import Query
 from .Table import Table
 from .Base import Base
 from urllib.parse import quote as quote_uri
-from ..common.api_request import make_paginated_request
+from ..common.api_request import make_request, make_paginated_request
 
 
 class Project(Base):
@@ -30,6 +30,20 @@ class Project(Base):
         return [
             Table(table["name"], project=self, properties=table) for table in tables
         ]
+
+    def exists(self):
+        try:
+            make_request(method="GET", path=self.uri)
+            return True
+        except Exception as err:
+            if err.args[0]["status"] != 404:
+                raise err
+            return False
+
+    def get(self):
+        self.properties = make_request(method="GET", path=self.uri)
+        self.uri = self.properties["uri"]
+        return self
 
     def query(self, query):
         return Query(query, default_project=self.identifier)
