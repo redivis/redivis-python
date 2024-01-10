@@ -63,12 +63,14 @@ class Dataset(Base):
                 f"Next version already exists at {self.properties['nextVersion']['datasetUri']}. To avoid this error, set argument if_not_exists to True"
             )
 
-        return Dataset(
+        next_version_dataset = Dataset(
             name=self.name,
             user=self.user,
             organization=self.organization,
             version="next",
-        ).get()
+        )
+
+        return next_version_dataset.get()
 
     def delete(self):
         make_request(
@@ -91,7 +93,7 @@ class Dataset(Base):
         self.uri = self.properties["uri"]
         return self
 
-    def list_tables(self, max_results):
+    def list_tables(self, max_results=None):
         tables = make_paginated_request(
             path=f"{self.uri}/tables", page_size=100, max_results=max_results
         )
@@ -112,12 +114,7 @@ class Dataset(Base):
             f"{(self.organization or self.user).name}.{self.name}:{self.version}"
         )
         self.uri = f"/datasets/{quote_uri(self.identifier, '')}"
-        return Dataset(
-            name=self.name,
-            user=self.user,
-            organization=self.organization,
-            version="current",
-        ).get()
+        return self.get()
 
     def table(self, name, *, sample=False):
         return Table(name, dataset=self, sample=sample)
