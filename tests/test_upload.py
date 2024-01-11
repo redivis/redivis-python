@@ -40,7 +40,7 @@ def test_external_transfer():
     )
 
     table.upload(name="test.csv", ).create(
-        transfer_specification={"sourceType": "gcs", "sourcePath": "redivis-data-dev/test.csv.gz", "identity": "iaan@redivis.com"},
+        transfer_specification={"sourceType": "gcs", "sourcePath": "redivis-data-dev/test.csv.gz", "identity": "ian@redivis.com"},
     )
 
 def test_upload_string():
@@ -163,10 +163,10 @@ def test_resumable_upload():
     table = util.get_table()
     table.create(description="Some info", upload_merge_strategy="replace")
 
-    with open(os.path.join(os.path.dirname(__file__), "us_counties_500k.geojson"), "rb") as f:
-        table.upload(name="us_counties_500k.geojson", type="geojson", data=f)
+    with open(os.path.join(os.path.dirname(__file__), "./data/us_counties_500k.geojson"), "rb") as f:
+        table.upload(name="us_counties_500k.geojson").create(type="geojson", data=f)
 
-    print(table.upload("local.csv").to_dataframe(100))
+    print(table.upload("us_counties_500k.geojson").to_pandas_dataframe(10))
 
 
 def test_streaming_performance():
@@ -199,12 +199,12 @@ def test_streaming_after_upload():
     df = pandas.read_csv(os.path.join(os.path.dirname(__file__), "data/tiny.csv"))
     data = df.to_dict(orient="records")
     table.create(description="Some info")
-    upload = table.upload(name="seed_file").create(type="delimited")
+
 
     with open("tests/data/tiny.csv", "rb") as f:
-        upload.upload_file(data=f)
+        upload = table.upload(name="seed_file").create(data=f, type="delimited")
 
-    upload = table.upload(name="streamed_date").create(
+    upload = table.upload(name="streamed_data").create(
         type="stream",
         schema=[
             {

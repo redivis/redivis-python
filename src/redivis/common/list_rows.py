@@ -89,7 +89,7 @@ def list_rows(
 
     progressbar = None
     if progress:
-        progressbar = tqdm(total=max_results, leave=False)
+        progressbar = tqdm(total=read_session["numRows"], leave=False)
 
     if output_type == 'arrow_iterator':
         return RedivisArrowIterator(
@@ -124,26 +124,27 @@ def list_rows(
         # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
 
         # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(read_session["streams"])) as executor:
-            futures = [executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar, download_state, batch_preprocessor)
-                       for stream in read_session["streams"]]
+        if len(read_session["streams"]):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(read_session["streams"])) as executor:
+                futures = [executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar, download_state, batch_preprocessor)
+                           for stream in read_session["streams"]]
 
-            not_done = futures
+                not_done = futures
 
-            try:
-                while not_done:
-                    # next line 'sleeps' this main thread, letting the thread pool run
-                    freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.2)
-                    for future in freshly_done:
-                        # Call result() on any finished threads to raise any exceptions encountered.
-                        future.result()
-            finally:
-                for future in not_done:
-                    # Only cancels futures that were never started
-                    future.cancel()
-                download_state["done"] = True
-                # Shutdown all background threads, now that they should know to exit early.
-                executor.shutdown(wait=True, cancel_futures=True)
+                try:
+                    while not_done:
+                        # next line 'sleeps' this main thread, letting the thread pool run
+                        freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.2)
+                        for future in freshly_done:
+                            # Call result() on any finished threads to raise any exceptions encountered.
+                            future.result()
+                finally:
+                    for future in not_done:
+                        # Only cancels futures that were never started
+                        future.cancel()
+                    download_state["done"] = True
+                    # Shutdown all background threads, now that they should know to exit early.
+                    executor.shutdown(wait=True, cancel_futures=True)
 
         if progress:
             progressbar.close()
@@ -174,8 +175,12 @@ def list_rows(
             pyarrow_dataset.write_dataset(arrow_dataset, parquet_base_dir, format='parquet')
             return dd.read_parquet(parquet_base_dir, dtype_backend='pyarrow')
         else:
-            # TODO: remove head() once BE is sorted, instead use dataset.to_table()
-            arrow_table = pyarrow_dataset.Scanner.from_dataset(arrow_dataset).head(max_results)
+            if max_results is not None:
+                # TODO: remove head() once BE is sorted, instead always use dataset.to_table()
+                arrow_table = pyarrow_dataset.Scanner.from_dataset(arrow_dataset).head(max_results)
+            else:
+                arrow_table = arrow_dataset.to_table()
+
             if output_type == 'arrow_table':
                 return arrow_table
             elif output_type == 'tuple':

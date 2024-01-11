@@ -24,28 +24,20 @@ class Table(Base):
         sample=False,
         dataset=None,
         project=None,
-        properties={},
+        properties=None,
     ):
         dataset, project = get_table_parents(dataset, project)
-        parent = dataset or project
-        owner = parent.user or parent.organization
         sample_string = ":sample" if sample else ""
-        version_string = f":{dataset.version}" if dataset else ""
         self.name = name
         self.dataset = dataset
         self.project = project
-        self.identifier = (
-            f"{owner.name}.{parent.name}{version_string}.{self.name}{sample_string}"
+
+        self.qualified_reference = properties["qualifiedReference"] if "qualifiedReference" in (properties or {}) else (
+            f"{dataset.qualified_reference if dataset else project.qualified_reference}.{self.name}{sample_string}"
         )
-        self.uri = f"/tables/{quote_uri(self.identifier, '')}"
-        self.properties = {
-            **{
-                "kind": "table",
-                "name": name,
-                "uri": self.uri
-            },
-            **properties
-        }
+        self.scoped_reference = properties["scopedReference"] if "scopedReference" in (properties or {}) else f"{self.name}{sample_string}"
+        self.uri = f"/tables/{quote_uri(self.qualified_reference, '')}"
+        self.properties = properties
 
     def create(self, *, description=None, upload_merge_strategy="append", is_file_index=False):
         response = make_request(
@@ -58,8 +50,7 @@ class Table(Base):
                 "isFileIndex": is_file_index
             },
         )
-        self.properties = response
-        self.uri = self.properties["uri"]
+        update_properties(self, response)
         return self
 
     def delete(self):
@@ -70,13 +61,13 @@ class Table(Base):
         return
 
     def get(self):
-        self.properties = make_request(method="GET", path=self.uri)
-        self.uri = self.properties["uri"]
+        properties = make_request(method="GET", path=self.uri)
+        update_properties(self, properties)
         return self
 
     def exists(self):
         try:
-            make_request(method="GET", path=self.uri)
+            make_request(method="HEAD", path=self.uri)
             return True
         except Exception as err:
             if err.args[0]["status"] != 404:
@@ -166,70 +157,70 @@ class Table(Base):
             pbar_bytes.close()
 
     def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_dataset",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset',
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor
         )
 
     def to_arrow_table(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset',
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor
         )
 
     def to_polars_lazyframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="polars_lazyframe",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset',
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor
         )
 
     def to_dask_dataframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="dask_dataframe",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset',
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor
         )
 
@@ -237,19 +228,18 @@ class Table(Base):
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
             raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
 
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset',
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor
         )
 
@@ -273,19 +263,18 @@ class Table(Base):
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
             raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
 
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset',
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor
         )
 
@@ -315,20 +304,18 @@ class Table(Base):
     def to_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True):
         warnings.warn(get_warning('dataframe_deprecation'), FutureWarning, stacklevel=2)
 
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
         )
 
         df = arrow_table.to_pandas(self_destruct=True)
@@ -345,36 +332,35 @@ class Table(Base):
         return df
 
     def to_arrow_batch_iterator(self, max_results=None, *, variables=None, progress=True):
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_iterator",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
         )
 
     def list_rows(self, max_results=None, *, variables=None, progress=True):
         warnings.warn("The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.", FutureWarning, stacklevel=2)
 
-        if not self.properties or not hasattr(self.properties, "numRows"):
+        if not self.properties or "container" not in self.properties:
             self.get()
 
         mapped_variables = get_mapped_variables(variables, self.uri)
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="tuple",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"]["kind"] == 'dataset'
+            coerce_schema=self.properties["container"]["kind"] == 'dataset',
         )
 
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
@@ -391,51 +377,11 @@ class Table(Base):
             path=f"{self.uri}",
             payload=payload,
         )
-        self.properties = response
+        update_properties(self, response)
         return
 
-    def upload(
-        self,
-        name,
-        #  The rest is deprecated
-        *,
-        type=None,
-        schema=None,
-        has_header_row=True,
-        skip_bad_records=False,
-        allow_quoted_newlines=False,
-        quote_character='"',
-        delimiter=None,
-        data=None,
-        remove_on_fail=True,
-    ):
-        upload = Upload(
-            table=self,
-            name=name,
-        )
-        if data is not None:
-            warnings.warn(
-                "Passing data directly to the upload constructor is deprecated. Please call table.upload('upload name').create(data) instead.",
-                FutureWarning,
-                stacklevel=2
-            )
-            upload.create(
-                schema=schema,
-                type=type,
-                has_header_row=has_header_row,
-                skip_bad_records=skip_bad_records,
-                has_quoted_newlines=allow_quoted_newlines,
-                quote_character=quote_character,
-                delimiter=delimiter,
-            )
-            upload.upload_file(
-                data,
-                wait_for_finish=True,
-                raise_on_fail=True,
-                remove_on_fail=remove_on_fail,
-            )
-
-        return upload
+    def upload(self, name):
+        return Upload(name=name, table=self)
 
     def variable(self, name):
         return Variable(name, table=self)
@@ -478,3 +424,10 @@ def get_table_parents(dataset, project):
         raise Exception(
             "Cannot reference an unqualified table if the neither the REDIVIS_DEFAULT_PROJECT or REDIVIS_DEFAULT_DATASET environment variables are set."
         )
+
+def update_properties(instance, properties):
+    instance.properties = properties
+    instance.qualified_reference = properties["qualifiedReference"]
+    instance.scoped_reference = properties["scopedReference"]
+    instance.name = properties["name"]
+    instance.uri = properties["uri"]
