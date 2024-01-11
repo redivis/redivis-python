@@ -10,20 +10,15 @@ class Variable(Base):
         *,
         table=None,
         upload=None,
-        properties={},
+        properties=None,
     ):
         self.name = name
         self.table = table
         self.upload = upload
-        self.uri = f"{table.uri if table else upload.uri}/variables/{self.name}"
-        self.properties = {
-            **{
-                "kind": "variable",
-                "name": "name",
-                "uri": self.uri
-            },
-            **properties
-        }
+        self.uri = properties["uri"] if "uri" in (properties or {}) else (
+            f"{table.uri if table else upload.uri}/variables/{self.name}"
+        )
+        self.properties = properties
 
     def get(self, wait_for_statistics=False):
         self.properties = make_request(
@@ -61,7 +56,7 @@ class Variable(Base):
 
     def exists(self):
         try:
-            make_request(method="GET", path=self.uri)
+            make_request(method="HEAD", path=self.uri)
             return True
         except Exception as err:
             if err.args[0]["status"] != 404:

@@ -46,7 +46,7 @@ def create_test_dataset():
         dataset.create()
 
     dataset = dataset.create_next_version(
-        ignore_if_exists=True
+        if_not_exists=True
     )  # Make sure we have a version to upload to
     return dataset
 

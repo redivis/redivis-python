@@ -28,19 +28,14 @@ class Upload(Base):
         name,
         *,
         table,
-        properties={},
+        properties=None,
     ):
         self.table = table
         self.name = name
-        self.uri = f"{table.uri}/uploads/{quote_uri(self.name,'')}"
-        self.properties = {
-            **{
-                "kind": "upload",
-                "name": name,
-                "uri": self.uri
-            },
-            **properties
-        }
+        self.uri = properties["uri"] if "uri" in (properties or {}) else (
+            f"{table.uri}/uploads/{quote_uri(self.name,'')}"
+        )
+        self.properties = properties
 
     def create(
         self,
@@ -147,7 +142,7 @@ class Upload(Base):
 
     def exists(self):
         try:
-            make_request(method="GET", path=self.uri)
+            make_request(method="HEAD", path=self.uri)
             return True
         except Exception as err:
             if err.args[0]["status"] != 404:
@@ -179,78 +174,58 @@ class Upload(Base):
         ]
 
     def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_dataset",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset',
+            coerce_schema=True,
             batch_preprocessor=batch_preprocessor
         )
 
     def to_arrow_table(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset',
+            coerce_schema=True,
             batch_preprocessor=batch_preprocessor
         )
 
     def to_polars_lazyframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="polars_lazyframe",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset',
+            coerce_schema=True,
             batch_preprocessor=batch_preprocessor
         )
 
     def to_dask_dataframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="dask_dataframe",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset',
+            coerce_schema=True,
             batch_preprocessor=batch_preprocessor
         )
 
@@ -260,20 +235,15 @@ class Upload(Base):
             raise Exception(
                 f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
 
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset',
+            coerce_schema=True,
             batch_preprocessor=batch_preprocessor
         )
 
@@ -299,20 +269,15 @@ class Upload(Base):
             raise Exception(
                 f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
 
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset',
+            coerce_schema=True,
             batch_preprocessor=batch_preprocessor
         )
 
@@ -342,20 +307,15 @@ class Upload(Base):
     def to_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True):
         warnings.warn(get_warning('dataframe_deprecation'), FutureWarning, stacklevel=2)
 
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+            coerce_schema=True,
         )
 
         df = arrow_table.to_pandas(self_destruct=True)
@@ -372,19 +332,15 @@ class Upload(Base):
         return df
 
     def to_arrow_batch_iterator(self, max_results=None, *, variables=None, progress=True):
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results, int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_iterator",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+            coerce_schema=True,
         )
 
     def list_rows(self, max_results=None, *, variables=None, progress=True):
@@ -392,20 +348,15 @@ class Upload(Base):
             "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
             FutureWarning, stacklevel=2)
 
-        if not self.properties or not hasattr(self.properties, "numRows"):
-            self.get()
-
         mapped_variables = get_mapped_variables(variables, self.uri)
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["numRows"] if max_results is None else min(max_results,
-                                                                                   int(self.properties["numRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="tuple",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+            coerce_schema=True,
         )
 
     def variable(self, name):

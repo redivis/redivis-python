@@ -3,6 +3,7 @@ import logging
 import os
 import json
 import platform
+from urllib.parse import unquote
 
 from .auth import get_auth_token
 from .._version import __version__
@@ -60,10 +61,19 @@ def make_request(
 
     response_json = {}
     try:
-        if r.status_code >= 400 or (parse_response and r.text != "OK"):
-            response_json = r.json()
+        if r.status_code >= 400 or (method != "head" and parse_response and r.text != "OK"):
+            if method == "head":
+                if "X-REDIVIS-ERROR-PAYLOAD" in r.headers:
+                    response_json = json.loads(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
+                else:
+                    response_json = {"error": {"status": r.status_code}}
+            else:
+                response_json = r.json()
     except Exception:
-        raise Exception(r.text)
+        if method == "head":
+            raise Exception(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
+        else:
+            raise Exception(r.text)
 
     if r.status_code >= 400:
         raise Exception(response_json["error"])

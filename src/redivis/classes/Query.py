@@ -33,7 +33,7 @@ class Query(Base):
                 "defaultDataset": default_dataset if default_dataset else None,
             },
         )
-        self.uri = f"/queries/{self.properties['id']}"
+        self.uri = self.properties["uri"]
 
     def get(self):
         self.properties = make_request(method="GET", path=self.uri)
@@ -44,8 +44,7 @@ class Query(Base):
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
-                self.properties["outputNumRows"])),
+            max_results=max_results,
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_dataset",
             progress=progress,
@@ -58,8 +57,7 @@ class Query(Base):
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
-                self.properties["outputNumRows"])),
+            max_results=max_results,
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_table",
             progress=progress,
@@ -72,8 +70,7 @@ class Query(Base):
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
-                self.properties["outputNumRows"])),
+            max_results=max_results,
             mapped_variables=self.properties["outputSchema"],
             output_type="polars_lazyframe",
             progress=progress,
@@ -86,8 +83,7 @@ class Query(Base):
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
-                self.properties["outputNumRows"])),
+            max_results=max_results,
             mapped_variables=self.properties["outputSchema"],
             output_type="dask_dataframe",
             progress=progress,
@@ -101,9 +97,10 @@ class Query(Base):
 
         self._wait_for_finish()
 
+        print()
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(self.properties["outputNumRows"])),
+            max_results=max_results,
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_table",
             progress=progress,
@@ -143,7 +140,7 @@ class Query(Base):
 
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(self.properties["outputNumRows"])),
+            max_results=max_results,
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_table",
             progress=progress,
@@ -179,8 +176,7 @@ class Query(Base):
 
         arrow_table = list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
-                self.properties["outputNumRows"])),
+            max_results=max_results,
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_table",
             progress=progress,
@@ -205,13 +201,12 @@ class Query(Base):
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(self.properties["outputNumRows"])),
+            max_results=max_results,
             selected_variables=variables,
             mapped_variables=self.properties["outputSchema"],
             output_type="arrow_iterator",
             progress=progress,
-            coerce_schema=hasattr(self.properties, "container") is False or self.properties["container"][
-                "kind"] == 'dataset'
+            coerce_schema=False
         )
 
     def list_rows(self, max_results=None, *, progress=True):
@@ -223,8 +218,7 @@ class Query(Base):
 
         return list_rows(
             uri=self.uri,
-            max_results=self.properties["outputNumRows"] if max_results is None else min(max_results, int(
-                self.properties["outputNumRows"])),
+            max_results=max_results,
             mapped_variables=self.properties["outputSchema"],
             output_type="tuple",
             progress=progress,

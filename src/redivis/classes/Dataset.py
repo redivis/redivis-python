@@ -14,26 +14,19 @@ class Dataset(Base):
         version="current",  # TODO: should be version_tag, version would reference a version class (?) dataset().version("next").create()? .version("next").release()?
         user=None,
         organization=None,
-        properties={},
+        properties=None,
     ):
         self.name = name
         self.version = version
         self.user = user
         self.organization = organization
-        self.identifier = (
+
+        self.qualified_reference = properties["qualifiedReference"] if "qualifiedReference" in (properties or {}) else (
             f"{(self.organization or self.user).name}.{self.name}:{self.version}"
         )
-        self.uri = f"/datasets/{quote_uri(self.identifier, '')}"
-        self.properties = {
-            **{
-                  "kind": 'dataset',
-                  "name": name,
-                  "uri": self.uri
-            },
-            **properties
-        }
-
-
+        self.scoped_reference = properties["scopedReference"] if "scopedReference" in (properties or {}) else f"{self.name}:{self.version}"
+        self.uri = f"/datasets/{quote_uri(self.qualified_reference, '')}"
+        self.properties = properties
 
     def create(self, *, public_access_level="none", description=None):
         if self.organization:
@@ -41,7 +34,7 @@ class Dataset(Base):
         else:
             path = f"/users/{self.user.name}/datasets"
 
-        self.properties = make_request(
+        properties = make_request(
             method="POST",
             path=path,
             payload={
@@ -50,10 +43,11 @@ class Dataset(Base):
                 "description": description,
             },
         )
+        update_properties(self, properties)
         return self
 
     def create_next_version(self, *, if_not_exists=False):
-        if not self.properties or not hasattr(self.properties, "nextVersion"):
+        if not self.properties or "nextVersion" not in self.properties:
             self.get()
 
         if not self.properties["nextVersion"]:
@@ -81,7 +75,7 @@ class Dataset(Base):
 
     def exists(self):
         try:
-            make_request(method="GET", path=self.uri)
+            make_request(method="HEAD", path=self.uri)
             return True
         except Exception as err:
             if err.args[0]["status"] != 404:
@@ -89,8 +83,8 @@ class Dataset(Base):
             return False
 
     def get(self):
-        self.properties = make_request(method="GET", path=self.uri)
-        self.uri = self.properties["uri"]
+        properties = make_request(method="GET", path=self.uri)
+        update_properties(self, properties)
         return self
 
     def list_tables(self, max_results=None):
@@ -102,19 +96,16 @@ class Dataset(Base):
         ]
 
     def query(self, query):
-        return Query(query, default_dataset=self.identifier)
+        return Query(query, default_dataset=self.qualified_reference)
 
     def release(self):
-        res = make_request(
+        version_res = make_request(
             method="POST",
             path=f"{self.uri}/versions/next/release",
         )
-        self.version = f'v{res["tag"]}'
-        self.identifier = (
-            f"{(self.organization or self.user).name}.{self.name}:{self.version}"
-        )
-        self.uri = f"/datasets/{quote_uri(self.identifier, '')}"
-        return self.get()
+        self.uri = version_res["datasetUri"]
+        self.get()
+        return self
 
     def table(self, name, *, sample=False):
         return Table(name, dataset=self, sample=sample)
@@ -128,9 +119,18 @@ class Dataset(Base):
         if description is not None:
             payload["description"] = description
 
-        self.properties = make_request(
+        res = make_request(
             method="PATCH",
             path=self.uri,
             payload=payload,
         )
+        update_properties(self, res)
         return self
+
+def update_properties(instance, properties):
+    instance.properties = properties
+    instance.qualified_reference = properties["qualifiedReference"]
+    instance.scoped_reference = properties["scopedReference"]
+    instance.name = properties["name"]
+    instance.uri = properties["uri"]
+    instance.version = properties["version"]["tag"]
