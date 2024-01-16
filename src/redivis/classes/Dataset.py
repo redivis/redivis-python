@@ -17,14 +17,13 @@ class Dataset(Base):
         properties=None,
     ):
         self.name = name
-        self.version = version
         self.user = user
         self.organization = organization
 
         self.qualified_reference = properties["qualifiedReference"] if "qualifiedReference" in (properties or {}) else (
-            f"{(self.organization or self.user).name}.{self.name}:{self.version}"
+            f"{(self.organization or self.user).name}.{self.name}:{version}"
         )
-        self.scoped_reference = properties["scopedReference"] if "scopedReference" in (properties or {}) else f"{self.name}:{self.version}"
+        self.scoped_reference = properties["scopedReference"] if "scopedReference" in (properties or {}) else f"{self.name}:{version}"
         self.uri = f"/datasets/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
@@ -133,4 +132,3 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
-    instance.version = properties["version"]["tag"]

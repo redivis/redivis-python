@@ -22,3 +22,4 @@ def get_warning(kind):
         return 'Please use the to_geopandas_dataframe() method to ensure future compatability.'
     else:
         return 'WARNING'
+

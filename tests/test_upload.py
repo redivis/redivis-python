@@ -83,7 +83,7 @@ def test_upload_and_release():
     table = dataset.table(util.get_table_name())
 
     with open("tests/data/tiny.csv", "rb") as f:
-        table.upload(name="tiny.csv", type="delimited").create(data=f)
+        table.upload(name="tiny.csv").create(data=f, type="delimited")
 
     dataset.release()
 

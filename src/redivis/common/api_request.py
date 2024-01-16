@@ -18,7 +18,8 @@ def make_request(
     parse_payload=True,
     parse_response=True,
     stream=False,
-    files=None
+    files=None,
+    headers={}
 ):
     api_endpoint = __get_api_endpoint()
     verify_ssl = (
@@ -33,13 +34,16 @@ def make_request(
     url = f"{api_endpoint}{path}"
 
     headers = {
-        "Authorization": f"Bearer {get_auth_token()}",
-        "X-Redivis-Client": "redivis-python",
-        "X-Redivis-Client-Version": __version__,
-        "X-Redivis-Client-Python-Version": platform.python_version(),
-        "X-Redivis-Client-System": platform.system(),
-        "X-Redivis-Client-System-Version": platform.release(),
-        "User-Agent": f"redivis-python/{__version__}",
+        **{
+            "Authorization": f"Bearer {get_auth_token()}",
+            "X-Redivis-Client": "redivis-python",
+            "X-Redivis-Client-Version": __version__,
+            "X-Redivis-Client-Python-Version": platform.python_version(),
+            "X-Redivis-Client-System": platform.system(),
+            "X-Redivis-Client-System-Version": platform.release(),
+            "User-Agent": f"redivis-python/{__version__}",
+        },
+        **headers
     }
 
     logging.debug(f"Making API '{method}' request to '{url}'")

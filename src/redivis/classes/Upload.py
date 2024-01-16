@@ -1,15 +1,13 @@
 import time
-import re
-import math
 import os
 import json
 import logging
-import requests
 from urllib.parse import quote as quote_uri
 import warnings
 import io
 import pyarrow as pa
 import pandas as pd
+from tqdm.auto import tqdm
 
 from ..common.util import get_geography_variable, get_warning
 from ..common.list_rows import list_rows
@@ -17,10 +15,7 @@ from ..common.list_rows import list_rows
 from .Base import Base
 from .Variable import Variable
 from ..common.api_request import make_request, make_paginated_request
-
-# 8MB
-MAX_CHUNK_SIZE = 2 ** 23
-
+from ..common.retryable_upload import perform_resumable_upload
 
 class Upload(Base):
     def __init__(
@@ -57,14 +52,30 @@ class Upload(Base):
         remove_on_fail=False,
         wait_for_finish=True,
         raise_on_fail=True,
+        progress=True
     ):
-        resumable_upload_id = None
+        temp_upload_id = None
 
         if data and (
             (hasattr(data, "read") and os.stat(data.name).st_size > 1e7)
             or (hasattr(data, "__len__") and len(data) > 1e7)
         ):
-            resumable_upload_id = upload_file(data, self.table.uri)
+            pbar_bytes = None
+            size = os.stat(data.name).st_size if hasattr(data, "read") else len(data)
+            if progress:
+                pbar_bytes = tqdm(total=size, unit='B', leave=False, unit_scale=True)
+
+            res = make_request(
+                method="POST",
+                path=f"{self.table.uri}/tempUploads",
+                payload={"tempUploads": [{"size": size, "name": self.name, "resumable": True}]},
+            )
+            temp_upload = res["results"][0]
+            perform_resumable_upload(data=data, temp_upload_url=temp_upload["url"], progressbar=pbar_bytes)
+            if progress:
+                pbar_bytes.close()
+
+            temp_upload_id = temp_upload["id"]
             data = None
         elif data and not hasattr(data, "read"):
             data = io.StringIO(data)
@@ -98,7 +109,7 @@ class Upload(Base):
             "allowJaggedRows": allow_jagged_rows,
             "quoteCharacter": quote_character,
             "delimiter": delimiter,
-            "resumableUploadId": resumable_upload_id,
+            "tempUploadId": temp_upload_id,
             "transferSpecification": transfer_specification
         }
 
@@ -117,7 +128,7 @@ class Upload(Base):
         self.uri = self.properties["uri"]
 
         try:
-            if (data or resumable_upload_id or transfer_specification) and wait_for_finish:
+            if (data or temp_upload_id or transfer_specification) and wait_for_finish:
                 while True:
                     time.sleep(2)
                     self.get()
@@ -361,104 +372,6 @@ class Upload(Base):
 
     def variable(self, name):
         return Variable(name, upload=self)
-
-
-def upload_file(data, table_uri):
-    start_byte = 0
-    retry_count = 0
-    chunk_size = MAX_CHUNK_SIZE
-    did_reopen_file = False
-    is_file = True if hasattr(data, "read") else False
-    file_size = os.stat(data.name).st_size if is_file else len(data)
-
-    if (is_file and hasattr(data, 'mode') and 'b' not in data.mode):
-        data = open(data.name, 'rb')
-        did_reopen_file = True
-
-    res = make_request(
-        path=f"{table_uri}/resumableUpload",
-        method="POST",
-        payload={"size": file_size},
-    )
-    resumable_uri = res["url"]
-    resumable_upload_id = res["id"]
-
-    while start_byte < file_size:
-        end_byte = min(start_byte + chunk_size - 1, file_size - 1)
-        if is_file:
-            data.seek(start_byte)
-            chunk = data.read(end_byte - start_byte + 1)
-        else:
-            chunk = data[start_byte : end_byte + 1]
-
-        try:
-            res = requests.put(
-                url=resumable_uri,
-                headers={
-                    "Content-Length": f"{end_byte - start_byte + 1}",
-                    "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
-                },
-                data=chunk,
-            )
-            res.raise_for_status()
-
-            start_byte += chunk_size
-            retry_count = 0
-        except Exception as e:
-            if retry_count > 20:
-                print("A network error occurred. Upload failed after too many retries.")
-                raise e
-
-            retry_count += 1
-            time.sleep(retry_count)
-            print("A network error occurred. Retrying last chunk of resumable upload.")
-            start_byte = retry_partial_upload(
-                file_size=file_size, resumable_uri=resumable_uri
-            )
-
-    if did_reopen_file:
-        data.close()
-
-    return resumable_upload_id
-
-def retry_partial_upload(*, retry_count=0, file_size, resumable_uri):
-    logging.debug("Attempting to resume upload")
-
-    try:
-        res = requests.put(
-            url=resumable_uri,
-            headers={"Content-Length": "0", "Content-Range": f"bytes */{file_size}"},
-        )
-
-        if res.status_code == 404:
-            return 0
-
-        res.raise_for_status()
-
-        if res.status_code == 200 or res.status_code == 201:
-            return file_size
-        elif res.status_code == 308:
-            range_header = res.headers["Range"]
-
-            if range_header:
-                match = re.match(r"bytes=0-(\d+)", range_header)
-                if match.group(0) and not math.isnan(int(match.group(1))):
-                    return int(match.group(1)) + 1
-                else:
-                    raise Exception("An unknown error occurred. Please try again.")
-            # If GCS hasn't received any bytes, the header will be missing
-            else:
-                return 0
-    except Exception as e:
-        if retry_count > 10:
-            raise e
-
-        time.sleep(retry_count / 10)
-        retry_partial_upload(
-            retry_count=retry_count + 1,
-            file_size=file_size,
-            resumable_uri=resumable_uri,
-        )
 
 
 def get_mapped_variables(variables, uri):

@@ -97,7 +97,6 @@ class Query(Base):
 
         self._wait_for_finish()
 
-        print()
         arrow_table = list_rows(
             uri=self.uri,
             max_results=max_results,
