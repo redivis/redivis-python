@@ -256,3 +256,14 @@ def test_upload_metadata():
 
     with open("tests/data/tiny.csv", "rb") as f:
         upload = table.upload("tiny.csv").create(f, metadata={"id": { "label": "foo", "description": "bar", "valueLabels": { "1": "hello world"}}})
+
+def test_next_version_returned_from_create_next_version():
+    # This makes sure we always get the next version of the dataset
+    dataset = util.create_test_dataset()
+    util.clear_test_data()
+    dataset.release()
+    next_version = dataset.create_next_version()
+    assert("next" in next_version.uri)
+    dataset = util.get_dataset()
+    next_version = dataset.create_next_version(if_not_exists=True)
+    assert("next" in next_version.uri)
