@@ -33,7 +33,18 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # Required dependencies
-REQUIRED = ["requests >= 2.0.0", "pandas >= 2.0.0", "tqdm == 4.64.0", "pyarrow >= 13.0.0", "geopandas >= 0.14.0", "dask >= 2023.9.3", "polars >= 0.19", "shapely >= 2.0.1"]
+REQUIRED = [
+    "dask >= 2023.9.3",
+    "fiona >= 1.9.0", # required for geopandas
+    "geopandas >= 0.14.0",
+    "mapclassify >= 2.6.0", # required for geopandas
+    "pandas >= 2.0.0",
+    "polars >= 0.19",
+    "pyarrow >= 13.0.0",
+    "requests >= 2.0.0",
+    "shapely >= 2.0.1",
+    "tqdm == 4.64.0",
+]
 
 # What packages are optional?
 EXTRAS = {
