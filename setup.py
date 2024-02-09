@@ -35,9 +35,9 @@ else:
 # Required dependencies
 REQUIRED = [
     "dask >= 2023.9.3",
-    "fiona >= 1.9.0", # required for geopandas
+    "folium >= 0.15.0",  # required for geopandas
     "geopandas >= 0.14.0",
-    "mapclassify >= 2.6.0", # required for geopandas
+    "mapclassify >= 2.6.0",  # required for geopandas
     "pandas >= 2.0.0",
     "polars >= 0.19",
     "pyarrow >= 13.0.0",
