@@ -83,4 +83,4 @@ def parse_headers(file, res):
     file.properties["name"] = res.headers['x-redivis-filename']
     file.properties["md5Hash"] = res.headers['digest'].replace("md5=", "")
     file.properties["contentType"] = res.headers['content-type']
-    file.properties["size"] = int(res.headers['content-length'])
+    file.properties["size"] = int(res.headers['x-redivis-size'])

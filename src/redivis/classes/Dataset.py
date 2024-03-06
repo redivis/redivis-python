@@ -20,6 +20,9 @@ class Dataset(Base):
         self.user = user
         self.organization = organization
 
+        if version and version != "current" and version != "next" and not version.lower().startswith("v"):
+            version = f"v{version}"
+
         self.qualified_reference = properties["qualifiedReference"] if "qualifiedReference" in (properties or {}) else (
             f"{(self.organization or self.user).name}.{self.name}:{version}"
         )
