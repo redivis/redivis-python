@@ -9,6 +9,7 @@ import pathlib
 import pyarrow as pa
 import pandas as pd
 from tqdm.auto import tqdm
+from threading import Event
 
 from .Upload import Upload
 from .Variable import Variable
@@ -283,29 +284,34 @@ class Table(Base):
             nonlocal pbar_bytes
             pbar_bytes.update(bytes)
 
-        def download(file):
+        def download(file, cancel_event):
             nonlocal progress
             nonlocal pbar_count
-
-            file.download(path, overwrite=overwrite, progress=False, on_progress=on_progress if progress else None)
-            if progress:
+            file.download(path, overwrite=overwrite, progress=False, on_progress=on_progress if progress else None, cancel_event=cancel_event)
+            if progress and not cancel_event.is_set():
                 pbar_count.update()
 
+        cancel_event = Event()
         with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
-            futures = [executor.submit(download, file) for file in files]
+            futures = [executor.submit(download, file, cancel_event) for file in files]
 
             not_done = futures
             try:
-                while not_done:
+                while not_done and not cancel_event.is_set():
                     # next line 'sleeps' this main thread, letting the thread pool run
                     freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.5)
                     for future in freshly_done:
                         # Call result() on any finished threads to raise any exceptions encountered.
                         future.result()
+            except KeyboardInterrupt:
+                print("KeyboardInterrupt")
             finally:
                 for future in not_done:
                     # Only cancels futures that were never started
                     future.cancel()
+
+                cancel_event.set()
+
                 # Shutdown all background threads, now that they should know to exit early.
                 executor.shutdown(wait=True, cancel_futures=True)
 

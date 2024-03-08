@@ -28,7 +28,7 @@ class File(Base):
         parse_headers(self, res)
         return self
 
-    def download(self, path=None, *, overwrite=False, progress=True, on_progress=None):
+    def download(self, path=None, *, overwrite=False, progress=True, on_progress=None, cancel_event=None):
         is_dir = False
         if path is None:
             path = os.getcwd()
@@ -54,6 +54,9 @@ class File(Base):
                 if progress:
                     pbar = tqdm(total=self.properties['size'], leave=False, unit='iB', unit_scale=True)
                 for chunk in r.iter_content(chunk_size=1024*1024):
+                    if cancel_event and cancel_event.is_set():
+                        os.remove(file_name)
+                        return None
                     if progress:
                         pbar.update(len(chunk))
                     f.write(chunk)

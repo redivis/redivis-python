@@ -138,6 +138,8 @@ def list_rows(
                         for future in freshly_done:
                             # Call result() on any finished threads to raise any exceptions encountered.
                             future.result()
+                except KeyboardInterrupt:
+                    print("KeyboardInterrupt")
                 finally:
                     for future in not_done:
                         # Only cancels futures that were never started
