@@ -2,6 +2,8 @@ from tqdm.auto import tqdm
 import os
 from io import BytesIO
 import pathlib
+import re
+import urllib
 from .Base import Base
 from ..common.api_request import make_request
 from urllib.parse import quote as quote_uri
@@ -38,7 +40,7 @@ class File(Base):
         elif os.path.exists(path) and os.path.isdir(path):
             is_dir = True
 
-        with make_request(method="GET", path=f'{self.uri}', stream=True, parse_response=False) as r:
+        with make_request(method="GET", path=f'{self.uri}', query={"allowRedirect": "true"}, stream=True, parse_response=False) as r:
             parse_headers(self, r)
             name = self.properties["name"]
 
@@ -83,7 +85,20 @@ class File(Base):
 
 
 def parse_headers(file, res):
-    file.properties["name"] = res.headers['x-redivis-filename']
-    file.properties["md5Hash"] = res.headers['digest'].replace("md5=", "")
+    file.properties["name"] = get_filename(res.headers['content-disposition'])
+    # TODO: md5Hash from x-goog-hash
     file.properties["contentType"] = res.headers['content-type']
-    file.properties["size"] = int(res.headers['x-redivis-size'])
+    file.properties["size"] = int(res.headers['content-length'] or res.headers['x-goog-stored-content-length'])
+
+
+def get_filename(s):
+    fname = re.findall("filename\*=([^;]+)", s, flags=re.IGNORECASE)
+    if not fname:
+        fname = re.findall("filename=([^;]+)", s, flags=re.IGNORECASE)
+    if "utf-8''" in fname[0].lower():
+        fname = re.sub("utf-8''", '', fname[0], flags=re.IGNORECASE)
+        fname = urllib.unquote(fname).decode('utf8')
+    else:
+        fname = fname[0]
+    # clean space and double quotes
+    return fname.strip().strip('"')

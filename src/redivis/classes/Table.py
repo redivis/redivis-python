@@ -594,3 +594,4 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
+
