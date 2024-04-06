@@ -583,6 +583,7 @@ def update_properties(instance, properties):
     instance.name = properties["name"]
     instance.uri = properties["uri"]
 
+
 def map_file(file):
     if isinstance(file, str):
         file = {"path": file}
@@ -601,3 +602,5 @@ def map_file(file):
         file["size"] = len(file["data"])
     else:
         file["size"] = os.stat(file["path"]).st_size
+
+    return file
