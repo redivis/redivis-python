@@ -127,7 +127,7 @@ class Table(Base):
                         "size": size
                     })
         else:
-            files = map(map_file, files)
+            files = list(map(map_file, files))
             for file in files:
                 total_size += file["size"]
 
