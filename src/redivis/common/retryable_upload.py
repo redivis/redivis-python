@@ -22,7 +22,7 @@ def perform_resumable_upload(data, temp_upload_url=None, progressbar=None):
 
     resumable_url = initiate_resumable_upload(file_size, temp_upload_url)
 
-    while start_byte < file_size:
+    while start_byte < file_size or start_byte == 0: # handle empty upload for start_byte == 0
         end_byte = min(start_byte + chunk_size - 1, file_size - 1)
         if is_file:
             data.seek(start_byte)

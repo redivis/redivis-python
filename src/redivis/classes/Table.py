@@ -127,20 +127,8 @@ class Table(Base):
                         "size": size
                     })
         else:
+            files = list(map(map_file, files))
             for file in files:
-                if "name" not in file:
-                    if "data" in file:
-                        raise Exception('All file specifications with a "data" key must specify a name')
-
-                    file["name"] = os.path.basename(file["path"])
-
-                if "data" in file:
-                    if isinstance(file["data"], str):
-                        file["data"] = bytes(file["data"], 'utf-8')
-                    file["size"] = len(file["data"])
-                else:
-                    file["size"] = os.stat(file["path"]).st_size
-
                 total_size += file["size"]
 
         pbar_bytes = None
@@ -595,3 +583,24 @@ def update_properties(instance, properties):
     instance.name = properties["name"]
     instance.uri = properties["uri"]
 
+
+def map_file(file):
+    if isinstance(file, str):
+        file = {"path": file}
+    else:
+        file = {**file}
+
+    if "name" not in file:
+        if "data" in file:
+            raise Exception('All file specifications with a "data" key must specify a name')
+
+        file["name"] = os.path.basename(file["path"])
+
+    if "data" in file:
+        if isinstance(file["data"], str):
+            file["data"] = bytes(file["data"], 'utf-8')
+        file["size"] = len(file["data"])
+    else:
+        file["size"] = os.stat(file["path"]).st_size
+
+    return file
