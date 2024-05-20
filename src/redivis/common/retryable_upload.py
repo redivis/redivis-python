@@ -4,7 +4,6 @@ import time
 import requests
 import os
 import logging
-from ..common.api_request import make_request
 from tqdm.utils import CallbackIOWrapper
 
 

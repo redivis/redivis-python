@@ -8,7 +8,6 @@ from .Base import Base
 from ..common.api_request import make_request
 from urllib.parse import quote as quote_uri
 
-
 class File(Base):
     def __init__(
         self,

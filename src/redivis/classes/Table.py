@@ -7,7 +7,6 @@ import glob
 import concurrent.futures
 import pathlib
 import pyarrow as pa
-import pandas as pd
 from tqdm.auto import tqdm
 from threading import Event
 
@@ -394,6 +393,8 @@ class Table(Base):
             batch_preprocessor=batch_preprocessor
         )
 
+        import pandas as pd
+
         if dtype_backend == 'numpy_nullable':
             df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
                 pa.int64(): pd.Int64Dtype(),
@@ -428,6 +429,8 @@ class Table(Base):
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor
         )
+
+        import pandas as pd
 
         if dtype_backend == 'numpy_nullable':
             df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={

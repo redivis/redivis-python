@@ -6,7 +6,6 @@ from urllib.parse import quote as quote_uri
 import warnings
 import io
 import pyarrow as pa
-import pandas as pd
 from tqdm.auto import tqdm
 
 from ..common.util import get_geography_variable, get_warning
@@ -68,7 +67,7 @@ class Upload(Base):
             res = make_request(
                 method="POST",
                 path=f"{self.table.uri}/tempUploads",
-                payload={"tempUploads": [{"size": size, "name": self.name, "resumable": True}]},
+                payload={"tempUploads": [{"size": size, "name": self.name, "resumable": size > 1e7}]},
             )
             temp_upload = res["results"][0]
             perform_resumable_upload(data=data, temp_upload_url=temp_upload["url"], progressbar=pbar_bytes)
@@ -257,6 +256,7 @@ class Upload(Base):
             coerce_schema=True,
             batch_preprocessor=batch_preprocessor
         )
+        import pandas as pd
 
         if dtype_backend == 'numpy_nullable':
             df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
@@ -291,6 +291,7 @@ class Upload(Base):
             coerce_schema=True,
             batch_preprocessor=batch_preprocessor
         )
+        import pandas as pd
 
         if dtype_backend == 'numpy_nullable':
             df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={

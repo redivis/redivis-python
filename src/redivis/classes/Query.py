@@ -3,7 +3,6 @@ import os
 import time
 import warnings
 import pyarrow as pa
-import pandas as pd
 
 from ..common.api_request import make_request
 from ..common.list_rows import list_rows
@@ -107,6 +106,8 @@ class Query(Base):
             batch_preprocessor=batch_preprocessor
         )
 
+        import pandas as pd
+
         if dtype_backend == 'numpy_nullable':
             df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
                 pa.int64(): pd.Int64Dtype(),
@@ -146,6 +147,7 @@ class Query(Base):
             coerce_schema=False,
             batch_preprocessor=batch_preprocessor
         )
+        import pandas as pd
 
         if dtype_backend == 'numpy_nullable':
             df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={

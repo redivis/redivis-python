@@ -1,13 +1,15 @@
 from .Table import Table
 from .Base import Base
 from ..common.api_request import make_request
+from tqdm.auto import tqdm
+
 import pathlib
 import uuid
 import os
 import pyarrow as pa
 import pyarrow.dataset as pa_dataset
 import pyarrow.parquet as pa_parquet
-import pandas as pd
+from ..common.retryable_upload import perform_resumable_upload
 
 class Notebook(Base):
     def __init__(
@@ -24,6 +26,7 @@ class Notebook(Base):
             pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
             
             import geopandas
+            import pandas as pd
 
             if isinstance(data, geopandas.GeoDataFrame):
                 if geography_variables is None:
@@ -47,14 +50,25 @@ class Notebook(Base):
                 else:
                     raise Exception('Unknown datatype provided to notebook.create_output_table. Must either by a file path, or an instance of pandas.DataFrame, pyarrow.Dataset, pyarrow.Table, dask.DataFrame, polars.LazyFrame, or polars.DataFrame')
 
-        with open(temp_file_path, 'rb') as f:
-            res = make_request(
-                method="PUT",
-                path=f"/notebookJobs/{self.current_notebook_job_id}/outputTable",
-                query={"name": name, "append": append, "geographyVariables": geography_variables},
-                payload=f,
-                parse_payload=False
-            )
+        size = os.stat(data.name).st_size if hasattr(data, "read") else len(data)
+
+        pbar_bytes = tqdm(total=size, unit='B', leave=False, unit_scale=True)
+
+        res = make_request(
+            method="POST",
+            path=f"/notebookJobs/{self.current_notebook_job_id}/tempUploads",
+            payload={"tempUploads": [{"size": size, "resumable": size > 1e7}]},
+        )
+        temp_upload = res["results"][0]
+        perform_resumable_upload(data=data, temp_upload_url=temp_upload["url"], progressbar=pbar_bytes)
+
+        res = make_request(
+            method="PUT",
+            path=f"/notebookJobs/{self.current_notebook_job_id}/outputTable",
+            payload={"name": name, "append": append, "geographyVariables": geography_variables, "tempUploadId": temp_upload["id"]},
+        )
+
+        pbar_bytes.close()
 
         if type(data) != str:
             os.remove(temp_file_path)
