@@ -54,10 +54,9 @@ class Notebook(Base):
         res = make_request(
             method="POST",
             path=f"/notebookJobs/{self.current_notebook_job_id}/tempUploads",
-            payload={"tempUploads": [{"size": size, "resumable": size > 1e5}]}, #TODO: set to 1e8
+            payload={"tempUploads": [{"size": size, "resumable": size > 1e8}]},
         )
         temp_upload = res["results"][0]
-        print(temp_upload)
 
         with open(temp_file_path, 'rb') as f:
             if temp_upload["resumable"]:
@@ -67,6 +66,7 @@ class Notebook(Base):
                 perform_standard_upload(data=f, temp_upload_url=temp_upload["url"],
                                         progressbar=pbar_bytes)
 
+        pbar_bytes.close()
         os.remove(temp_file_path)
 
         res = make_request(
@@ -75,6 +75,5 @@ class Notebook(Base):
             payload={"name": name, "append": append, "geographyVariables": geography_variables, "tempUploadId": temp_upload["id"]},
         )
 
-        pbar_bytes.close()
 
         return Table(name=res["name"], properties=res)
