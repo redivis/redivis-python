@@ -2,7 +2,6 @@ from .Table import Table
 from .Query import Query
 from .Base import Base
 from urllib.parse import quote as quote_uri
-import warnings
 
 from ..common.api_request import make_request, make_paginated_request
 

@@ -1,5 +1,4 @@
 import copy
-import operator
 from typing import Any, Dict, Iterable, Tuple
 
 

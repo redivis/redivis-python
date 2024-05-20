@@ -43,7 +43,7 @@ REQUIRED = [
     "pyarrow >= 13.0.0",
     "requests >= 2.0.0",
     "shapely >= 2.0.1",
-    "tqdm == 4.64.0",
+    "tqdm >= 4.64.0",
 ]
 
 # What packages are optional?
