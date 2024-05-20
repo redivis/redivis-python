@@ -9,7 +9,7 @@ import os
 import pyarrow as pa
 import pyarrow.dataset as pa_dataset
 import pyarrow.parquet as pa_parquet
-from ..common.retryable_upload import perform_resumable_upload
+from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
 class Notebook(Base):
     def __init__(
@@ -60,7 +60,12 @@ class Notebook(Base):
             payload={"tempUploads": [{"size": size, "resumable": size > 1e8}]},
         )
         temp_upload = res["results"][0]
-        perform_resumable_upload(data=data, temp_upload_url=temp_upload["url"], progressbar=pbar_bytes)
+        if temp_upload["resumable"]:
+            perform_resumable_upload(data=data, progressbar=pbar_bytes,
+                                     temp_upload_url=temp_upload["url"])
+        else:
+            perform_standard_upload(data=data, temp_upload_url=temp_upload["url"],
+                                    progressbar=pbar_bytes)
 
         res = make_request(
             method="PUT",
