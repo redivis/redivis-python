@@ -58,12 +58,14 @@ class Notebook(Base):
         )
         temp_upload = res["results"][0]
         print(temp_upload)
-        if temp_upload["resumable"]:
-            perform_resumable_upload(data=temp_file_path, progressbar=pbar_bytes,
-                                     temp_upload_url=temp_upload["url"])
-        else:
-            perform_standard_upload(data=temp_file_path, temp_upload_url=temp_upload["url"],
-                                    progressbar=pbar_bytes)
+
+        with open(temp_file_path, 'rb') as f:
+            if temp_upload["resumable"]:
+                perform_resumable_upload(data=f, progressbar=pbar_bytes,
+                                         temp_upload_url=temp_upload["url"])
+            else:
+                perform_standard_upload(data=f, temp_upload_url=temp_upload["url"],
+                                        progressbar=pbar_bytes)
 
         os.remove(temp_file_path)
 
