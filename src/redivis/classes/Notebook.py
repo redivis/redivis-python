@@ -57,9 +57,10 @@ class Notebook(Base):
         res = make_request(
             method="POST",
             path=f"/notebookJobs/{self.current_notebook_job_id}/tempUploads",
-            payload={"tempUploads": [{"size": size, "resumable": size > 1e8}]},
+            payload={"tempUploads": [{"size": size, "resumable": size > 1e5}]}, #TODO: set to 1e8
         )
         temp_upload = res["results"][0]
+        print(temp_upload)
         if temp_upload["resumable"]:
             perform_resumable_upload(data=data, progressbar=pbar_bytes,
                                      temp_upload_url=temp_upload["url"])
