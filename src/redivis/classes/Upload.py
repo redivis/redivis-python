@@ -14,7 +14,7 @@ from ..common.list_rows import list_rows
 from .Base import Base
 from .Variable import Variable
 from ..common.api_request import make_request, make_paginated_request
-from ..common.retryable_upload import perform_resumable_upload
+from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
 class Upload(Base):
     def __init__(
@@ -70,7 +70,13 @@ class Upload(Base):
                 payload={"tempUploads": [{"size": size, "name": self.name, "resumable": size > 1e7}]},
             )
             temp_upload = res["results"][0]
-            perform_resumable_upload(data=data, temp_upload_url=temp_upload["url"], progressbar=pbar_bytes)
+            if temp_upload["resumable"]:
+                perform_resumable_upload(data=data, progressbar=pbar_bytes,
+                                         temp_upload_url=temp_upload["url"])
+            else:
+                perform_standard_upload(data=data, temp_upload_url=temp_upload["url"],
+                                        progressbar=pbar_bytes)
+
             if progress:
                 pbar_bytes.close()
 
