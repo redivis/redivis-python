@@ -75,5 +75,4 @@ class Notebook(Base):
             payload={"name": name, "append": append, "geographyVariables": geography_variables, "tempUploadId": temp_upload["id"]},
         )
 
-
         return Table(name=res["name"], properties=res)

@@ -10,14 +10,9 @@ from tqdm.utils import CallbackIOWrapper
 def perform_resumable_upload(data, temp_upload_url=None, progressbar=None):
     retry_count = 0
     start_byte = 0
-    did_reopen_file = False
     is_file = True if hasattr(data, "read") else False
     file_size = os.stat(data.name).st_size if is_file else len(data)
     chunk_size = file_size
-
-    if is_file and hasattr(data, 'mode') and 'b' not in data.mode:
-        data = open(data.name, 'rb')
-        did_reopen_file = True
 
     resumable_url = initiate_resumable_upload(file_size, temp_upload_url)
 
@@ -59,9 +54,6 @@ def perform_resumable_upload(data, temp_upload_url=None, progressbar=None):
             start_byte = retry_partial_upload(
                 file_size=file_size, resumable_url=resumable_url
             )
-
-    if did_reopen_file:
-        data.close()
 
 
 def initiate_resumable_upload(size, temp_upload_url, retry_count=0):

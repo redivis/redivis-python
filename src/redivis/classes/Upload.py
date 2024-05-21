@@ -59,7 +59,13 @@ class Upload(Base):
             (hasattr(data, "read") and os.stat(data.name).st_size > 1e7)
             or (hasattr(data, "__len__") and len(data) > 1e7)
         ):
+            did_reopen_file = False
             pbar_bytes = None
+            # If file isn't in binary mode, we need to reopen, otherwise uploading of non-text files will fail
+            if hasattr(data, 'mode') and 'b' not in data.mode:
+                data = open(data.name, 'rb')
+                did_reopen_file = True
+
             size = os.stat(data.name).st_size if hasattr(data, "read") else len(data)
             if progress:
                 pbar_bytes = tqdm(total=size, unit='B', leave=False, unit_scale=True)
@@ -77,6 +83,8 @@ class Upload(Base):
                 perform_standard_upload(data=data, temp_upload_url=temp_upload["url"],
                                         progressbar=pbar_bytes)
 
+            if did_reopen_file:
+                data.close()
             if progress:
                 pbar_bytes.close()
 
