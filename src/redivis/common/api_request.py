@@ -5,7 +5,7 @@ import json
 import platform
 from urllib.parse import unquote
 
-from .auth import get_auth_token
+from .auth import get_auth_token, refresh_credentials
 from .._version import __version__
 
 
@@ -21,6 +21,7 @@ def make_request(
     files=None,
     headers={}
 ):
+    original_parameters = locals().copy()
     api_endpoint = __get_api_endpoint()
     verify_ssl = (
         False
@@ -65,6 +66,9 @@ def make_request(
 
     response_json = {}
     try:
+        if r.status_code == 401 and os.getenv("REDIVIS_API_TOKEN") is None and os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None:
+            refresh_credentials()
+            return make_request(**original_parameters)
         if r.status_code >= 400 or (method != "head" and parse_response and r.text != "OK"):
             if method == "head":
                 if "X-REDIVIS-ERROR-PAYLOAD" in r.headers:
