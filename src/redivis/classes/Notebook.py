@@ -61,10 +61,14 @@ class Notebook(Base):
 
         with open(temp_file_path, 'rb') as f:
             if temp_upload["resumable"]:
-                perform_resumable_upload(data=f, progressbar=pbar_bytes,
+                perform_resumable_upload(data=f,
+                                         progressbar=pbar_bytes,
+                                         proxy_url=temp_upload["proxy_url"],
                                          temp_upload_url=temp_upload["url"])
             else:
-                perform_standard_upload(data=f, temp_upload_url=temp_upload["url"],
+                perform_standard_upload(data=f,
+                                        temp_upload_url=temp_upload["url"],
+                                        proxy_url=temp_upload["proxy_url"],
                                         progressbar=pbar_bytes)
 
         pbar_bytes.close()

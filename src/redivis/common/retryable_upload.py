@@ -5,16 +5,22 @@ import requests
 import os
 import logging
 from tqdm.utils import CallbackIOWrapper
+from urllib.parse import quote as quote_uri
 
-
-def perform_resumable_upload(data, temp_upload_url=None, progressbar=None):
+def perform_resumable_upload(data, temp_upload_url=None, proxy_url=None, progressbar=None):
     retry_count = 0
     start_byte = 0
     is_file = True if hasattr(data, "read") else False
     file_size = os.stat(data.name).st_size if is_file else len(data)
     chunk_size = file_size
 
+    if proxy_url:
+        temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
+
     resumable_url = initiate_resumable_upload(file_size, temp_upload_url)
+
+    if proxy_url:
+        resumable_url = f"{proxy_url}?url={quote_uri(resumable_url)}"
 
     while start_byte < file_size or start_byte == 0: # handle empty upload for start_byte == 0
         end_byte = min(start_byte + chunk_size - 1, file_size - 1)
@@ -121,7 +127,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url):
         )
 
 
-def perform_standard_upload(data, temp_upload_url=None, retry_count=0, progressbar=None):
+def perform_standard_upload(data, temp_upload_url=None, proxy_url=None, retry_count=0, progressbar=None):
     try:
         if progressbar:
             data = CallbackIOWrapper(progressbar.update, data, "read")
