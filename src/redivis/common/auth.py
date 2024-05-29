@@ -13,7 +13,8 @@ verify_ssl = os.getenv('REDIVIS_API_ENDPOINT', 'https://redivis.com').find("http
 credentials_file = redivis_dir / "credentials"
 scope = 'data.edit'
 client_id = '7YGtYWuQot1TEe0pHB3EPSj5'
-base_url = re.match(r'(https://.*?)(/|$)', os.getenv('REDIVIS_API_ENDPOINT', 'https://redivis.com')).group(1)
+# Note that https is optional, since traffic can happen over http if all in the same cluster
+base_url = re.match(r'(https://.*?)(/|$)', os.getenv('REDIVIS_API_ENDPOINT', 'https?://redivis.com')).group(1)
 
 
 def get_auth_token():
