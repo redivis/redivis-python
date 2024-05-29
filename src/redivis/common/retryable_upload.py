@@ -23,9 +23,6 @@ def perform_resumable_upload(data, temp_upload_url=None, proxy_url=None, progres
 
     resumable_url = initiate_resumable_upload(file_size, temp_upload_url, headers)
 
-    if proxy_url:
-        resumable_url = f"{proxy_url}?url={quote_uri(resumable_url)}"
-
     while start_byte < file_size or start_byte == 0: # handle empty upload for start_byte == 0
         end_byte = min(start_byte + chunk_size - 1, file_size - 1)
         if is_file:
