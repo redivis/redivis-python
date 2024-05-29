@@ -5,16 +5,23 @@ import requests
 import os
 import logging
 from tqdm.utils import CallbackIOWrapper
+from urllib.parse import quote as quote_uri
+from .auth import get_auth_token
 
 
-def perform_resumable_upload(data, temp_upload_url=None, progressbar=None):
+def perform_resumable_upload(data, temp_upload_url=None, proxy_url=None, progressbar=None):
     retry_count = 0
     start_byte = 0
     is_file = True if hasattr(data, "read") else False
     file_size = os.stat(data.name).st_size if is_file else len(data)
     chunk_size = file_size
+    headers = {}
 
-    resumable_url = initiate_resumable_upload(file_size, temp_upload_url)
+    if proxy_url:
+        headers["Authorization"] = f"Bearer {get_auth_token()}"
+        temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
+
+    resumable_url = initiate_resumable_upload(file_size, temp_upload_url, headers)
 
     while start_byte < file_size or start_byte == 0: # handle empty upload for start_byte == 0
         end_byte = min(start_byte + chunk_size - 1, file_size - 1)
@@ -34,8 +41,11 @@ def perform_resumable_upload(data, temp_upload_url=None, progressbar=None):
             res = requests.put(
                 url=resumable_url,
                 headers={
-                    "Content-Length": f"{end_byte - start_byte + 1}",
-                    "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
+                    **headers,
+                    **{
+                        "Content-Length": f"{end_byte - start_byte + 1}",
+                        "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
+                    }
                 },
                 data=chunk,
             )
@@ -52,18 +62,21 @@ def perform_resumable_upload(data, temp_upload_url=None, progressbar=None):
             time.sleep(retry_count/2)
             print("A network error occurred. Retrying last chunk of resumable upload.")
             start_byte = retry_partial_upload(
-                file_size=file_size, resumable_url=resumable_url
+                file_size=file_size, resumable_url=resumable_url, headers=headers
             )
 
 
-def initiate_resumable_upload(size, temp_upload_url, retry_count=0):
+def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
     did_request_complete = False
     try:
         res = requests.post(
             temp_upload_url,
             headers={
-                "x-upload-content-length": str(size),
-                "x-goog-resumable": "start",
+                **headers,
+                **{
+                    "x-upload-content-length": str(size),
+                    "x-goog-resumable": "start",
+                }
             }
         )
         did_request_complete = True
@@ -78,16 +91,22 @@ def initiate_resumable_upload(size, temp_upload_url, retry_count=0):
                 print("A network error occurred. Upload failed after too many retries.")
                 raise e
             time.sleep(retry_count / 2)
-            initiate_resumable_upload(size, temp_upload_url, retry_count=retry_count+1)
+            initiate_resumable_upload(size, temp_upload_url, headers, retry_count=retry_count+1)
 
 
-def retry_partial_upload(*, retry_count=0, file_size, resumable_url):
+def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
     logging.debug("Attempting to resume upload")
 
     try:
         res = requests.put(
             url=resumable_url,
-            headers={"Content-Length": "0", "Content-Range": f"bytes */{file_size}"},
+            headers={
+                **headers,
+                **{
+                    "Content-Length": "0",
+                    "Content-Range": f"bytes */{file_size}"
+                }
+            },
         )
 
         if res.status_code == 404:
@@ -118,19 +137,28 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url):
             retry_count=retry_count + 1,
             file_size=file_size,
             resumable_url=resumable_url,
+            headers=headers
         )
 
 
-def perform_standard_upload(data, temp_upload_url=None, retry_count=0, progressbar=None):
+def perform_standard_upload(data, temp_upload_url=None, proxy_url=None, retry_count=0, progressbar=None):
+    original_url = temp_upload_url
     try:
         if progressbar:
             data = CallbackIOWrapper(progressbar.update, data, "read")
 
-        res = requests.put(url=temp_upload_url, data=data)
+        headers = {}
+
+        if proxy_url:
+            headers["Authorization"] = f"Bearer {get_auth_token()}"
+            temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
+
+        res = requests.put(url=temp_upload_url, data=data, headers=headers)
         res.raise_for_status()
     except Exception as e:
         if retry_count > 20:
             print("A network error occurred. Upload failed after too many retries.")
             raise e
         time.sleep(retry_count / 2)
+        return perform_standard_upload(data=data, temp_upload_url=original_url, proxy_url=proxy_url, retry_count=retry_count+1, progressbar=progressbar)
 

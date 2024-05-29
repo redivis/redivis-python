@@ -55,16 +55,20 @@ class Notebook(Base):
         res = make_request(
             method="POST",
             path=f"/notebookJobs/{self.current_notebook_job_id}/tempUploads",
-            payload={"tempUploads": [{"size": size, "resumable": size > 1e8}]},
+            payload={"tempUploads": [{"size": size, "resumable": size > 5e7}]},
         )
         temp_upload = res["results"][0]
 
         with open(temp_file_path, 'rb') as f:
             if temp_upload["resumable"]:
-                perform_resumable_upload(data=f, progressbar=pbar_bytes,
+                perform_resumable_upload(data=f,
+                                         progressbar=pbar_bytes,
+                                         proxy_url=f"{os.getenv('REDIVIS_API_ENDPOINT')}/notebookJobs/{self.current_notebook_job_id}/tempUploadProxy",
                                          temp_upload_url=temp_upload["url"])
             else:
-                perform_standard_upload(data=f, temp_upload_url=temp_upload["url"],
+                perform_standard_upload(data=f,
+                                        temp_upload_url=temp_upload["url"],
+                                        proxy_url=f"{os.getenv('REDIVIS_API_ENDPOINT')}/notebookJobs/{self.current_notebook_job_id}/tempUploadProxy",
                                         progressbar=pbar_bytes)
 
         pbar_bytes.close()
