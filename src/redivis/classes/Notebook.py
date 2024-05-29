@@ -11,6 +11,7 @@ import pyarrow.dataset as pa_dataset
 import pyarrow.parquet as pa_parquet
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
+
 class Notebook(Base):
     def __init__(
         self,
