@@ -18,7 +18,7 @@ def perform_resumable_upload(data, temp_upload_url=None, proxy_url=None, progres
     headers = {}
 
     if proxy_url:
-        headers["Authorization"] = f"Bearer {get_auth_token()}",
+        headers["Authorization"] = f"Bearer {get_auth_token()}"
         temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
 
     resumable_url = initiate_resumable_upload(file_size, temp_upload_url, headers)
@@ -49,7 +49,6 @@ def perform_resumable_upload(data, temp_upload_url=None, proxy_url=None, progres
                         "Content-Length": f"{end_byte - start_byte + 1}",
                         "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
                     }
-
                 },
                 data=chunk,
             )
@@ -146,6 +145,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
 
 
 def perform_standard_upload(data, temp_upload_url=None, proxy_url=None, retry_count=0, progressbar=None):
+    original_url = temp_upload_url
     try:
         if progressbar:
             data = CallbackIOWrapper(progressbar.update, data, "read")
@@ -153,10 +153,8 @@ def perform_standard_upload(data, temp_upload_url=None, proxy_url=None, retry_co
         headers = {}
 
         if proxy_url:
-            headers["Authorization"] = f"Bearer {get_auth_token()}",
+            headers["Authorization"] = f"Bearer {get_auth_token()}"
             temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
-
-        print('sending to', temp_upload_url)
 
         res = requests.put(url=temp_upload_url, data=data, headers=headers)
         res.raise_for_status()
@@ -165,4 +163,5 @@ def perform_standard_upload(data, temp_upload_url=None, proxy_url=None, retry_co
             print("A network error occurred. Upload failed after too many retries.")
             raise e
         time.sleep(retry_count / 2)
+        return perform_standard_upload(data=data, temp_upload_url=original_url, proxy_url=proxy_url, retry_count=retry_count+1, progressbar=progressbar)
 
