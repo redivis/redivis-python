@@ -107,7 +107,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
             headers={
                 **headers,
                 **{
-                     "Content-Length": "0",
+                    "Content-Length": "0",
                     "Content-Range": f"bytes */{file_size}"
                 }
             },
@@ -155,6 +155,8 @@ def perform_standard_upload(data, temp_upload_url=None, proxy_url=None, retry_co
         if proxy_url:
             headers["Authorization"] = f"Bearer {get_auth_token()}",
             temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
+
+        print('sending to', temp_upload_url)
 
         res = requests.put(url=temp_upload_url, data=data, headers=headers)
         res.raise_for_status()
