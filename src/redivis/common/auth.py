@@ -21,13 +21,12 @@ def get_auth_token():
     global cached_credentials
 
     if os.getenv("REDIVIS_API_TOKEN"):
-#         TODO: enable warning after more testing
-#         if os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None and bool(getattr(sys, 'ps1', sys.flags.interactive)):
-#             warnings.warn("""Setting the REDIVIS_API_TOKEN for interactive sessions is deprecated and highly discouraged.
-# Please delete the token on Redivis and remove it from your code, and follow the authentication prompts here instead.
-#
-# This environment variable should only ever be set in a non-interactive environment, such as in an automated script or service.
-# """)
+        if os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None and bool(getattr(sys, 'ps1', sys.flags.interactive)):
+            warnings.warn("""Setting the REDIVIS_API_TOKEN for interactive sessions is deprecated and highly discouraged.
+Please delete the token on Redivis and remove it from your code, and follow the authentication prompts here instead.
+
+This environment variable should only ever be set in a non-interactive environment, such as in an automated script or service.
+""")
         return os.environ["REDIVIS_API_TOKEN"]
     elif cached_credentials is None and credentials_file.is_file():
         try:
