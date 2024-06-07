@@ -6,10 +6,13 @@ import tempfile
 import uuid
 import os
 import pathlib
+from contextlib import closing
 from ..classes.Row import Row
 from tqdm.auto import tqdm
 import shutil
 from ..common.api_request import make_request
+from threading import Event
+
 
 class RedivisArrowIterator:
     def __init__(self, streams, mapped_variables, progressbar, coerce_schema):
@@ -21,6 +24,7 @@ class RedivisArrowIterator:
         self.__get_next_reader__()
 
     def __get_next_reader__(self):
+        # TODO: this won't get closed properly if the iterator is not fully consumed
         arrow_response = make_request(
             method="get",
             path=f'/readStreams/{self.streams[self.current_stream_index]["id"]}',
@@ -60,6 +64,7 @@ class RedivisArrowIterator:
                 self.__get_next_reader__()
                 return self.__next__()
 
+
 def list_rows(
     *,
     uri,
@@ -70,34 +75,39 @@ def list_rows(
     target_parallelization=None,
     progress=True,
     coerce_schema=False,
-    batch_preprocessor=None
+    batch_preprocessor=None,
+    table=None,
+    use_export_api=False
 ):
+    use_export_api = use_export_api and table and output_type != 'arrow_iterator' and selected_variables is None and batch_preprocessor is None and max_results is None
+    progressbar = None
+
     if target_parallelization is None:
         target_parallelization = mp.cpu_count()
 
-    read_session = make_request(
-        method="post",
-        path=f'{uri}/readSessions',
-        parse_response=True,
-        payload={
-            "selectedVariables": selected_variables,
-            "maxResults": max_results,
-            "format": "arrow",
-            "requestedStreamCount": min(target_parallelization, 16)
-        },
-    )
-
-    progressbar = None
-    if progress:
-        progressbar = tqdm(total=read_session["numRows"], leave=False)
-
-    if output_type == 'arrow_iterator':
-        return RedivisArrowIterator(
-            streams=read_session["streams"],
-            mapped_variables=mapped_variables,
-            progressbar=progressbar,
-            coerce_schema=coerce_schema
+    if not use_export_api:
+        read_session = make_request(
+            method="post",
+            path=f'{uri}/readSessions',
+            parse_response=True,
+            payload={
+                "selectedVariables": selected_variables,
+                "maxResults": max_results,
+                "format": "arrow",
+                "requestedStreamCount": min(target_parallelization, 8)
+            },
         )
+
+        if progress:
+            progressbar = tqdm(total=read_session["numRows"], leave=False)
+
+        if output_type == 'arrow_iterator':
+            return RedivisArrowIterator(
+                streams=read_session["streams"],
+                mapped_variables=mapped_variables,
+                progressbar=progressbar,
+                coerce_schema=coerce_schema
+            )
 
     folder = (
         pathlib.Path("/")
@@ -106,58 +116,59 @@ def list_rows(
                 "redivis",
                 "tables",
                 f"{uuid.uuid4()}"
-
             )
     )
 
-    # create the folder, if it doesn't exist
-    folder.mkdir(parents=True, exist_ok=True)
+
     # get the absolute folder path, as a string
-    folder = str(folder.absolute())
+    folder_path = str(folder.absolute())
 
     try:
-        # Use download_state to notify worker threads when to quit.
-        # See: https://stackoverflow.com/a/29237343/101923
-        download_state = {"done": False}
+        if use_export_api:
+            table.download(folder_path + '/', format='parquet', progress=progress)
+            arrow_dataset = pyarrow_dataset.dataset(folder_path, format="parquet")
+        else:
+            # create the folder, if it doesn't exist
+            folder.mkdir(parents=True, exist_ok=True)
+            # Use download_state to notify worker threads when to quit.
+            # See: https://stackoverflow.com/a/29237343/101923
+            cancel_event = Event()
 
-        # Code to use multiprocess... would simplify exiting on stop, but progress doesn't currently work
-        # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
+            # Code to use multiprocess... would simplify exiting on stop, but progress doesn't currently work
+            # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
 
-        # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
-        if len(read_session["streams"]):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(read_session["streams"])) as executor:
-                futures = [executor.submit(process_stream, stream, folder, mapped_variables, coerce_schema, progressbar, download_state, batch_preprocessor)
-                           for stream in read_session["streams"]]
+            # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
+            if len(read_session["streams"]):
+                with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=min(8, len(read_session["streams"]))) as executor:
+                    futures = [
+                        executor.submit(process_stream, stream, folder_path, mapped_variables, coerce_schema, progressbar,
+                                        batch_preprocessor, cancel_event)
+                        for stream in read_session["streams"]]
 
-                not_done = futures
+                    not_done = futures
 
-                try:
-                    while not_done:
-                        # next line 'sleeps' this main thread, letting the thread pool run
-                        freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.2)
-                        for future in freshly_done:
-                            # Call result() on any finished threads to raise any exceptions encountered.
-                            future.result()
-                except KeyboardInterrupt:
-                    print("KeyboardInterrupt")
-                finally:
-                    for future in not_done:
-                        # Only cancels futures that were never started
-                        future.cancel()
-                    download_state["done"] = True
-                    # Shutdown all background threads, now that they should know to exit early.
-                    executor.shutdown(wait=True, cancel_futures=True)
+                    try:
+                        while not_done and not cancel_event.is_set():
+                            # next line 'sleeps' this main thread, letting the thread pool run
+                            freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.2)
+                            for future in freshly_done:
+                                # Call result() on any finished threads to raise any exceptions encountered.
+                                future.result()
+                    finally:
+                        cancel_event.set()
+                        # Shutdown all background threads, now that they should know to exit early.
+                        executor.shutdown(wait=True, cancel_futures=True)
 
-        if progress:
-            progressbar.close()
-
-        arrow_dataset = pyarrow_dataset.dataset(folder, format="feather", schema = pyarrow.schema(map(variable_to_field, mapped_variables)) if batch_preprocessor is None else None)
+            if progressbar:
+                progressbar.close()
+            arrow_dataset = pyarrow_dataset.dataset(folder_path, format="feather", schema = pyarrow.schema(map(variable_to_field, mapped_variables)) if batch_preprocessor is None else None)
 
         if output_type == 'arrow_dataset':
             return arrow_dataset
         elif output_type == 'polars_lazyframe':
             import polars
-            return polars.scan_ipc(f'{folder}/*', memory_map=True)
+            return polars.scan_ipc(f'{folder_path}/*', memory_map=True)
         elif output_type == 'dask_dataframe':
             import dask.dataframe as dd
             # TODO: simplify once dask supports reading from feather: https://github.com/dask/dask/issues/6865
@@ -199,7 +210,7 @@ def list_rows(
                 ]
     finally:
         if output_type != 'arrow_dataset' and output_type != "polars_lazyframe":
-            shutil.rmtree(folder)
+            shutil.rmtree(folder_path, ignore_errors=False)
 
 
 def variable_to_field(variable):
@@ -242,56 +253,54 @@ def coerce_string_variable(pyarrow_array, variable):
         return pyarrow.compute.cast(pyarrow_array, pyarrow.bool_())
 
 
-def process_stream(stream, folder, mapped_variables, coerce_schema, progressbar, download_state, batch_preprocessor):
-    arrow_response = make_request(
+def process_stream(stream, folder_path, mapped_variables, coerce_schema, progressbar, batch_preprocessor, cancel_event):
+
+    with closing(make_request(
         method="get",
         path=f'/readStreams/{stream["id"]}',
         stream=True,
         parse_response=False,
-    )
-
-    reader = pyarrow.ipc.RecordBatchStreamReader(arrow_response.raw)
-
-    if coerce_schema:
-        variables_in_stream = list(map(lambda field_name: next(x for x in mapped_variables if x["name"] == field_name), reader.schema.names))
-        output_schema = pyarrow.schema(map(variable_to_field, variables_in_stream))
-    else:
-        output_schema = reader.schema
-
-    has_content = False
-    # create the os_file path
-    os_file = pathlib.Path(folder).joinpath(f"{stream['id']}.feather").absolute()
-    with pyarrow.OSFile(str(os_file), mode="wb") as f:
-        writer = None
-        for batch in reader:
-            # exit out of thread
-            if download_state["done"]:
-                break
-
+    )) as arrow_response:
+        has_content = False
+        # create the os_file path
+        os_file = pathlib.Path(folder_path).joinpath(f"{stream['id']}.feather").absolute()
+        with pyarrow.OSFile(str(os_file), mode="wb") as f, pyarrow.ipc.RecordBatchStreamReader(arrow_response.raw) as reader:
             if coerce_schema:
-                batch = pyarrow.RecordBatch.from_arrays(list(map(coerce_string_variable, batch.columns, variables_in_stream)), schema=output_schema)
+                variables_in_stream = list(
+                    map(lambda field_name: next(x for x in mapped_variables if x["name"] == field_name),
+                        reader.schema.names))
+                output_schema = pyarrow.schema(map(variable_to_field, variables_in_stream))
+            else:
+                output_schema = reader.schema
+            writer = None
+            for batch in reader:
+                # exit out of thread
+                if cancel_event.is_set():
+                    has_content = False
+                    break
 
-            num_rows = batch.num_rows
-            if batch_preprocessor:
-                batch = batch_preprocessor(batch)
+                if coerce_schema:
+                    batch = pyarrow.RecordBatch.from_arrays(list(map(coerce_string_variable, batch.columns, variables_in_stream)), schema=output_schema)
 
-            if batch is not None:
-                has_content = True
-                if writer is None:
-                    writer = pyarrow.ipc.RecordBatchFileWriter(f, output_schema if batch_preprocessor is None else batch.schema)
+                num_rows = batch.num_rows
+                if batch_preprocessor:
+                    batch = batch_preprocessor(batch)
 
-                writer.write_batch(batch)
+                if batch is not None:
+                    has_content = True
+                    if writer is None:
+                        writer = pyarrow.ipc.RecordBatchFileWriter(f, output_schema if batch_preprocessor is None else batch.schema)
 
-            if progressbar is not None:
-                progressbar.update(num_rows)
+                    writer.write_batch(batch)
 
-        if writer is not None:
-            writer.close()
+                if progressbar is not None:
+                    progressbar.update(num_rows)
 
-    if has_content == False:
-        os.remove(os_file)
+            if writer is not None:
+                writer.close()
 
-    reader.close()
+        if has_content == False:
+            os.remove(os_file)
 
 
 def format_tuple_type(val, type):

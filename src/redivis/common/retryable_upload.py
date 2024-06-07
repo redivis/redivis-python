@@ -54,7 +54,7 @@ def perform_resumable_upload(data, temp_upload_url=None, proxy_url=None, progres
             start_byte += chunk_size
             retry_count = 0
         except Exception as e:
-            if retry_count > 20:
+            if retry_count > 10:
                 print("A network error occurred. Upload failed after too many retries.")
                 raise e
 
@@ -87,7 +87,7 @@ def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
         if did_request_complete:
             raise e
         else:
-            if retry_count > 20:
+            if retry_count > 10:
                 print("A network error occurred. Upload failed after too many retries.")
                 raise e
             time.sleep(retry_count / 2)
@@ -128,6 +128,8 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
             # If GCS hasn't received any bytes, the header will be missing
             else:
                 return 0
+        else:
+            raise Exception("An unknown error occurred. Please try again.")
     except Exception as e:
         if retry_count > 10:
             raise e
@@ -156,7 +158,7 @@ def perform_standard_upload(data, temp_upload_url=None, proxy_url=None, retry_co
         res = requests.put(url=temp_upload_url, data=data, headers=headers)
         res.raise_for_status()
     except Exception as e:
-        if retry_count > 20:
+        if retry_count > 10:
             print("A network error occurred. Upload failed after too many retries.")
             raise e
         time.sleep(retry_count / 2)

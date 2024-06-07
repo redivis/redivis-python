@@ -22,73 +22,20 @@ def make_request(
     headers={}
 ):
     original_parameters = locals().copy()
-    api_endpoint = __get_api_endpoint()
-    verify_ssl = (
-        False
-        if api_endpoint.find("https://localhost", 0) == 0
-        or os.getenv("REDIVIS_ENV") == "development"
-        or os.getenv("REDIVIS_ENV") == "test"
-        or os.getenv("REDIVIS_ENV") == "staging"
-        else True
-    )
-    method = method.lower()
-    url = f"{api_endpoint}{path}"
-
-    headers = {
-        **{
-            "Authorization": f"Bearer {get_auth_token()}",
-            "X-Redivis-Client": "redivis-python",
-            "X-Redivis-Client-Version": __version__,
-            "X-Redivis-Client-Python-Version": platform.python_version(),
-            "X-Redivis-Client-System": platform.system(),
-            "X-Redivis-Client-System-Version": platform.release(),
-            "User-Agent": f"redivis-python/{__version__}",
-        },
-        **headers
-    }
-
-    logging.debug(f"Making API '{method}' request to '{url}'")
-
-    if parse_payload and payload:
-        payload = json.dumps(payload)
-        headers["Content-Type"] = "application/json"
-
-    r = getattr(requests, method)(
-        url,
-        headers=headers,
-        params=query,
-        verify=verify_ssl,
-        data=payload,
+    args = get_request_args(
+        method=method,
+        path=path,
+        query=query,
+        payload=payload,
+        parse_payload=parse_payload,
         stream=stream,
-        files=files,
-        timeout=125,
+        files=files
     )
 
-    response_json = {}
-    try:
-        if r.status_code == 401 and os.getenv("REDIVIS_API_TOKEN") is None and os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None:
-            refresh_credentials()
-            return make_request(**original_parameters)
-        if r.status_code >= 400 or (method != "head" and parse_response and r.text != "OK"):
-            if method == "head":
-                if "X-REDIVIS-ERROR-PAYLOAD" in r.headers:
-                    response_json = json.loads(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
-                else:
-                    response_json = {"error": {"status": r.status_code}}
-            else:
-                response_json = r.json()
-    except Exception:
-        if method == "head":
-            raise Exception(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
-        else:
-            raise Exception(r.text)
+    logging.debug(f"Making API '{method}' request to '{args['url']}'")
+    r = requests.request(**args)
 
-    if r.status_code >= 400:
-        raise Exception(response_json["error"])
-    elif parse_response:
-        return response_json
-    else:
-        return r
+    return process_request_response(r, parse_response, method, original_parameters)
 
 
 def make_paginated_request(
@@ -125,6 +72,87 @@ def make_paginated_request(
             break
 
     return results
+
+
+def get_request_args(
+    method,
+    path,
+    query=None,
+    payload=None,
+    parse_payload=True,
+    stream=False,
+    files=None,
+    headers={}
+ ):
+    api_endpoint = __get_api_endpoint()
+    verify_ssl = (
+        False
+        if api_endpoint.find("https://localhost", 0) == 0
+           or os.getenv("REDIVIS_ENV") == "development"
+           or os.getenv("REDIVIS_ENV") == "test"
+           or os.getenv("REDIVIS_ENV") == "staging"
+        else True
+    )
+    url = f"{api_endpoint}{path}"
+
+    method = method.upper()
+    headers = {
+        **{
+            "Authorization": f"Bearer {get_auth_token()}",
+            "X-Redivis-Client": "redivis-python",
+            "X-Redivis-Client-Version": __version__,
+            "X-Redivis-Client-Python-Version": platform.python_version(),
+            "X-Redivis-Client-System": platform.system(),
+            "X-Redivis-Client-System-Version": platform.release(),
+            "User-Agent": f"redivis-python/{__version__}",
+        },
+        **headers
+    }
+
+    if parse_payload and payload:
+        payload = json.dumps(payload)
+        headers["Content-Type"] = "application/json"
+
+    return {
+        "method": method.upper(),
+        "url": url,
+        "headers": headers,
+        "params": query,
+        "verify": verify_ssl,
+        "data": payload,
+        "stream": stream,
+        "files": files,
+        "timeout": 125
+    }
+
+
+def process_request_response(r, parse_response=True, method=None, original_parameters=None):
+    response_json = {}
+    try:
+        if r.status_code == 401 and os.getenv("REDIVIS_API_TOKEN") is None and os.getenv(
+                "REDIVIS_NOTEBOOK_JOB_ID") is None:
+            refresh_credentials()
+            return make_request(**original_parameters)
+        if r.status_code >= 400 or (method != "head" and parse_response and r.text != "OK"):
+            if method == "head":
+                if "X-REDIVIS-ERROR-PAYLOAD" in r.headers:
+                    response_json = json.loads(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
+                else:
+                    response_json = {"error": {"status": r.status_code}}
+            else:
+                response_json = r.json()
+    except Exception:
+        if method == "head":
+            raise Exception(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
+        else:
+            raise Exception(r.text)
+
+    if r.status_code >= 400:
+        raise Exception(response_json["error"])
+    elif parse_response:
+        return response_json
+    else:
+        return r
 
 
 def __get_api_endpoint():

@@ -11,6 +11,7 @@ from tqdm.auto import tqdm
 from threading import Event
 
 from .Upload import Upload
+from .Export import Export
 from .Variable import Variable
 from .File import File
 from ..common.list_rows import list_rows
@@ -18,6 +19,7 @@ from ..common.api_request import make_request, make_paginated_request
 from ..common.util import get_geography_variable, get_warning
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
+MAX_STREAMING_BYTES = 1e9 if os.getenv('REDIVIS_NOTEBOOK_JOB_ID') is None else 1e11
 
 class Table(Base):
     def __init__(
@@ -81,7 +83,7 @@ class Table(Base):
         uploads = make_paginated_request(
             path=f"{self.uri}/uploads", max_results=max_results
         )
-        return [Upload(upload) for upload in uploads]
+        return [Upload(upload["name"], table=self, properties=upload) for upload in uploads]
 
     def list_variables(self, *, max_results=None):
         variables = make_paginated_request(
@@ -231,6 +233,14 @@ class Table(Base):
 
             raise e
 
+    def download(self, path=None, *, format='csv', overwrite=False, progress=True):
+        res = make_request(
+            method="POST",
+            path=f"{self.uri}/exports",
+            payload={"format": format},
+        )
+        export_job = Export(res["id"], table=self, properties=res)
+        return export_job.download_files(path=path, overwrite=overwrite, progress=progress)
 
     def list_files(self, max_results=None, *, file_id_variable=None):
         if file_id_variable:
@@ -274,6 +284,7 @@ class Table(Base):
         def download(file, cancel_event):
             nonlocal progress
             nonlocal pbar_count
+            # TODO: if overwriting file, first check if file is the same size, and if so check md5 hash, and skip if identical (need md5 in header)
             file.download(path, overwrite=overwrite, progress=False, on_progress=on_progress if progress else None, cancel_event=cancel_event)
             if progress and not cancel_event.is_set():
                 pbar_count.update()
@@ -293,11 +304,11 @@ class Table(Base):
             except KeyboardInterrupt:
                 print("KeyboardInterrupt")
             finally:
+                cancel_event.set()
+
                 for future in not_done:
                     # Only cancels futures that were never started
                     future.cancel()
-
-                cancel_event.set()
 
                 # Shutdown all background threads, now that they should know to exit early.
                 executor.shutdown(wait=True, cancel_futures=True)
@@ -314,13 +325,15 @@ class Table(Base):
 
         return list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_dataset",
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
     def to_arrow_table(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
@@ -331,13 +344,15 @@ class Table(Base):
 
         return list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
     def to_polars_lazyframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
@@ -348,13 +363,15 @@ class Table(Base):
 
         return list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="polars_lazyframe",
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
     def to_dask_dataframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
@@ -365,13 +382,15 @@ class Table(Base):
 
         return list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="dask_dataframe",
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
     def to_pandas_dataframe(self, max_results=None, *, variables=None, progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None):
@@ -384,13 +403,15 @@ class Table(Base):
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
         import pandas as pd
@@ -421,13 +442,15 @@ class Table(Base):
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
         import pandas as pd
@@ -464,12 +487,14 @@ class Table(Base):
         mapped_variables = get_mapped_variables(variables, self.uri)
         arrow_table = list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
         df = arrow_table.to_pandas(self_destruct=True)
@@ -492,12 +517,13 @@ class Table(Base):
         mapped_variables = get_mapped_variables(variables, self.uri)
         return list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="arrow_iterator",
             progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == 'dataset',
+            coerce_schema=self.properties["container"]["kind"] == 'dataset'
         )
 
     def list_rows(self, max_results=None, *, variables=None, progress=True):
@@ -509,12 +535,14 @@ class Table(Base):
         mapped_variables = get_mapped_variables(variables, self.uri)
         return list_rows(
             uri=self.uri,
+            table=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
             output_type="tuple",
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
@@ -578,6 +606,7 @@ def get_table_parents(dataset, project):
         raise Exception(
             "Cannot reference an unqualified table if the neither the REDIVIS_DEFAULT_PROJECT or REDIVIS_DEFAULT_DATASET environment variables are set."
         )
+
 
 def update_properties(instance, properties):
     instance.properties = properties
