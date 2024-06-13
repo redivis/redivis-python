@@ -5,6 +5,7 @@ from urllib.parse import quote as quote_uri
 
 from ..common.api_request import make_request, make_paginated_request
 
+
 class Dataset(Base):
     def __init__(
         self,
@@ -19,13 +20,24 @@ class Dataset(Base):
         self.user = user
         self.organization = organization
 
-        if version and version != "current" and version != "next" and not version.lower().startswith("v"):
+        if (
+            version
+            and version != "current"
+            and version != "next"
+            and not version.lower().startswith("v")
+        ):
             version = f"v{version}"
 
-        self.qualified_reference = properties["qualifiedReference"] if "qualifiedReference" in (properties or {}) else (
-            f"{(self.organization or self.user).name}.{self.name}:{version}"
+        self.qualified_reference = (
+            properties["qualifiedReference"]
+            if "qualifiedReference" in (properties or {})
+            else (f"{(self.organization or self.user).name}.{self.name}:{version}")
         )
-        self.scoped_reference = properties["scopedReference"] if "scopedReference" in (properties or {}) else f"{self.name}:{version}"
+        self.scoped_reference = (
+            properties["scopedReference"]
+            if "scopedReference" in (properties or {})
+            else f"{self.name}:{version}"
+        )
         self.uri = f"/datasets/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
@@ -127,6 +139,7 @@ class Dataset(Base):
         )
         update_properties(self, res)
         return self
+
 
 def update_properties(instance, properties):
     instance.properties = properties

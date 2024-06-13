@@ -10,10 +10,16 @@ class Project(Base):
         self.user = user
         self.name = name
 
-        self.qualified_reference = properties["qualifiedReference"] if "qualifiedReference" in (properties or {}) else (
-            f"{self.user.name}.{self.name}"
+        self.qualified_reference = (
+            properties["qualifiedReference"]
+            if "qualifiedReference" in (properties or {})
+            else (f"{self.user.name}.{self.name}")
         )
-        self.scoped_reference = properties["scopedReference"] if "scopedReference" in (properties or {}) else f"{self.name}"
+        self.scoped_reference = (
+            properties["scopedReference"]
+            if "scopedReference" in (properties or {})
+            else f"{self.name}"
+        )
         self.uri = f"/projects/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
@@ -46,6 +52,7 @@ class Project(Base):
 
     def table(self, name):
         return Table(name, project=self)
+
 
 def update_properties(instance, properties):
     instance.properties = properties

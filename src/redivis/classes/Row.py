@@ -77,7 +77,8 @@ class Row(object):
             return NotImplemented
         return (
             self.__redivis_hidden_values == other.__redivis_hidden_values
-            and self.__redivis_hidden_variable_name_to_index == other.__redivis_hidden_variable_name_to_index
+            and self.__redivis_hidden_variable_name_to_index
+            == other.__redivis_hidden_variable_name_to_index
         )
 
     def __ne__(self, other):
@@ -86,7 +87,9 @@ class Row(object):
     def __repr__(self):
         column_index_to_variable_name = {}
         for variable_name in self.__redivis_hidden_variable_name_to_index.keys():
-            column_index_to_variable_name[self.__redivis_hidden_variable_name_to_index[variable_name]]=variable_name
+            column_index_to_variable_name[
+                self.__redivis_hidden_variable_name_to_index[variable_name]
+            ] = variable_name
         cells = []
         for index, value in enumerate(self.__redivis_hidden_values):
             cells.append(f"{column_index_to_variable_name[index]}: {value}")
