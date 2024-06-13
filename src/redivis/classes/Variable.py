@@ -15,8 +15,10 @@ class Variable(Base):
         self.name = name
         self.table = table
         self.upload = upload
-        self.uri = properties["uri"] if "uri" in (properties or {}) else (
-            f"{table.uri if table else upload.uri}/variables/{self.name}"
+        self.uri = (
+            properties["uri"]
+            if "uri" in (properties or {})
+            else (f"{table.uri if table else upload.uri}/variables/{self.name}")
         )
         self.properties = properties
 

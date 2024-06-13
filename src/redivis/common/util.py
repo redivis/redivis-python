@@ -23,3 +23,29 @@ def get_warning(kind):
     else:
         return 'WARNING'
 
+
+def arrow_table_to_pandas(arrow_table, dtype_backend, date_as_object, max_parallelization):
+    import pandas as pd
+    import pyarrow as pa
+
+    pa.set_cpu_count(max_parallelization)
+    pa.set_io_thread_count(max_parallelization)
+
+    if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
+        raise Exception(
+            f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
+
+    if dtype_backend == 'numpy_nullable':
+        df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
+            pa.int64(): pd.Int64Dtype(),
+            pa.bool_(): pd.BooleanDtype(),
+            pa.float64(): pd.Float64Dtype(),
+            pa.string(): pd.StringDtype(),
+        }.get)
+    elif dtype_backend == 'pyarrow':
+        df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
+    else:
+        df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
+
+    return df
+

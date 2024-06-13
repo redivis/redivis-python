@@ -6,16 +6,12 @@ from ..common.api_request import make_paginated_request
 
 
 class User(Base):
-    def __init__(self, name, properties = {}):
+    def __init__(self, name, properties={}):
         self.name = name
         self.uri = f"/users/{quote_uri(self.name, '')}"
         self.properties = {
-            **{
-                "kind": "user",
-                "userName": name,
-                "uri": self.uri
-            },
-            **properties
+            **{"kind": "user", "userName": name, "uri": self.uri},
+            **properties,
         }
 
     def dataset(self, name, *, version="current"):
@@ -29,7 +25,8 @@ class User(Base):
             path=f"{self.uri}/datasets", page_size=100, max_results=max_results
         )
         return [
-            Dataset(dataset["name"], user=self, properties=dataset) for dataset in datasets
+            Dataset(dataset["name"], user=self, properties=dataset)
+            for dataset in datasets
         ]
 
     def list_projects(self, max_results=None):
@@ -37,5 +34,6 @@ class User(Base):
             path=f"{self.uri}/projects", page_size=100, max_results=max_results
         )
         return [
-            Project(project["name"], user=self, properties=project) for project in projects
+            Project(project["name"], user=self, properties=project)
+            for project in projects
         ]
