@@ -27,7 +27,7 @@ class Export(Base):
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def download_files(self, *, path, overwrite, progress=True, max_parallelization):
+    def download_files(self, *, path, overwrite, progress=True):
         # TODO: if overwriting file, first check if file is the same size, and if so check md5 hash, and skip if identical (need md5 in header)
         self.wait_for_finish()
         file_count = self.properties["fileCount"]
@@ -79,7 +79,7 @@ class Export(Base):
         # TODO: this should use async, not threads
         # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(max_parallelization, file_count)
+            max_workers=min(os.cpu_count() * 5, file_count)
         ) as executor:
             futures = [
                 executor.submit(

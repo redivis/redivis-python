@@ -110,6 +110,9 @@ def list_rows(
     if max_parallelization < 1:
         raise ValueError("max_parallelization must be greater than 0")
 
+    pyarrow.set_cpu_count(max_parallelization)
+    pyarrow.set_io_thread_count(max_parallelization)
+
     if not use_export_api:
         read_session = make_request(
             method="post",

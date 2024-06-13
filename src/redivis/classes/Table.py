@@ -300,7 +300,6 @@ class Table(Base):
         format="csv",
         overwrite=False,
         progress=True,
-        max_parallelization=os.cpu_count() * 5,
     ):
         res = make_request(
             method="POST",
@@ -312,7 +311,6 @@ class Table(Base):
             path=path,
             overwrite=overwrite,
             progress=progress,
-            max_parallelization=max_parallelization,
         )
 
     def list_files(self, max_results=None, *, file_id_variable=None):
