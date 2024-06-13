@@ -6,7 +6,7 @@ import pyarrow as pa
 
 from ..common.api_request import make_request
 from ..common.list_rows import list_rows
-from ..common.util import get_geography_variable, get_warning
+from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
 
 
 class Query(Base):
@@ -38,7 +38,7 @@ class Query(Base):
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def to_arrow_dataset(self, max_results=None, *, progress=True, batch_preprocessor=None):
+    def to_arrow_dataset(self, max_results=None, *, progress=True, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         self._wait_for_finish()
 
         return list_rows(
@@ -48,10 +48,11 @@ class Query(Base):
             output_type="arrow_dataset",
             progress=progress,
             coerce_schema=False,
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            max_parallelization=max_parallelization
         )
 
-    def to_arrow_table(self, max_results=None, *, progress=True, batch_preprocessor=None):
+    def to_arrow_table(self, max_results=None, *, progress=True, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         self._wait_for_finish()
 
         return list_rows(
@@ -61,10 +62,11 @@ class Query(Base):
             output_type="arrow_table",
             progress=progress,
             coerce_schema=False,
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            max_parallelization=max_parallelization
         )
 
-    def to_polars_lazyframe(self, max_results=None, *, progress=True, batch_preprocessor=None):
+    def to_polars_lazyframe(self, max_results=None, *, progress=True, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         self._wait_for_finish()
 
         return list_rows(
@@ -74,10 +76,11 @@ class Query(Base):
             output_type="polars_lazyframe",
             progress=progress,
             coerce_schema=False,
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            max_parallelization=max_parallelization
         )
 
-    def to_dask_dataframe(self, max_results=None, *, progress=True, batch_preprocessor=None):
+    def to_dask_dataframe(self, max_results=None, *, progress=True, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         self._wait_for_finish()
 
         return list_rows(
@@ -87,13 +90,11 @@ class Query(Base):
             output_type="dask_dataframe",
             progress=progress,
             coerce_schema=False,
-            batch_preprocessor=batch_preprocessor
+            batch_preprocessor=batch_preprocessor,
+            max_parallelization=max_parallelization
         )
 
-    def to_pandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None):
-        if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
-            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
-
+    def to_pandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         self._wait_for_finish()
 
         arrow_table = list_rows(
@@ -106,36 +107,11 @@ class Query(Base):
             batch_preprocessor=batch_preprocessor
         )
 
-        import pandas as pd
+        return arrow_table_to_pandas(arrow_table, dtype_backend, date_as_object, max_parallelization)
 
-        if dtype_backend == 'numpy_nullable':
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
-                pa.int64(): pd.Int64Dtype(),
-                pa.bool_(): pd.BooleanDtype(),
-                pa.float64(): pd.Float64Dtype(),
-                pa.string(): pd.StringDtype(),
-            }.get)
-        elif dtype_backend == 'pyarrow':
-            df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
-        else:
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
-
-        if geography_variable is not None:
-            geography_variable = get_geography_variable(self.properties["outputSchema"], geography_variable)
-
-        if geography_variable is not None:
-            import geopandas
-            df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(df[geography_variable["name"]])
-            df = geopandas.GeoDataFrame(data=df, geometry=geography_variable["name"], crs="EPSG:4326")
-
-        return df
-
-    def to_geopandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None):
+    def to_geopandas_dataframe(self, max_results=None, *, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         import geopandas
 
-        if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
-            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
-
         self._wait_for_finish()
 
         arrow_table = list_rows(
@@ -147,19 +123,8 @@ class Query(Base):
             coerce_schema=False,
             batch_preprocessor=batch_preprocessor
         )
-        import pandas as pd
 
-        if dtype_backend == 'numpy_nullable':
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
-                pa.int64(): pd.Int64Dtype(),
-                pa.bool_(): pd.BooleanDtype(),
-                pa.float64(): pd.Float64Dtype(),
-                pa.string(): pd.StringDtype(),
-            }.get)
-        elif dtype_backend == 'pyarrow':
-            df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
-        else:
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
+        df = arrow_table_to_pandas(arrow_table, dtype_backend, date_as_object, max_parallelization)
 
         if geography_variable is not None:
             geography_variable = get_geography_variable(self.properties["outputSchema"], geography_variable)

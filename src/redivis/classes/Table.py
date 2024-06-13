@@ -16,7 +16,7 @@ from .Variable import Variable
 from .File import File
 from ..common.list_rows import list_rows
 from ..common.api_request import make_request, make_paginated_request
-from ..common.util import get_geography_variable, get_warning
+from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
 MAX_STREAMING_BYTES = 1e9 if os.getenv('REDIVIS_NOTEBOOK_JOB_ID') is None else 1e11
@@ -108,7 +108,7 @@ class Table(Base):
         )
         return File(response["id"], table=self, properties=response)
 
-    def add_files(self, *, files=None, directory=None, progress=True):
+    def add_files(self, *, files=None, directory=None, progress=True, max_parallelization=os.cpu_count() * 5):
         if (files is None) == (directory is None):
             raise Exception("Either files or directory must be specified")
 
@@ -181,7 +181,7 @@ class Table(Base):
                         if "path" in file:
                             data.close()
 
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=min(100, max_parallelization)) as executor:
                         futures = [executor.submit(upload, batch_file)
                                    for batch_file in current_batch_files]
 
@@ -233,14 +233,14 @@ class Table(Base):
 
             raise e
 
-    def download(self, path=None, *, format='csv', overwrite=False, progress=True):
+    def download(self, path=None, *, format='csv', overwrite=False, progress=True, max_parallelization=os.cpu_count() * 5):
         res = make_request(
             method="POST",
             path=f"{self.uri}/exports",
             payload={"format": format},
         )
         export_job = Export(res["id"], table=self, properties=res)
-        return export_job.download_files(path=path, overwrite=overwrite, progress=progress)
+        return export_job.download_files(path=path, overwrite=overwrite, progress=progress, max_parallelization=max_parallelization)
 
     def list_files(self, max_results=None, *, file_id_variable=None):
         if file_id_variable:
@@ -264,7 +264,7 @@ class Table(Base):
             for row in rows
         ]
 
-    def download_files(self, path=None, *, overwrite=False, max_results=None, file_id_variable=None, progress=True):
+    def download_files(self, path=None, *, overwrite=False, max_results=None, file_id_variable=None, progress=True, max_parallelization=os.cpu_count() * 5):
         files = self.list_files(max_results, file_id_variable=file_id_variable)
         if path is None:
             path = os.getcwd()
@@ -290,7 +290,8 @@ class Table(Base):
                 pbar_count.update()
 
         cancel_event = Event()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
+        # TODO: this should use async, not threads
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(100, max_parallelization, len(files))) as executor:
             futures = [executor.submit(download, file, cancel_event) for file in files]
 
             not_done = futures
@@ -317,7 +318,7 @@ class Table(Base):
             pbar_count.close()
             pbar_bytes.close()
 
-    def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
+    def to_arrow_dataset(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         if not self.properties or "container" not in self.properties:
             self.get()
 
@@ -333,10 +334,11 @@ class Table(Base):
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor,
-            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES,
+            max_parallelization=max_parallelization
         )
 
-    def to_arrow_table(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
+    def to_arrow_table(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         if not self.properties or "container" not in self.properties:
             self.get()
 
@@ -352,10 +354,11 @@ class Table(Base):
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor,
-            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES,
+            max_parallelization=max_parallelization
         )
 
-    def to_polars_lazyframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
+    def to_polars_lazyframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         if not self.properties or "container" not in self.properties:
             self.get()
 
@@ -371,10 +374,11 @@ class Table(Base):
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor,
-            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES,
+            max_parallelization=max_parallelization
         )
 
-    def to_dask_dataframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None):
+    def to_dask_dataframe(self, max_results=None, *, variables=None, progress=True, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         if not self.properties or "container" not in self.properties:
             self.get()
 
@@ -390,13 +394,11 @@ class Table(Base):
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor,
-            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES,
+            max_parallelization=max_parallelization
         )
 
-    def to_pandas_dataframe(self, max_results=None, *, variables=None, progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None):
-        if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
-            raise Exception(f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'")
-
+    def to_pandas_dataframe(self, max_results=None, *, variables=None, progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         if not self.properties or "container" not in self.properties:
             self.get()
 
@@ -411,26 +413,12 @@ class Table(Base):
             progress=progress,
             coerce_schema=self.properties["container"]["kind"] == 'dataset',
             batch_preprocessor=batch_preprocessor,
-            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
+            use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES,
+            max_parallelization=max_parallelization
         )
+        return arrow_table_to_pandas(arrow_table, dtype_backend, date_as_object, max_parallelization)
 
-        import pandas as pd
-
-        if dtype_backend == 'numpy_nullable':
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
-                pa.int64(): pd.Int64Dtype(),
-                pa.bool_(): pd.BooleanDtype(),
-                pa.float64(): pd.Float64Dtype(),
-                pa.string(): pd.StringDtype(),
-            }.get)
-        elif dtype_backend == 'pyarrow':
-            df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
-        else:
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
-
-        return df
-
-    def to_geopandas_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None):
+    def to_geopandas_dataframe(self, max_results=None, *, variables=None, geography_variable="", progress=True, dtype_backend='pyarrow', date_as_object=False, batch_preprocessor=None, max_parallelization=os.cpu_count()):
         import geopandas
 
         if dtype_backend not in ['numpy', 'numpy_nullable', 'pyarrow']:
@@ -453,19 +441,7 @@ class Table(Base):
             use_export_api=self.properties["numBytes"] > MAX_STREAMING_BYTES
         )
 
-        import pandas as pd
-
-        if dtype_backend == 'numpy_nullable':
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object, types_mapper={
-                pa.int64(): pd.Int64Dtype(),
-                pa.bool_(): pd.BooleanDtype(),
-                pa.float64(): pd.Float64Dtype(),
-                pa.string(): pd.StringDtype(),
-            }.get)
-        elif dtype_backend == 'pyarrow':
-            df = arrow_table.to_pandas(self_destruct=True, types_mapper=pd.ArrowDtype)
-        else:
-            df = arrow_table.to_pandas(self_destruct=True, date_as_object=date_as_object)
+        df = arrow_table_to_pandas(arrow_table, dtype_backend, date_as_object, max_parallelization)
 
         if geography_variable is not None:
             geography_variable = get_geography_variable(mapped_variables, geography_variable)
