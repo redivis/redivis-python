@@ -6,9 +6,7 @@ from tqdm.auto import tqdm
 import pathlib
 import uuid
 import os
-import pyarrow as pa
-import pyarrow.dataset as pa_dataset
-import pyarrow.parquet as pa_parquet
+
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
 
@@ -27,6 +25,10 @@ class Notebook(Base):
 
         import geopandas
         import pandas as pd
+        import pyarrow as pa
+        import pyarrow.dataset as pa_dataset
+        import pyarrow.parquet as pa_parquet
+        from dask.dataframe import DataFrame as dask_df
 
         if isinstance(data, geopandas.GeoDataFrame):
             if geography_variables is None:
@@ -45,6 +47,8 @@ class Notebook(Base):
             temp_file_path = f"{temp_file_path}/part-0.parquet"
         elif isinstance(data, pa.Table):
             pa_parquet.write_table(data, temp_file_path)
+        elif isinstance(data, dask_df):
+            data.to_parquet(temp_file_path, write_index=False)
         else:
             # importing polars is causing an IllegalInstruction error on ARM + Docker. Import inline to avoid crashes elsewhwere
             # TODO: revert once fixed upstream

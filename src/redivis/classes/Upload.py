@@ -163,9 +163,12 @@ class Upload(Base):
                 while True:
                     time.sleep(2)
                     self.get()
-                    if self["status"] == "completed" or self["status"] == "failed":
-                        if self["status"] == "failed" and raise_on_fail:
-                            raise Exception(self["errorMessage"])
+                    if (
+                        self.properties["status"] == "completed"
+                        or self.properties["status"] == "failed"
+                    ):
+                        if self.properties["status"] == "failed" and raise_on_fail:
+                            raise Exception(self.properties["errorMessage"])
                         break
                     else:
                         logging.debug("Upload is still in progress...")
