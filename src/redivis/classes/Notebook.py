@@ -48,6 +48,7 @@ class Notebook(Base):
         elif isinstance(data, pa.Table):
             pa_parquet.write_table(data, temp_file_path)
         elif isinstance(data, dask_df):
+            temp_file_path = f"{temp_file_path}/part-0.parquet"
             data.to_parquet(temp_file_path, write_index=False)
         else:
             # importing polars is causing an IllegalInstruction error on ARM + Docker. Import inline to avoid crashes elsewhwere
