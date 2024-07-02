@@ -131,7 +131,7 @@ class Export(Base):
                 if progress:
                     pbar.close()
                 raise Exception(
-                    f"Export job failed with message: {self.properties['message']}"
+                    f"Export job failed with message: {self.properties['errorMessage']}"
                 )
             elif self.properties["status"] == "cancelled":
                 if progress:
