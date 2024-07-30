@@ -41,6 +41,7 @@ REQUIRED = [
     "pandas >= 2.0.0",
     "polars >= 0.19",
     "pyarrow >= 13.0.0",
+    "PyJWT >= 2.8.0",
     "requests >= 2.0.0",
     "shapely >= 2.0.1",
     "tqdm >= 4.64.0",

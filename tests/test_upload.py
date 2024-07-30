@@ -11,7 +11,7 @@ def test_linebreaks_in_cell():
     )
 
     with open("tests/data/line_breaks.csv", "rb") as f:
-        table.upload(name="test.csv",).create(
+        table.upload(name="test.csv").create(
             data=f,
             type="delimited",
             has_quoted_newlines=True,
@@ -25,12 +25,15 @@ def test_upload_remove_on_failure():
         description="Some info", upload_merge_strategy="replace"
     )
 
-    table.upload(name="tiny.csv",).create(
+    table.upload(
+        name="tiny.csv",
+    ).create(
         data='a,b\n1,2\n3,"4\n5"',
         remove_on_fail=True,
         type="delimited",
         has_quoted_newlines=False,
     )
+
 
 def test_external_transfer():
     dataset = util.create_test_dataset()
@@ -39,9 +42,16 @@ def test_external_transfer():
         description="Some info", upload_merge_strategy="replace"
     )
 
-    table.upload(name="test.csv", ).create(
-        transfer_specification={"sourceType": "gcs", "sourcePath": "redivis-data-dev/test.csv.gz", "identity": "ian@redivis.com"},
+    table.upload(
+        name="test.csv",
+    ).create(
+        transfer_specification={
+            "sourceType": "gcs",
+            "sourcePath": "redivis-data-dev/test.csv.gz",
+            "identity": "ian@redivis.com",
+        },
     )
+
 
 def test_upload_string():
     dataset = util.create_test_dataset()
@@ -50,11 +60,14 @@ def test_upload_string():
         description="Some info", upload_merge_strategy="replace"
     )
 
-    table.upload(name="tiny.csv",).create(
+    table.upload(
+        name="tiny.csv",
+    ).create(
         data='a,b\n1,2\n3,"4\n5"',
         type="delimited",
         has_quoted_newlines=True,
     )
+
 
 def test_upload_large_string():
     dataset = util.create_test_dataset()
@@ -65,7 +78,10 @@ def test_upload_large_string():
 
     with open("tests/data/us_counties_500k.geojson", "rb") as f:
         data = f.read()
-        table.upload(name="us_counties_500k.geojson").create(data=data, wait_for_finish=True)
+        table.upload(name="us_counties_500k.geojson").create(
+            data=data, wait_for_finish=True
+        )
+
 
 def test_upload_and_release():
     dataset = util.create_test_dataset()
@@ -75,7 +91,9 @@ def test_upload_and_release():
     )
 
     with open("tests/data/tiny.csv", "rb") as f:
-        table.upload(name="tiny.csv").create(data=f, type="delimited", wait_for_finish=True)
+        table.upload(name="tiny.csv").create(
+            data=f, type="delimited", wait_for_finish=True
+        )
 
     dataset.release()
 
@@ -118,6 +136,7 @@ def test_streaming_upload():
     print(table.list_rows())
     print(upload.list_rows())
 
+
 def test_redivis_upload():
     util.create_test_dataset()
     util.clear_test_data()
@@ -126,7 +145,13 @@ def test_redivis_upload():
 
     table.create(description="Some info", upload_merge_strategy="replace")
     upload = table.upload(name="test")
-    upload.create(transfer_specification={"sourceType":'redivis', "sourcePath":"demo.novel_corona_virus_2019_dataset.covid_19_data"})
+    upload.create(
+        transfer_specification={
+            "sourceType": "redivis",
+            "sourcePath": "demo.novel_corona_virus_2019_dataset.covid_19_data",
+        }
+    )
+
 
 def test_streaming_schema_upload():
     util.create_test_dataset()
@@ -163,7 +188,9 @@ def test_resumable_upload():
     table = util.get_table()
     table.create(description="Some info", upload_merge_strategy="replace")
 
-    with open(os.path.join(os.path.dirname(__file__), "./data/us_counties_500k.geojson"), "rb") as f:
+    with open(
+        os.path.join(os.path.dirname(__file__), "./data/us_counties_500k.geojson"), "rb"
+    ) as f:
         table.upload(name="us_counties_500k.geojson").create(type="geojson", data=f)
 
     print(table.upload("us_counties_500k.geojson").to_pandas_dataframe(10))
@@ -199,7 +226,6 @@ def test_streaming_after_upload():
     df = pandas.read_csv(os.path.join(os.path.dirname(__file__), "data/tiny.csv"))
     data = df.to_dict(orient="records")
     table.create(description="Some info")
-
 
     with open("tests/data/tiny.csv", "rb") as f:
         upload = table.upload(name="seed_file").create(data=f, type="delimited")
@@ -239,7 +265,9 @@ def test_streaming_after_upload():
     )
     upload.insert_rows(data, update_schema=False)
 
+
 def test_upload_raw_file():
+    raise Exception("not implemented")
     dataset = util.create_test_dataset()
     util.clear_test_data()
     table = util.get_table().create(is_file_index=True)
@@ -255,7 +283,17 @@ def test_upload_metadata():
     table = util.get_table().create()
 
     with open("tests/data/tiny.csv", "rb") as f:
-        upload = table.upload("tiny.csv").create(f, metadata={"id": { "label": "foo", "description": "bar", "valueLabels": { "1": "hello world"}}})
+        upload = table.upload("tiny.csv").create(
+            f,
+            metadata={
+                "id": {
+                    "label": "foo",
+                    "description": "bar",
+                    "valueLabels": {"1": "hello world"},
+                }
+            },
+        )
+
 
 def test_next_version_returned_from_create_next_version():
     # This makes sure we always get the next version of the dataset
@@ -263,7 +301,7 @@ def test_next_version_returned_from_create_next_version():
     util.clear_test_data()
     dataset.release()
     next_version = dataset.create_next_version()
-    assert("next" in next_version.uri)
+    assert "next" in next_version.uri
     dataset = util.get_dataset()
     next_version = dataset.create_next_version(if_not_exists=True)
-    assert("next" in next_version.uri)
+    assert "next" in next_version.uri

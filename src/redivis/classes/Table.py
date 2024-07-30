@@ -53,15 +53,18 @@ class Table(Base):
     def create(
         self, *, description=None, upload_merge_strategy="append", is_file_index=False
     ):
+        payload = {
+            "name": self.name,
+            "uploadMergeStrategy": upload_merge_strategy,
+            "isFileIndex": is_file_index,
+        }
+        if description is not None:
+            payload["description"] = description
+
         response = make_request(
             method="POST",
             path=f"{self.dataset.uri}/tables",
-            payload={
-                "name": self.name,
-                "description": description,
-                "uploadMergeStrategy": upload_merge_strategy,
-                "isFileIndex": is_file_index,
-            },
+            payload=payload,
         )
         update_properties(self, response)
         return self
@@ -103,22 +106,6 @@ class Table(Base):
             Variable(variable["name"], table=self, properties=variable)
             for variable in variables
         ]
-
-    def add_file(self, name, data):
-        warnings.warn(
-            "The table.add_file() method is deprecated, and will be removed soon. Please use the table.add_files() method for improved performance and future compatibility.",
-            FutureWarning,
-            stacklevel=2,
-        )
-
-        response = make_request(
-            method="POST",
-            path=f"{self.uri}/rawFiles",
-            query={"name": name},
-            payload=data,
-            parse_payload=False,
-        )
-        return File(response["id"], table=self, properties=response)
 
     def add_files(
         self,

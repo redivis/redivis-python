@@ -113,17 +113,20 @@ def list_rows(
     pyarrow.set_cpu_count(max_parallelization)
     pyarrow.set_io_thread_count(max_parallelization)
 
+    payload = {"requestedStreamCount": min(MAX_PARALLELIZATION, max_parallelization)}
+
+    if max_results is not None:
+        payload["maxResults"] = max_results
+
+    if selected_variables is not None:
+        payload["selectedVariables"] = selected_variables
+
     if not use_export_api:
         read_session = make_request(
             method="post",
             path=f"{uri}/readSessions",
             parse_response=True,
-            payload={
-                "selectedVariables": selected_variables,
-                "maxResults": max_results,
-                "format": "arrow",
-                "requestedStreamCount": min(MAX_PARALLELIZATION, max_parallelization),
-            },
+            payload=payload,
         )
 
         if progress:
@@ -262,7 +265,7 @@ def list_rows(
                 ]
     finally:
         if output_type != "arrow_dataset" and output_type != "polars_lazyframe":
-            shutil.rmtree(folder_path, ignore_errors=False)
+            shutil.rmtree(folder_path, ignore_errors=True)
 
 
 def variable_to_field(variable):

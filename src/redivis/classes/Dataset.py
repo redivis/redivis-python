@@ -1,7 +1,9 @@
 from .Table import Table
+from .Version import Version
 from .Query import Query
 from .Base import Base
 from urllib.parse import quote as quote_uri
+import re
 
 from ..common.api_request import make_request, make_paginated_request
 
@@ -11,14 +13,29 @@ class Dataset(Base):
         self,
         name,
         *,
-        version="current",  # TODO: should be version_tag, version would reference a version class (?) dataset().version("next").create()? .version("next").release()?
+        version=None,
         user=None,
         organization=None,
         properties=None,
     ):
-        self.name = name
+        self.name = name.split(":")[0]
         self.user = user
         self.organization = organization
+
+        reference_id = ""
+        reference_id_split = re.sub(r":v\d+[._]\d+|current|next", "", name).split(":")
+        if len(reference_id_split) > 1:
+            reference_id = reference_id_split[1]
+
+        if reference_id:
+            reference_id = f":{reference_id}"
+
+        if not version:
+            version_search = re.search(r":(v\d+[._]\d+|current|next)", name)
+            if version_search:
+                version = version_search[1]
+            else:
+                version = "current"
 
         if (
             version
@@ -28,16 +45,18 @@ class Dataset(Base):
         ):
             version = f"v{version}"
 
-        self.qualified_reference = (
-            properties["qualifiedReference"]
-            if "qualifiedReference" in (properties or {})
-            else (f"{(self.organization or self.user).name}.{self.name}:{version}")
-        )
+        self.version_tag = version
         self.scoped_reference = (
             properties["scopedReference"]
             if "scopedReference" in (properties or {})
-            else f"{self.name}:{version}"
+            else f"{self.name}{reference_id}:{version}"
         )
+        self.qualified_reference = (
+            properties["qualifiedReference"]
+            if "qualifiedReference" in (properties or {})
+            else (f"{(self.organization or self.user).name}.{self.scoped_reference}")
+        )
+
         self.uri = f"/datasets/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
@@ -71,7 +90,7 @@ class Dataset(Base):
             )
 
         next_version_dataset = Dataset(
-            name=self.name,
+            name=self.scoped_reference,
             user=self.user,
             organization=self.organization,
             version="next",
@@ -108,6 +127,15 @@ class Dataset(Base):
             Table(table["name"], dataset=self, properties=table) for table in tables
         ]
 
+    def list_versions(self, max_results=None):
+        versions = make_paginated_request(
+            path=f"{self.uri}/versions", page_size=100, max_results=max_results
+        )
+        return [
+            Version(version["tag"], dataset=self, properties=version)
+            for version in versions
+        ]
+
     def query(self, query):
         return Query(query, default_dataset=self.qualified_reference)
 
@@ -120,10 +148,43 @@ class Dataset(Base):
         self.get()
         return self
 
+    def unrelease(self):
+        version_res = make_request(
+            method="POST",
+            path=f"{self.uri}/versions/current/unrelease",
+        )
+        self.uri = version_res["datasetUri"]
+        self.get()
+        return self
+
+    def version(self, tag=None):
+        tag = self.version_tag if tag is None else tag
+        return Version(tag, dataset=self)
+
     def table(self, name, *, sample=False):
         return Table(name, dataset=self, sample=sample)
 
-    def update(self, *, name=None, public_access_level=None, description=None):
+    def add_labels(self, labels):
+        self.get()
+        self.update(
+            labels=list(
+                set(self.properties.get("labels", []))
+                | set(label.lower() for label in labels)
+            )
+        )
+
+    def remove_labels(self, labels):
+        self.get()
+        self.update(
+            labels=list(
+                set(self.properties.get("labels", []))
+                - set(label.lower() for label in labels)
+            )
+        )
+
+    def update(
+        self, *, name=None, public_access_level=None, description=None, labels=None
+    ):
         payload = {}
         if name:
             payload["name"] = name
@@ -131,6 +192,8 @@ class Dataset(Base):
             payload["publicAccessLevel"] = public_access_level
         if description is not None:
             payload["description"] = description
+        if labels is not None:
+            payload["labels"] = labels
 
         res = make_request(
             method="PATCH",
