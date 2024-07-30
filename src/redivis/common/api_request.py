@@ -3,6 +3,7 @@ import logging
 import os
 import json
 import platform
+import warnings
 from urllib.parse import unquote
 
 from .auth import get_auth_token, refresh_credentials
@@ -128,19 +129,15 @@ def get_request_args(
     }
 
 
+previously_printed_warnings = {}
+
+
 def process_request_response(
     r, parse_response=True, method=None, original_parameters=None
 ):
     method = method.lower()
     response_json = {}
     try:
-        if (
-            r.status_code == 401
-            and os.getenv("REDIVIS_API_TOKEN") is None
-            and os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None
-        ):
-            refresh_credentials()
-            return make_request(**original_parameters)
         if r.status_code >= 400 or (
             method != "head" and parse_response and r.text != "OK"
         ):
@@ -150,17 +147,52 @@ def process_request_response(
                         unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"])
                     )
                 else:
-                    response_json = {"error": {"status": r.status_code}}
+                    # This should never happen
+                    response_json = {"error": "unknown_error", "status": r.status_code}
             else:
                 response_json = r.json()
+
+        if (
+            (
+                r.status_code == 401
+                or (
+                    r.status_code == 403
+                    and response_json["error"] == "insufficient_scope"
+                )
+            )
+            and os.getenv("REDIVIS_API_TOKEN") is None
+            and os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None
+        ):
+            warnings.warn(
+                f"{response_json['error']}: {response_json['error_description']}"
+            )
+            refresh_credentials(
+                scope=(
+                    response_json["scope"].split(" ")
+                    if "scope" in response_json
+                    else None
+                ),
+                amr_values=(
+                    response_json["amr_values"]
+                    if "amr_values" in response_json
+                    else None
+                ),
+            )
+            return make_request(**original_parameters)
     except Exception:
         if method == "head":
             raise Exception(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
         else:
             raise Exception(r.text)
 
+    if "X-REDIVIS-WARNING" in r.headers:
+        global previously_printed_warnings
+        if r.headers["X-REDIVIS-WARNING"] not in previously_printed_warnings:
+            warnings.warn(r.headers["X-REDIVIS-WARNING"])
+            previously_printed_warnings[r.headers["X-REDIVIS-WARNING"]] = True
+
     if r.status_code >= 400:
-        raise Exception(response_json["error"])
+        raise Exception(response_json)
     elif parse_response:
         return response_json
     else:

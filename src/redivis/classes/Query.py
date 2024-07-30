@@ -22,14 +22,16 @@ class Query(Base):
             elif os.getenv("REDIVIS_DEFAULT_DATASET"):
                 default_dataset = os.getenv("REDIVIS_DEFAULT_DATASET")
 
+        payload = {"query": query}
+        if default_project:
+            payload["defaultProject"] = default_project
+        if default_dataset:
+            payload["defaultDataset"] = default_dataset
+
         self.properties = make_request(
             method="post",
             path="/queries",
-            payload={
-                "query": query,
-                "defaultProject": default_project if default_project else None,
-                "defaultDataset": default_dataset if default_dataset else None,
-            },
+            payload=payload,
         )
         self.uri = self.properties["uri"]
 
