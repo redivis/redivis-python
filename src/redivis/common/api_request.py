@@ -102,12 +102,7 @@ def get_request_args(
     headers = {
         **{
             "Authorization": f"Bearer {get_auth_token()}",
-            "X-Redivis-Client": "redivis-python",
-            "X-Redivis-Client-Version": __version__,
-            "X-Redivis-Client-Python-Version": platform.python_version(),
-            "X-Redivis-Client-System": platform.system(),
-            "X-Redivis-Client-System-Version": platform.release(),
-            "User-Agent": f"redivis-python/{__version__}",
+            "User-Agent": f"redivis-python/{__version__} ({platform.platform()}; Python/{platform.python_version()})",
         },
         **headers,
     }

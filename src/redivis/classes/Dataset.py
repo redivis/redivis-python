@@ -34,8 +34,6 @@ class Dataset(Base):
             version_search = re.search(r":(v\d+[._]\d+|current|next)", name)
             if version_search:
                 version = version_search[1]
-            else:
-                version = "current"
 
         if (
             version
@@ -158,6 +156,9 @@ class Dataset(Base):
         return self
 
     def version(self, tag=None):
+        if not self.version_tag and not tag:
+            self.get()
+
         tag = self.version_tag if tag is None else tag
         return Version(tag, dataset=self)
 
