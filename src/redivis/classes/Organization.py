@@ -11,7 +11,7 @@ class Organization(Base):
         self.uri = f"/organizations/{quote_uri(self.name, '')}"
         self.properties = {"kind": "organization", "uri": self.uri, "userName": name}
 
-    def dataset(self, name, *, version="current"):
+    def dataset(self, name, *, version=None):
         return Dataset(name, organization=self, version=version)
 
     def member(self, name):

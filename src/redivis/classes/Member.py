@@ -35,6 +35,7 @@ class Member(Base):
                 | set(label.lower() for label in labels)
             )
         )
+        return self
 
     def remove_labels(self, labels):
         self.get()
@@ -44,6 +45,7 @@ class Member(Base):
                 - set(label.lower() for label in labels)
             )
         )
+        return self
 
     def update(self, *, labels=None, status=None):
         payload = {}

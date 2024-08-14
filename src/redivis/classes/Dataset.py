@@ -47,7 +47,7 @@ class Dataset(Base):
         self.scoped_reference = (
             properties["scopedReference"]
             if "scopedReference" in (properties or {})
-            else f"{self.name}{reference_id}:{version}"
+            else f"{self.name}{reference_id}{f':{version}' if version else ''}"
         )
         self.qualified_reference = (
             properties["qualifiedReference"]
@@ -173,6 +173,7 @@ class Dataset(Base):
                 | set(label.lower() for label in labels)
             )
         )
+        return self
 
     def remove_labels(self, labels):
         self.get()
@@ -182,6 +183,7 @@ class Dataset(Base):
                 - set(label.lower() for label in labels)
             )
         )
+        return self
 
     def update(
         self, *, name=None, public_access_level=None, description=None, labels=None

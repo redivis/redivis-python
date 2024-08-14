@@ -14,7 +14,7 @@ class User(Base):
             **properties,
         }
 
-    def dataset(self, name, *, version="current"):
+    def dataset(self, name, *, version=None):
         return Dataset(name, user=self, version=version)
 
     def project(self, name):
