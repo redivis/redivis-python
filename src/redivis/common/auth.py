@@ -66,7 +66,10 @@ This environment variable should only ever be set in a non-interactive environme
         if not redivis_dir.is_dir():
             redivis_dir.mkdir()
 
-        perform_oauth_login(missing_scope if len(missing_scope) > 0 else scope)
+        perform_oauth_login(
+            missing_scope if len(missing_scope) > 0 else scope,
+            upgrade_credentials=bool(len(missing_scope)),
+        )
 
         return cached_credentials["access_token"]
 
