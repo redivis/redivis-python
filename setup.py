@@ -34,17 +34,20 @@ else:
 
 # Required dependencies
 REQUIRED = [
+    # Base libraries. These are required for working with the API
+    "PyJWT >= 2.8.0",
+    "requests >= 2.0.0",
+    "tqdm >= 4.64.0",
+    # Data processing libraries, required if pulling data off Redivis.
+    # Pyarrow is always required when working with data, other libraries only needed if returning data of that type.
+    "pyarrow >= 13.0.0",
     "dask >= 2023.9.3",
     "folium >= 0.15.0",  # required for geopandas
     "geopandas >= 0.14.0",
     "mapclassify >= 2.6.0",  # required for geopandas
     "pandas >= 2.0.0",
     "polars >= 0.19",
-    "pyarrow >= 13.0.0",
-    "PyJWT >= 2.8.0",
-    "requests >= 2.0.0",
-    "shapely >= 2.0.1",
-    "tqdm >= 4.64.0",
+    "shapely >= 2.0.1",  # required for geopandas
 ]
 
 # What packages are optional?
