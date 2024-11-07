@@ -1,6 +1,4 @@
 import concurrent.futures
-import pyarrow
-import pyarrow.dataset as pyarrow_dataset  # need to import separately, it's not on the pyarrow import
 import tempfile
 import uuid
 import os
@@ -25,6 +23,8 @@ class RedivisArrowIterator:
         self.__get_next_reader__()
 
     def __get_next_reader__(self):
+        import pyarrow
+
         # TODO: this won't get closed properly if the iterator is not fully consumed
         arrow_response = make_request(
             method="get",
@@ -54,6 +54,8 @@ class RedivisArrowIterator:
         return self
 
     def __next__(self):
+        import pyarrow
+
         try:
             batch = self.current_record_batch_reader.read_next_batch()
             if self.coerce_schema:
@@ -97,6 +99,9 @@ def list_rows(
     use_export_api=False,
     max_parallelization=os.cpu_count(),
 ):
+    import pyarrow
+    import pyarrow.dataset as pyarrow_dataset  # need to import separately, it's not on the pyarrow import
+
     use_export_api = (
         use_export_api
         and table
@@ -269,6 +274,8 @@ def list_rows(
 
 
 def variable_to_field(variable):
+    import pyarrow
+
     if variable["type"] == "string" or variable["type"] == "geography":
         return pyarrow.field(variable["name"], pyarrow.string())
     elif variable["type"] == "integer":
@@ -286,6 +293,8 @@ def variable_to_field(variable):
 
 
 def coerce_string_variable(pyarrow_array, variable):
+    import pyarrow
+
     if variable["type"] == "string" or variable["type"] == "geography":
         return pyarrow_array
     elif variable["type"] == "integer":
@@ -322,6 +331,8 @@ def process_stream(
     batch_preprocessor,
     cancel_event,
 ):
+    import pyarrow
+
     with closing(
         make_request(
             method="get",
@@ -358,7 +369,6 @@ def process_stream(
             for batch in reader:
                 # exit out of thread
                 if cancel_event.is_set():
-
                     has_content = False
                     break
 
