@@ -146,8 +146,7 @@ def list_rows(
             )
 
     folder = pathlib.Path("/").joinpath(
-        os.getenv("REDIVIS_TMPDIR") or tempfile.gettempdir(),
-        "redivis",
+        get_tempdir(),
         "tables",
         f"{uuid.uuid4()}",
     )
@@ -231,8 +230,7 @@ def list_rows(
             parquet_base_dir = str(
                 pathlib.Path("/")
                 .joinpath(
-                    os.getenv("REDIVIS_TMPDIR") or tempfile.gettempdir(),
-                    "redivis",
+                    get_tempdir(),
                     "tables",
                     f"{uuid.uuid4()}",
                 )
@@ -410,6 +408,13 @@ def process_stream(
 
         if has_content == False:
             os.remove(os_file)
+
+
+def get_tempdir():
+    user_suffix = os.environ.get("USER", os.environ.get("USERNAME")) or os.getuid()
+    return (
+        f"{os.getenv('REDIVIS_TMPDIR') or tempfile.gettempdir()}/redivis_{user_suffix}"
+    )
 
 
 def format_tuple_type(val, type):
