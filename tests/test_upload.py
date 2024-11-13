@@ -106,6 +106,26 @@ def test_upload_and_release():
     dataset.release()
 
 
+def test_stream_bad_variable_name():
+    util.create_test_dataset()
+    util.clear_test_data()
+
+    table = util.get_table()
+
+    table.create(description="Some info", upload_merge_strategy="replace")
+    upload = table.upload(name="test")
+    upload.create(type="stream", schema=[{"name": "var1", "type": "dateTime"}])
+
+    upload2 = table.upload(name="test2")
+    upload2.create(
+        type="stream",
+        schema=[
+            {"name": "_upload_name", "type": "dateTime"},
+            {"name": "var.2", "type": "dateTime"},
+        ],
+    )
+
+
 def test_streaming_upload():
     util.create_test_dataset()
     util.clear_test_data()
