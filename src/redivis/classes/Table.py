@@ -738,7 +738,7 @@ def get_table_parents(dataset, project):
     if dataset or project:
         return dataset, project
     elif os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is not None:
-        return None
+        return None, None
     elif os.getenv("REDIVIS_DEFAULT_PROJECT") is not None:
         return None, User(os.getenv("REDIVIS_DEFAULT_PROJECT").split(".")[0]).project(
             os.getenv("REDIVIS_DEFAULT_PROJECT").split(".")[1]
