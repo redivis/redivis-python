@@ -162,8 +162,8 @@ class Dataset(Base):
         tag = self.version_tag if tag is None else tag
         return Version(tag, dataset=self)
 
-    def table(self, name, *, sample=False):
-        return Table(name, dataset=self, sample=sample)
+    def table(self, name):
+        return Table(name, dataset=self)
 
     def add_labels(self, labels):
         self.get()

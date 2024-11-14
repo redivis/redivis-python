@@ -24,28 +24,31 @@ class Table(Base):
         self,
         name,
         *,
-        sample=False,
         dataset=None,
         project=None,
         properties=None,
     ):
         dataset, project = get_table_parents(dataset, project)
-        sample_string = ":sample" if sample else ""
         self.name = name
         self.dataset = dataset
         self.project = project
 
+        reference_scope = ""
+
+        if dataset:
+            reference_scope = f"{dataset.qualified_reference}."
+        elif project:
+            reference_scope = f"{project.qualified_reference}."
+
         self.qualified_reference = (
             properties["qualifiedReference"]
             if "qualifiedReference" in (properties or {})
-            else (
-                f"{dataset.qualified_reference if dataset else project.qualified_reference}.{self.name}{sample_string}"
-            )
+            else (f"{reference_scope}{self.name}")
         )
         self.scoped_reference = (
             properties["scopedReference"]
             if "scopedReference" in (properties or {})
-            else f"{self.name}{sample_string}"
+            else self.name
         )
         self.uri = f"/tables/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
@@ -734,6 +737,8 @@ def get_table_parents(dataset, project):
 
     if dataset or project:
         return dataset, project
+    elif os.getevn("REDIVIS_NOTEBOOK_JOB_ID") is not None:
+        return None
     elif os.getenv("REDIVIS_DEFAULT_PROJECT") is not None:
         return None, User(os.getenv("REDIVIS_DEFAULT_PROJECT").split(".")[0]).project(
             os.getenv("REDIVIS_DEFAULT_PROJECT").split(".")[1]
