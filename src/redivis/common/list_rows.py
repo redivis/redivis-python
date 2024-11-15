@@ -1,5 +1,4 @@
 import concurrent.futures
-import tempfile
 import uuid
 import os
 import pathlib
@@ -7,7 +6,8 @@ from contextlib import closing
 from ..classes.Row import Row
 from tqdm.auto import tqdm
 import shutil
-from ..common.api_request import make_request
+from .util import get_tempdir
+from .api_request import make_request
 from threading import Event
 
 MAX_PARALLELIZATION = 8
@@ -145,7 +145,7 @@ def list_rows(
                 coerce_schema=coerce_schema,
             )
 
-    folder = pathlib.Path("/").joinpath(
+    folder = pathlib.Path().joinpath(
         get_tempdir(),
         "tables",
         f"{uuid.uuid4()}",
@@ -228,7 +228,7 @@ def list_rows(
             # Make sure we no longer remove the folder in the finally clause after making this change
             # Create the Parquet base directory
             parquet_base_dir = str(
-                pathlib.Path("/")
+                pathlib.Path()
                 .joinpath(
                     get_tempdir(),
                     "tables",
@@ -408,13 +408,6 @@ def process_stream(
 
         if has_content == False:
             os.remove(os_file)
-
-
-def get_tempdir():
-    user_suffix = os.environ.get("USER", os.environ.get("USERNAME")) or os.getuid()
-    return (
-        f"{os.getenv('REDIVIS_TMPDIR') or tempfile.gettempdir()}/redivis_{user_suffix}"
-    )
 
 
 def format_tuple_type(val, type):

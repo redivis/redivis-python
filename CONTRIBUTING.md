@@ -2,16 +2,10 @@
 
 For local development, clone this repository and then run
 
-```py
-source. / venv / bin / activate & & python
-setup.py
-develop - -user
+```sh
+source ./venv/bin/ ctivate && python setup.py develop --user
 # OR
-source. / venv / bin / activate & & python3 - m
-pip
-install. & & REDIVIS_API_ENDPOINT = https: // localhost: 8443 / api / v1
-python3 - W
-ignore
+source ./venv/bin/activate && python3 -m pip install . && REDIVIS_API_ENDPOINT = https://localhost:8443/api/v1 python3 - W ignore
 ```
 
 You can then run the tests, e.g.:

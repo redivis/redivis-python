@@ -8,6 +8,7 @@ import uuid
 import os
 
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
+from ..common.util import get_tempdir
 
 
 class Notebook(Base):
@@ -20,7 +21,7 @@ class Notebook(Base):
     def create_output_table(
         self, data=None, *, name=None, append=False, geography_variables=None
     ):
-        temp_file_path = f"/tmp/redivis/out/{uuid.uuid4()}"
+        temp_file_path = f"{get_tempdir()}/out/{uuid.uuid4()}"
         try:
             pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
 
