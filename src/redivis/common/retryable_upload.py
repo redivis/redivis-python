@@ -6,6 +6,7 @@ import os
 import logging
 from tqdm.utils import CallbackIOWrapper
 from urllib.parse import quote as quote_uri
+
 from .auth import get_auth_token
 
 
@@ -120,7 +121,6 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
             return file_size
         elif res.status_code == 308:
             range_header = res.headers["Range"] if "Range" in res.headers else None
-
             if range_header:
                 match = re.match(r"bytes=0-(\d+)", range_header)
                 if match.group(0) and not math.isnan(int(match.group(1))):
@@ -137,7 +137,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
             raise e
 
         time.sleep(retry_count / 10)
-        retry_partial_upload(
+        return retry_partial_upload(
             retry_count=retry_count + 1,
             file_size=file_size,
             resumable_url=resumable_url,

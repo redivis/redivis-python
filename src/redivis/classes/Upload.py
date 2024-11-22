@@ -15,6 +15,8 @@ from .Variable import Variable
 from ..common.api_request import make_request, make_paginated_request
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
+MAX_SIMPLE_UPLOAD_SIZE = 1e7
+
 
 class Upload(Base):
     def __init__(
@@ -59,8 +61,11 @@ class Upload(Base):
         temp_upload_id = None
 
         if data and (
-            (hasattr(data, "read") and os.stat(data.name).st_size > 1e7)
-            or (hasattr(data, "__len__") and len(data) > 1e7)
+            (
+                hasattr(data, "read")
+                and os.stat(data.name).st_size > MAX_SIMPLE_UPLOAD_SIZE
+            )
+            or (hasattr(data, "__len__") and len(data) > MAX_SIMPLE_UPLOAD_SIZE)
         ):
             did_reopen_file = False
             pbar_bytes = None
@@ -78,7 +83,7 @@ class Upload(Base):
                 path=f"{self.table.uri}/tempUploads",
                 payload={
                     "tempUploads": [
-                        {"size": size, "name": self.name, "resumable": size > 1e7}
+                        {"size": size, "name": self.name, "resumable": True}
                     ]
                 },
             )

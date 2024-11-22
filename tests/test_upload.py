@@ -18,6 +18,18 @@ def test_linebreaks_in_cell():
         )
 
 
+def test_upload_large_file():
+    dataset = util.create_test_dataset()
+    util.clear_test_data()
+    table = util.get_table().create(
+        description="Some info", upload_merge_strategy="replace"
+    )
+    file_name = "concept_relationship.csv"
+    with open(f"tests/data/{file_name}", "rb") as f:
+        data = f.read()
+        table.upload(name=file_name).create(data=data, wait_for_finish=True)
+
+
 def test_upload_remove_on_failure():
     dataset = util.create_test_dataset()
     util.clear_test_data()
