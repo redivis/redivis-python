@@ -25,20 +25,20 @@ class Table(Base):
         name,
         *,
         dataset=None,
-        project=None,
+        workflow=None,
         properties=None,
     ):
-        dataset, project = get_table_parents(dataset, project)
+        dataset, workflow = get_table_parents(dataset, workflow)
         self.name = name
         self.dataset = dataset
-        self.project = project
+        self.workflow = workflow
 
         reference_scope = ""
 
         if dataset:
             reference_scope = f"{dataset.qualified_reference}."
-        elif project:
-            reference_scope = f"{project.qualified_reference}."
+        elif workflow:
+            reference_scope = f"{workflow.qualified_reference}."
 
         self.qualified_reference = (
             properties["qualifiedReference"]
@@ -732,16 +732,16 @@ def get_mapped_variables(variables, uri):
         return variables_list
 
 
-def get_table_parents(dataset, project):
+def get_table_parents(dataset, workflow):
     from .User import User
 
-    if dataset or project:
-        return dataset, project
+    if dataset or workflow:
+        return dataset, workflow
     elif os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is not None:
         return None, None
-    elif os.getenv("REDIVIS_DEFAULT_PROJECT") is not None:
-        return None, User(os.getenv("REDIVIS_DEFAULT_PROJECT").split(".")[0]).project(
-            os.getenv("REDIVIS_DEFAULT_PROJECT").split(".")[1]
+    elif os.getenv("REDIVIS_DEFAULT_WORKFLOW") is not None:
+        return None, User(os.getenv("REDIVIS_DEFAULT_WORKFLOW").split(".")[0]).workflow(
+            os.getenv("REDIVIS_DEFAULT_WORKFLOW").split(".")[1]
         )
     elif os.getenv("REDIVIS_DEFAULT_DATASET") is not None:
         return (
@@ -751,7 +751,7 @@ def get_table_parents(dataset, project):
         ), None
     else:
         raise Exception(
-            "Cannot reference an unqualified table if the neither the REDIVIS_DEFAULT_PROJECT or REDIVIS_DEFAULT_DATASET environment variables are set."
+            "Cannot reference an unqualified table if the neither the REDIVIS_DEFAULT_WORKFLOW or REDIVIS_DEFAULT_DATASET environment variables are set."
         )
 
 

@@ -1,8 +1,9 @@
 from urllib.parse import quote as quote_uri
 from .Dataset import Dataset
 from .Base import Base
-from .Project import Project
+from .Workflow import Workflow
 from ..common.api_request import make_paginated_request
+import warnings
 
 
 class User(Base):
@@ -18,7 +19,15 @@ class User(Base):
         return Dataset(name, user=self, version=version)
 
     def project(self, name):
-        return Project(name, user=self)
+        warnings.warn(
+            "Projects have been renamed to Workflows, please update your code to: user.workflow()",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return Workflow(name, user=self)
+
+    def workflow(self, name):
+        return Workflow(name, user=self)
 
     def list_datasets(self, max_results=None):
         datasets = make_paginated_request(
@@ -30,10 +39,18 @@ class User(Base):
         ]
 
     def list_projects(self, max_results=None):
-        projects = make_paginated_request(
-            path=f"{self.uri}/projects", page_size=100, max_results=max_results
+        warnings.warn(
+            "Projects have been renamed to Workflows, please update your code to: user.list_workflows()",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return self.list_workflows(max_results)
+
+    def list_workflows(self, max_results=None):
+        workflows = make_paginated_request(
+            path=f"{self.uri}/workflows", page_size=100, max_results=max_results
         )
         return [
-            Project(project["name"], user=self, properties=project)
-            for project in projects
+            Workflow(workflow["name"], user=self, properties=workflow)
+            for workflow in workflows
         ]

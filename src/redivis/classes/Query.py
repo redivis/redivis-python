@@ -13,18 +13,18 @@ class Query(Base):
         self,
         query,
         *,
-        default_project=None,
+        default_workflow=None,
         default_dataset=None,
     ):
-        if not default_project and not default_dataset:
-            if os.getenv("REDIVIS_DEFAULT_PROJECT"):
-                default_project = os.getenv("REDIVIS_DEFAULT_PROJECT")
+        if not default_workflow and not default_dataset:
+            if os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
+                default_workflow = os.getenv("REDIVIS_DEFAULT_WORKFLOW")
             elif os.getenv("REDIVIS_DEFAULT_DATASET"):
                 default_dataset = os.getenv("REDIVIS_DEFAULT_DATASET")
 
         payload = {"query": query}
-        if default_project:
-            payload["defaultProject"] = default_project
+        if default_workflow:
+            payload["defaultWorkflow"] = default_workflow
         if default_dataset:
             payload["defaultDataset"] = default_dataset
 
