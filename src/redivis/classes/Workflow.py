@@ -5,7 +5,7 @@ from urllib.parse import quote as quote_uri
 from ..common.api_request import make_request, make_paginated_request
 
 
-class Project(Base):
+class Workflow(Base):
     def __init__(self, name, *, user, properties=None):
         self.user = user
         self.name = name
@@ -20,7 +20,7 @@ class Project(Base):
             if "scopedReference" in (properties or {})
             else f"{self.name}"
         )
-        self.uri = f"/projects/{quote_uri(self.qualified_reference, '')}"
+        self.uri = f"/workflows/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
     def list_tables(self, *, max_results=None):
@@ -30,7 +30,7 @@ class Project(Base):
             max_results=max_results,
         )
         return [
-            Table(table["name"], project=self, properties=table) for table in tables
+            Table(table["name"], workflow=self, properties=table) for table in tables
         ]
 
     def exists(self):
@@ -48,10 +48,10 @@ class Project(Base):
         return self
 
     def query(self, query):
-        return Query(query, default_project=self.qualified_reference)
+        return Query(query, default_workflow=self.qualified_reference)
 
     def table(self, name):
-        return Table(name, project=self)
+        return Table(name, workflow=self)
 
 
 def update_properties(instance, properties):
