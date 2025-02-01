@@ -23,7 +23,9 @@ class Dataset(Base):
         self.organization = organization
 
         reference_id = ""
-        reference_id_split = re.sub(r":v\d+[._]\d+|current|next", "", name).split(":")
+        reference_id_split = re.sub(
+            r":(v\d+[._]\d+|current|next|sample)", "", name
+        ).split(":")
         if len(reference_id_split) > 1:
             reference_id = reference_id_split[1]
 
