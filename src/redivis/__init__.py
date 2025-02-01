@@ -21,6 +21,9 @@ def authenticate(scope=None, force_reauthentication=False):
     if force_reauthentication:
         clear_cached_credentials()
 
+    if isinstance(scope, str):
+        scope = [scope]
+
     get_auth_token(scope=scope)
 
 
