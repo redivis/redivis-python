@@ -35,7 +35,6 @@ else:
 # Required dependencies
 REQUIRED = [
     # Base libraries. These are required for working with the API
-    "PyJWT >= 2.8.0",
     "requests >= 2.0.0",
     "tqdm >= 4.64.0",
     # Data processing libraries, required if pulling data off Redivis.

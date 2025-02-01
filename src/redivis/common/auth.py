@@ -3,7 +3,7 @@ import json
 import time
 import sys
 import warnings
-import jwt
+import base64
 from pathlib import Path
 import re
 import requests
@@ -16,7 +16,7 @@ verify_ssl = (
     )
     != 0
 )
-credentials_file = redivis_dir / "credentials"
+credentials_file = redivis_dir / "python_credentials"
 default_scope = ["data.edit", "organization.write"]
 client_id = "7YGtYWuQot1TEe0pHB3EPSj5"
 # Note that https is optional, since traffic can happen over http if all in the same cluster
@@ -67,7 +67,7 @@ This environment variable should only ever be set in a non-interactive environme
             redivis_dir.mkdir()
 
         perform_oauth_login(
-            missing_scope if len(missing_scope) > 0 else scope,
+            scope=missing_scope if len(missing_scope) > 0 else scope,
             upgrade_credentials=bool(len(missing_scope)),
         )
 
@@ -192,10 +192,12 @@ def refresh_credentials(scope=None, amr_values=None):
 def get_current_credential_scope():
     try:
         if cached_credentials is not None:
-            return jwt.decode(
-                cached_credentials["access_token"],
-                options={"verify_signature": False},
-            )["scope"].split(" ")
+            base64_payload = cached_credentials["access_token"].split(".")[1]
+            # IMPORTANT: b64decode requires that the string length be a multiple of 4, with "=" at the end for padding
+            padded_base64_payload = f"{base64_payload}{'=' * (len(base64_payload) % 4)}"
+            return json.loads(base64.b64decode(padded_base64_payload))["scope"].split(
+                " "
+            )
     except Exception as e:
         """ignore"""
 
