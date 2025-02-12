@@ -17,7 +17,7 @@ def perform_resumable_upload(
     start_byte = 0
     is_file = True if hasattr(data, "read") else False
     file_size = os.stat(data.name).st_size if is_file else len(data)
-    chunk_size = file_size
+    chunk_size = min(file_size, 2**30)
     headers = {"Authorization": f"Bearer {get_auth_token()}"}
 
     if proxy_url:
