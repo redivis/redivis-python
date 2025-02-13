@@ -9,6 +9,15 @@ from urllib.parse import quote as quote_uri
 
 from .auth import get_auth_token
 
+verify_ssl = (
+    False
+    if os.getenv("REDIVIS_API_ENDPOINT", "https://redivis.com/api/v1").find(
+        "https://localhost", 0
+    )
+    == 0
+    else True
+)
+
 
 def perform_resumable_upload(
     data, temp_upload_url=None, proxy_url=None, progressbar=None
@@ -17,7 +26,8 @@ def perform_resumable_upload(
     start_byte = 0
     is_file = True if hasattr(data, "read") else False
     file_size = os.stat(data.name).st_size if is_file else len(data)
-    chunk_size = min(file_size, 2**30)
+    chunk_size = file_size
+    # chunk_size = min(file_size, 2**30)
     headers = {"Authorization": f"Bearer {get_auth_token()}"}
 
     if proxy_url:
@@ -29,6 +39,7 @@ def perform_resumable_upload(
         start_byte < file_size or start_byte == 0
     ):  # handle empty upload for start_byte == 0
         end_byte = min(start_byte + chunk_size - 1, file_size - 1)
+        progressbar.update(start_byte - progressbar.n)
         if is_file:
             data.seek(start_byte)
             if progressbar:
@@ -44,6 +55,7 @@ def perform_resumable_upload(
         try:
             res = requests.put(
                 url=resumable_url,
+                verify=verify_ssl,
                 headers={
                     **headers,
                     **{
@@ -56,14 +68,14 @@ def perform_resumable_upload(
             res.raise_for_status()
 
             start_byte += chunk_size
-            retry_count = 0
+            retry_count = 0  # reset retry_count after a successfully uploaded chunk
         except Exception as e:
             if retry_count > 10:
                 print("A network error occurred. Upload failed after too many retries.")
                 raise e
 
             retry_count += 1
-            time.sleep(retry_count / 2)
+            time.sleep(retry_count)
             print("A network error occurred. Retrying last chunk of resumable upload.")
             start_byte = retry_partial_upload(
                 file_size=file_size, resumable_url=resumable_url, headers=headers
@@ -75,6 +87,7 @@ def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
     try:
         res = requests.post(
             temp_upload_url,
+            verify=verify_ssl,
             headers={
                 **headers,
                 **{
@@ -94,7 +107,7 @@ def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
             if retry_count > 10:
                 print("A network error occurred. Upload failed after too many retries.")
                 raise e
-            time.sleep(retry_count / 2)
+            time.sleep(retry_count + 1)
             initiate_resumable_upload(
                 size, temp_upload_url, headers, retry_count=retry_count + 1
             )
@@ -106,6 +119,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
     try:
         res = requests.put(
             url=resumable_url,
+            verify=verify_ssl,
             headers={
                 **headers,
                 **{"Content-Length": "0", "Content-Range": f"bytes */{file_size}"},
@@ -136,7 +150,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
         if retry_count > 10:
             raise e
 
-        time.sleep(retry_count / 10)
+        time.sleep(retry_count + 1)
         return retry_partial_upload(
             retry_count=retry_count + 1,
             file_size=file_size,
@@ -158,13 +172,15 @@ def perform_standard_upload(
         if proxy_url:
             temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
 
-        res = requests.put(url=temp_upload_url, data=data, headers=headers)
+        res = requests.put(
+            url=temp_upload_url, data=data, headers=headers, verify=verify_ssl
+        )
         res.raise_for_status()
     except Exception as e:
         if retry_count > 10:
             print("A network error occurred. Upload failed after too many retries.")
             raise e
-        time.sleep(retry_count / 2)
+        time.sleep(retry_count + 1)
         return perform_standard_upload(
             data=data,
             temp_upload_url=original_url,
