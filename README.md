@@ -30,9 +30,11 @@ df = iris_table.to_pandas_dataframe()
 
 ## Documentation
 
+**[View the comprehensive documentation here >](https://apidocs.redivis.com/client-libraries/redivis-python)**
+
 This package contains a number of methods for processing data on Redivis and interfacing with the API through python.
-Comprehensive
-documentation and examples are available at https://apidocs.redivis.com/client-libraries/redivis-python
+Consult
+the documentation for a detailed list of all methods and accompanying examples.
 
 ## Issue reporting
 
