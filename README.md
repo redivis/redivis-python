@@ -10,7 +10,7 @@ tasks!
 ## Getting started
 
 The easiest way to get started is
-to [create a new python notebook on Redivis] (https://docs.redivis.com/reference/workflows/notebooks/python-notebooks).
+to [create a new python notebook on Redivis](https://docs.redivis.com/reference/workflows/notebooks/python-notebooks).
 This package, alongside other common data science python packages, are all preinstalled.
 
 You can also install the latest version of this package in any other python environment:
