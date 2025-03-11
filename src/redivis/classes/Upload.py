@@ -5,6 +5,7 @@ import logging
 from urllib.parse import quote as quote_uri
 import warnings
 import io
+import pathlib
 from tqdm.auto import tqdm
 
 from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
@@ -15,7 +16,8 @@ from .Variable import Variable
 from ..common.api_request import make_request, make_paginated_request
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
-MAX_SIMPLE_UPLOAD_SIZE = 1e7
+MAX_SIMPLE_UPLOAD_SIZE = 2**20  # 1MB
+MIN_RESUMABLE_UPLOAD_SIZE = 2**25  # 32MB
 
 
 class Upload(Base):
@@ -31,14 +33,15 @@ class Upload(Base):
         self.uri = (
             properties["uri"]
             if "uri" in (properties or {})
-            else (f"{table.uri}/uploads/{quote_uri(self.name,'')}")
+            else (f"{table.uri}/uploads/{quote_uri(self.name.replace('.', '_'),'')}")
         )
         self.properties = properties
 
     def create(
         self,
-        data=None,
+        content=None,
         *,
+        data=None,
         type=None,
         transfer_specification=None,
         delimiter=None,
@@ -58,23 +61,42 @@ class Upload(Base):
         raise_on_fail=True,
         progress=True,
     ):
+
+        if data is not None and content is None:
+            content = data
+            warnings.warn(
+                "Deprecation warning: the `data` named argument has been renamed to `content`",
+                FutureWarning,
+                stacklevel=2,
+            )
+
         temp_upload_id = None
 
-        if data and (
+        did_reopen_file = False
+
+        if isinstance(content, str) or isinstance(content, pathlib.PurePath):
+            did_reopen_file = True
+            content = open(content, "rb")
+
+        if content and (
             (
-                hasattr(data, "read")
-                and os.stat(data.name).st_size > MAX_SIMPLE_UPLOAD_SIZE
+                hasattr(content, "read")
+                and os.stat(content.name).st_size > MAX_SIMPLE_UPLOAD_SIZE
             )
-            or (hasattr(data, "__len__") and len(data) > MAX_SIMPLE_UPLOAD_SIZE)
+            or (hasattr(content, "__len__") and len(content) > MAX_SIMPLE_UPLOAD_SIZE)
         ):
-            did_reopen_file = False
+
             pbar_bytes = None
             # If file isn't in binary mode, we need to reopen, otherwise uploading of non-text files will fail
-            if hasattr(data, "mode") and "b" not in data.mode:
-                data = open(data.name, "rb")
+            if hasattr(content, "mode") and "b" not in content.mode:
+                content = open(content.name, "rb")
                 did_reopen_file = True
 
-            size = os.stat(data.name).st_size if hasattr(data, "read") else len(data)
+            size = (
+                os.stat(content.name).st_size
+                if hasattr(content, "read")
+                else len(content)
+            )
             if progress:
                 pbar_bytes = tqdm(total=size, unit="B", leave=False, unit_scale=True)
 
@@ -83,33 +105,37 @@ class Upload(Base):
                 path=f"{self.table.uri}/tempUploads",
                 payload={
                     "tempUploads": [
-                        {"size": size, "name": self.name, "resumable": True}
+                        {
+                            "size": size,
+                            "name": self.name,
+                            "resumable": size >= MIN_RESUMABLE_UPLOAD_SIZE,
+                        }
                     ]
                 },
             )
             temp_upload = res["results"][0]
             if temp_upload["resumable"]:
                 perform_resumable_upload(
-                    data=data,
+                    data=content,
                     progressbar=pbar_bytes,
                     temp_upload_url=temp_upload["url"],
                 )
             else:
                 perform_standard_upload(
-                    data=data,
+                    data=content,
                     temp_upload_url=temp_upload["url"],
                     progressbar=pbar_bytes,
                 )
 
             if did_reopen_file:
-                data.close()
+                content.close()
             if progress:
                 pbar_bytes.close()
 
             temp_upload_id = temp_upload["id"]
-            data = None
-        elif data and not hasattr(data, "read"):
-            data = io.StringIO(data)
+            content = None
+        elif content and not hasattr(content, "read"):
+            content = io.BytesIO(content)
 
         if schema and type != "stream":
             warnings.warn(
@@ -151,14 +177,14 @@ class Upload(Base):
             "transferSpecification": transfer_specification,
         }
 
-        if data is not None:
-            files = {"metadata": json.dumps(payload), "data": data}
+        if content is not None:
+            files = {"metadata": json.dumps(payload), "data": content}
             payload = None
 
         response = make_request(
             method="POST",
             path=f"{self.table.uri}/uploads",
-            parse_payload=data is None,
+            parse_payload=content is None,
             payload=payload,
             files=files,
         )
@@ -166,7 +192,9 @@ class Upload(Base):
         self.uri = self.properties["uri"]
 
         try:
-            if (data or temp_upload_id or transfer_specification) and wait_for_finish:
+            if (
+                content or temp_upload_id or transfer_specification
+            ) and wait_for_finish:
                 while True:
                     time.sleep(2)
                     self.get()

@@ -39,7 +39,8 @@ def perform_resumable_upload(
         start_byte < file_size or start_byte == 0
     ):  # handle empty upload for start_byte == 0
         end_byte = min(start_byte + chunk_size - 1, file_size - 1)
-        progressbar.update(start_byte - progressbar.n)
+        if progressbar:
+            progressbar.update(start_byte - progressbar.n)
         if is_file:
             data.seek(start_byte)
             if progressbar:
