@@ -12,7 +12,7 @@ def test_linebreaks_in_cell():
 
     with open("tests/data/line_breaks.csv", "rb") as f:
         table.upload(name="test.csv").create(
-            data=f,
+            content=f,
             type="delimited",
             has_quoted_newlines=True,
         )
@@ -25,9 +25,9 @@ def test_upload_large_file():
         description="Some info", upload_merge_strategy="replace"
     )
     file_name = "concept_relationship.csv"
-    with open(f"tests/data/{file_name}", "rb") as f:
-        data = f.read()
-        table.upload(name=file_name).create(data=data, wait_for_finish=True)
+    table.upload(name=file_name).create(
+        data=f"tests/data/{file_name}", wait_for_finish=True
+    )
 
 
 def test_upload_remove_on_failure():
@@ -40,7 +40,7 @@ def test_upload_remove_on_failure():
     table.upload(
         name="tiny.csv",
     ).create(
-        data='a,b\n1,2\n3,"4\n5"',
+        content=b'a,b\n1,2\n3,"4\n5"',
         remove_on_fail=True,
         type="delimited",
         has_quoted_newlines=False,
@@ -75,7 +75,7 @@ def test_upload_string():
     table.upload(
         name="tiny.csv",
     ).create(
-        data='a,b\n1,2\n3,"4\n5"',
+        content=b'a,b\n1,2\n3,"4\n5"',
         type="delimited",
         has_quoted_newlines=True,
     )
@@ -91,7 +91,7 @@ def test_upload_large_string():
     with open("tests/data/us_counties_500k.geojson", "rb") as f:
         data = f.read()
         table.upload(name="us_counties_500k.geojson").create(
-            data=data, wait_for_finish=True
+            content=data, wait_for_finish=True
         )
 
 
@@ -104,7 +104,7 @@ def test_upload_and_release():
 
     with open("tests/data/tiny.csv", "rb") as f:
         table.upload(name="tiny.csv").create(
-            data=f, type="delimited", wait_for_finish=True
+            content=f, type="delimited", wait_for_finish=True
         )
 
     dataset.release()
@@ -113,7 +113,7 @@ def test_upload_and_release():
     table = dataset.table(util.get_table_name())
 
     with open("tests/data/tiny.csv", "rb") as f:
-        table.upload(name="tiny.csv").create(data=f, type="delimited")
+        table.upload(name="tiny.csv").create(content=f, type="delimited")
 
     dataset.release()
 
@@ -223,7 +223,7 @@ def test_resumable_upload():
     with open(
         os.path.join(os.path.dirname(__file__), "./data/us_counties_500k.geojson"), "rb"
     ) as f:
-        table.upload(name="us_counties_500k.geojson").create(type="geojson", data=f)
+        table.upload(name="us_counties_500k.geojson").create(type="geojson", content=f)
 
     print(table.upload("us_counties_500k.geojson").to_pandas_dataframe(10))
 
@@ -260,7 +260,7 @@ def test_streaming_after_upload():
     table.create(description="Some info")
 
     with open("tests/data/tiny.csv", "rb") as f:
-        upload = table.upload(name="seed_file").create(data=f, type="delimited")
+        upload = table.upload(name="seed_file").create(content=f, type="delimited")
 
     upload = table.upload(name="streamed_data").create(
         type="stream",
@@ -305,7 +305,7 @@ def test_upload_raw_file():
     table = util.get_table().create(is_file_index=True)
 
     with open("tests/data/tiny.csv", "rb") as f:
-        file = table.add_file(name="tiny.csv", data=f)
+        file = table.add_file(name="tiny.csv", content=f)
         print(file)
 
 

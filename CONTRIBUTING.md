@@ -3,7 +3,7 @@
 For local development, clone this repository and then run
 
 ```sh
-source ./venv/bin/ ctivate && python setup.py develop --user
+source ./venv/bin/activate && python setup.py develop --user
 # OR
 source ./venv/bin/activate && python3 -m pip install . && REDIVIS_API_ENDPOINT=https://localhost:8443/api/v1 python3 - W ignore
 ```

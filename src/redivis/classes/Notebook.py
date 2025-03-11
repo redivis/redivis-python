@@ -21,6 +21,7 @@ class Notebook(Base):
     def create_output_table(
         self, data=None, *, name=None, append=False, geography_variables=None
     ):
+        should_remove_tempfile = True
         temp_file_path = f"{get_tempdir()}/out/{uuid.uuid4()}"
         try:
             pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
@@ -32,7 +33,15 @@ class Notebook(Base):
             import pyarrow.parquet as pa_parquet
             from dask.dataframe import DataFrame as dask_df
 
-            if isinstance(data, geopandas.GeoDataFrame):
+            if isinstance(data, str):
+                if data.endswith(".parquet"):
+                    should_remove_tempfile = False
+                    temp_file_path = data
+                else:
+                    raise Exception(
+                        "Only paths to parquet files (ending in .parquet) are supported when a string argument is provided"
+                    )
+            elif isinstance(data, geopandas.GeoDataFrame):
                 if geography_variables is None:
                     geography_variables = list(data.select_dtypes("geometry"))
                 data.to_wkt().to_parquet(path=temp_file_path, index=False)
@@ -94,7 +103,8 @@ class Notebook(Base):
                     )
 
             pbar_bytes.close()
-            os.remove(temp_file_path)
+            if should_remove_tempfile:
+                os.remove(temp_file_path)
 
             res = make_request(
                 method="PUT",
@@ -109,6 +119,6 @@ class Notebook(Base):
 
             return Table(name=res["name"], properties=res)
         except Exception as e:
-            if os.path.exists(temp_file_path):
+            if os.path.exists(temp_file_path) and should_remove_tempfile:
                 os.remove(temp_file_path)
             raise e

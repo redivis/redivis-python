@@ -109,8 +109,18 @@ class File(Base):
 
 def parse_headers(file, res):
     file.properties["name"] = get_filename(res.headers["content-disposition"])
-    # TODO: md5Hash from x-goog-hash
     file.properties["contentType"] = res.headers["content-type"]
+
+    digest = None
+
+    if "Digest" in res.headers:
+        digest = res.headers["Digest"]
+    elif "x-goog-hash" in res.headers:
+        digest = res.headers["x-goog-hash"]
+
+    if digest:
+        file.properties["md5"] = digest.replace("md5=", "")
+
     file.properties["size"] = int(
         res.headers["content-length"] or res.headers["x-goog-stored-content-length"]
     )
