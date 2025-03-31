@@ -38,6 +38,10 @@ class Version(Base):
         self.properties = make_request(method="DELETE", path=self.uri)
         self.uri = self.properties["uri"]
 
+    def undelete(self):
+        self.properties = make_request(method="POST", path=f"{self.uri}/undelete")
+        self.uri = self.properties["uri"]
+
     def previous_version(self):
         if "previousVersion" not in self.properties:
             self.get()

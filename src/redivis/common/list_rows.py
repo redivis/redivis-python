@@ -241,13 +241,7 @@ def list_rows(
             )
             return dd.read_parquet(parquet_base_dir, dtype_backend="pyarrow")
         else:
-            if max_results is not None:
-                # TODO: remove head() once BE is sorted, instead always use dataset.to_table()
-                arrow_table = pyarrow_dataset.Scanner.from_dataset(arrow_dataset).head(
-                    max_results
-                )
-            else:
-                arrow_table = arrow_dataset.to_table()
+            arrow_table = arrow_dataset.to_table()
 
             if output_type == "arrow_table":
                 return arrow_table
@@ -358,6 +352,7 @@ def process_stream(
                         reader.schema.names,
                     )
                 )
+
                 output_schema = pyarrow.schema(
                     map(variable_to_field, variables_in_stream)
                 )

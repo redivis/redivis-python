@@ -33,7 +33,8 @@ class Notebook(Base):
             import pyarrow.parquet as pa_parquet
             from dask.dataframe import DataFrame as dask_df
 
-            if isinstance(data, str):
+            if isinstance(data, str) or isinstance(data, pathlib.PurePath):
+                data = str(data)
                 if data.endswith(".parquet"):
                     should_remove_tempfile = False
                     temp_file_path = data
