@@ -5,6 +5,7 @@ import json
 import platform
 import warnings
 from urllib.parse import unquote
+import time
 
 from .auth import get_auth_token, refresh_credentials
 from .._version import __version__
@@ -21,6 +22,7 @@ def make_request(
     stream=False,
     files=None,
     headers={},
+    retry_count=0,
 ):
     original_parameters = locals().copy()
     args = get_request_args(
@@ -133,6 +135,13 @@ def process_request_response(
     method = method.lower()
     response_json = {}
     try:
+        # Retry with exponential backoff on service unavailable
+        if r.status_code == 503 and original_parameters["retry_count"] < 10:
+            logging.debug("API is currently unavailable, retrying...")
+            time.sleep(original_parameters["retry_count"])
+            original_parameters["retry_count"] += 1
+            return make_request(**original_parameters)
+
         if r.status_code >= 400 or (
             method != "head" and parse_response and r.text != "OK"
         ):

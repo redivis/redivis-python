@@ -208,7 +208,7 @@ class Upload(Base):
                     else:
                         logging.debug("Upload is still in progress...")
         except Exception as e:
-            if remove_on_fail:
+            if remove_on_fail and self.properties["status"] == "failed":
                 self.delete()
             raise Exception(str(e))
 
