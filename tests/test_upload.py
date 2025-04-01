@@ -299,14 +299,10 @@ def test_streaming_after_upload():
 
 
 def test_upload_raw_file():
-    raise Exception("not implemented")
     dataset = util.create_test_dataset()
     util.clear_test_data()
     table = util.get_table().create(is_file_index=True)
-
-    with open("tests/data/tiny.csv", "rb") as f:
-        file = table.add_file(name="tiny.csv", content=f)
-        print(file)
+    table.add_files(directory="tests/data")
 
 
 def test_upload_metadata():

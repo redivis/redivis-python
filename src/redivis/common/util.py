@@ -3,6 +3,7 @@ import tempfile
 import atexit
 import shutil
 import pathlib
+import uuid
 
 
 def get_geography_variable(variables, geography_variable_name):
@@ -55,6 +56,52 @@ def get_tempdir():
         atexit.register(rm_tempdir)
 
     return created_temp_dir
+
+
+def convert_data_to_parquet(data):
+    temp_file_path = f"{get_tempdir()}/parquet/{uuid.uuid4()}"
+    pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
+
+    import geopandas
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.dataset as pa_dataset
+    import pyarrow.parquet as pa_parquet
+    from dask.dataframe import DataFrame as dask_df
+
+    if isinstance(data, geopandas.GeoDataFrame):
+        data.to_wkt().to_parquet(path=temp_file_path, index=False)
+    elif isinstance(data, pd.DataFrame):
+        data.to_parquet(path=temp_file_path, index=False)
+    elif isinstance(data, pa_dataset.Dataset):
+        pa_dataset.write_dataset(
+            data,
+            temp_file_path,
+            format="parquet",
+            basename_template="part-{i}.parquet",
+            max_partitions=1,
+        )
+        temp_file_path = f"{temp_file_path}/part-0.parquet"
+    elif isinstance(data, pa.Table):
+        pa_parquet.write_table(data, temp_file_path)
+    elif isinstance(data, dask_df):
+        data.to_parquet(temp_file_path, write_index=False)
+        temp_file_path = f"{temp_file_path}/part.0.parquet"
+    else:
+        # importing polars is causing an IllegalInstruction error on ARM + Docker. Import inline to avoid crashes elsewhwere
+        # TODO: revert once fixed upstream
+        import polars
+
+        if isinstance(data, polars.LazyFrame):
+            data.sink_parquet(temp_file_path)
+        elif isinstance(data, polars.DataFrame):
+            data.write_parquet(temp_file_path)
+        else:
+            raise Exception(
+                "Unknown datatype provided. Must be an instance of pandas.DataFrame, pyarrow.Dataset, pyarrow.Table, dask.DataFrame, polars.LazyFrame, or polars.DataFrame"
+            )
+
+    return temp_file_path
 
 
 def arrow_table_to_pandas(

@@ -4,11 +4,10 @@ from ..common.api_request import make_request
 from tqdm.auto import tqdm
 
 import pathlib
-import uuid
 import os
 
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
-from ..common.util import get_tempdir
+from ..common.util import convert_data_to_parquet
 
 
 class Notebook(Base):
@@ -22,17 +21,8 @@ class Notebook(Base):
         self, data=None, *, name=None, append=False, geography_variables=None
     ):
         should_remove_tempfile = True
-        temp_file_path = f"{get_tempdir()}/out/{uuid.uuid4()}"
+        temp_file_path = None
         try:
-            pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
-
-            import geopandas
-            import pandas as pd
-            import pyarrow as pa
-            import pyarrow.dataset as pa_dataset
-            import pyarrow.parquet as pa_parquet
-            from dask.dataframe import DataFrame as dask_df
-
             if isinstance(data, str) or isinstance(data, pathlib.PurePath):
                 data = str(data)
                 if data.endswith(".parquet"):
@@ -42,42 +32,10 @@ class Notebook(Base):
                     raise Exception(
                         "Only paths to parquet files (ending in .parquet) are supported when a string argument is provided"
                     )
-            elif isinstance(data, geopandas.GeoDataFrame):
-                if geography_variables is None:
-                    geography_variables = list(data.select_dtypes("geometry"))
-                data.to_wkt().to_parquet(path=temp_file_path, index=False)
-            elif isinstance(data, pd.DataFrame):
-                data.to_parquet(path=temp_file_path, index=False)
-            elif isinstance(data, pa_dataset.Dataset):
-                pa_dataset.write_dataset(
-                    data,
-                    temp_file_path,
-                    format="parquet",
-                    basename_template="part-{i}.parquet",
-                    max_partitions=1,
-                )
-                temp_file_path = f"{temp_file_path}/part-0.parquet"
-            elif isinstance(data, pa.Table):
-                pa_parquet.write_table(data, temp_file_path)
-            elif isinstance(data, dask_df):
-                data.to_parquet(temp_file_path, write_index=False)
-                temp_file_path = f"{temp_file_path}/part.0.parquet"
             else:
-                # importing polars is causing an IllegalInstruction error on ARM + Docker. Import inline to avoid crashes elsewhwere
-                # TODO: revert once fixed upstream
-                import polars
-
-                if isinstance(data, polars.LazyFrame):
-                    data.sink_parquet(temp_file_path)
-                elif isinstance(data, polars.DataFrame):
-                    data.write_parquet(temp_file_path)
-                else:
-                    raise Exception(
-                        "Unknown datatype provided to notebook.create_output_table. Must either by a file path, or an instance of pandas.DataFrame, pyarrow.Dataset, pyarrow.Table, dask.DataFrame, polars.LazyFrame, or polars.DataFrame"
-                    )
+                temp_file_path = convert_data_to_parquet(data)
 
             size = os.stat(temp_file_path).st_size
-
             pbar_bytes = tqdm(total=size, unit="B", leave=False, unit_scale=True)
 
             res = make_request(
@@ -120,6 +78,10 @@ class Notebook(Base):
 
             return Table(name=res["name"], properties=res)
         except Exception as e:
-            if os.path.exists(temp_file_path) and should_remove_tempfile:
+            if (
+                temp_file_path
+                and os.path.exists(temp_file_path)
+                and should_remove_tempfile
+            ):
                 os.remove(temp_file_path)
             raise e
