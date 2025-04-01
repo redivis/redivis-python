@@ -8,7 +8,12 @@ import io
 import pathlib
 from tqdm.auto import tqdm
 
-from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
+from ..common.util import (
+    get_geography_variable,
+    get_warning,
+    arrow_table_to_pandas,
+    convert_data_to_parquet,
+)
 from ..common.list_rows import list_rows
 
 from .Base import Base
@@ -71,32 +76,46 @@ class Upload(Base):
             )
 
         temp_upload_id = None
-
         did_reopen_file = False
+        tempfile_to_remove = None
+        size = None
 
         if isinstance(content, str) or isinstance(content, pathlib.PurePath):
             did_reopen_file = True
             content = open(content, "rb")
 
-        if content and (
+        if hasattr(content, "name") and not self.name:
+            self.name = pathlib.Path(content.name).name
+
+        if content is not None and not hasattr(content, "read"):
+            if isinstance(content, (bytes, bytearray)):
+                size = len(content)
+                content = io.BytesIO(content)
+            else:
+                tempfile_to_remove = convert_data_to_parquet(content)
+                did_reopen_file = True
+                type = "parquet"
+                content = open(tempfile_to_remove, "rb")
+
+        if content is not None and (
             (
-                hasattr(content, "read")
-                and os.stat(content.name).st_size > MAX_SIMPLE_UPLOAD_SIZE
+                isinstance(content, io.IOBase)
+                and (
+                    not hasattr(content, "name")
+                    or os.stat(content.name).st_size > MAX_SIMPLE_UPLOAD_SIZE
+                )
             )
             or (hasattr(content, "__len__") and len(content) > MAX_SIMPLE_UPLOAD_SIZE)
         ):
-
             pbar_bytes = None
             # If file isn't in binary mode, we need to reopen, otherwise uploading of non-text files will fail
             if hasattr(content, "mode") and "b" not in content.mode:
                 content = open(content.name, "rb")
                 did_reopen_file = True
 
-            size = (
-                os.stat(content.name).st_size
-                if hasattr(content, "read")
-                else len(content)
-            )
+            if size is None:
+                size = os.stat(content.name).st_size
+
             if progress:
                 pbar_bytes = tqdm(total=size, unit="B", leave=False, unit_scale=True)
 
@@ -131,18 +150,23 @@ class Upload(Base):
                 content.close()
             if progress:
                 pbar_bytes.close()
+            if tempfile_to_remove is not None:
+                os.remove(tempfile_to_remove)
 
             temp_upload_id = temp_upload["id"]
             content = None
-        elif content and not hasattr(content, "read"):
-            content = io.BytesIO(content)
 
         if schema and type != "stream":
             warnings.warn(
                 "The schema option is ignored for uploads that aren't of type `stream`"
             )
 
-        exists = self.exists()
+        exists = False
+
+        if self.name != "":
+            if self.properties is None or "uri" not in self.properties:
+                self.uri = f"{self.table.uri}/uploads/{quote_uri(self.name.replace('.', '_'), '')}"
+            exists = self.exists()
 
         if if_not_exists and exists:
             return self

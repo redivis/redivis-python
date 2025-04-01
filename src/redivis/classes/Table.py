@@ -707,7 +707,7 @@ class Table(Base):
         update_properties(self, response)
         return
 
-    def upload(self, name):
+    def upload(self, name=""):
         return Upload(name=name, table=self)
 
     def variable(self, name):
