@@ -20,12 +20,16 @@ verify_ssl = (
 
 
 def perform_resumable_upload(
-    data, temp_upload_url=None, proxy_url=None, progressbar=None
+    data, size=None, temp_upload_url=None, proxy_url=None, progressbar=None
 ):
     retry_count = 0
     start_byte = 0
     is_file = True if hasattr(data, "read") else False
-    file_size = os.stat(data.name).st_size if is_file else len(data)
+    file_size = size
+
+    if file_size is None:
+        file_size = os.stat(data.name).st_size if is_file else len(data)
+
     chunk_size = file_size
     # chunk_size = min(file_size, 2**30)
     headers = {"Authorization": f"Bearer {get_auth_token()}"}
