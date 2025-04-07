@@ -6,6 +6,7 @@ from urllib.parse import quote as quote_uri
 import warnings
 import io
 import pathlib
+import uuid
 from tqdm.auto import tqdm
 
 from ..common.util import (
@@ -80,6 +81,11 @@ class Upload(Base):
         tempfile_to_remove = None
         size = None
 
+        if isinstance(content, str) and len(content) > 4096:  # maximum path length
+            raise Exception(
+                "`content` argument was a string, but is an invalid file path. To upload data as content, make sure that the `content` argument is provided as binary data."
+            )
+
         if isinstance(content, str) or isinstance(content, pathlib.PurePath):
             did_reopen_file = True
             content = open(content, "rb")
@@ -126,7 +132,7 @@ class Upload(Base):
                     "tempUploads": [
                         {
                             "size": size,
-                            "name": self.name,
+                            "name": self.name or str(uuid.uuid4()),
                             "resumable": size >= MIN_RESUMABLE_UPLOAD_SIZE,
                         }
                     ]
@@ -136,6 +142,7 @@ class Upload(Base):
             if temp_upload["resumable"]:
                 perform_resumable_upload(
                     data=content,
+                    size=size,
                     progressbar=pbar_bytes,
                     temp_upload_url=temp_upload["url"],
                 )
