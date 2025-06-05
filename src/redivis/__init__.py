@@ -3,6 +3,7 @@ from .classes.Organization import Organization as organization
 from .classes.Query import Query as query
 from .classes.Table import Table as table
 from .classes.File import File as file
+from .common.api_request import make_request as make_api_request
 import warnings
 
 from ._version import __version__
