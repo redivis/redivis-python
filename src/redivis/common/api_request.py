@@ -13,8 +13,8 @@ from .._version import __version__
 
 def make_request(
     *,
-    method,
-    path,
+    method="GET",
+    path="",
     query=None,
     payload=None,
     parse_payload=True,
