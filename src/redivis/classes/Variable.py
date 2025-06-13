@@ -1,4 +1,6 @@
 import time
+import warnings
+
 from .Base import Base
 from ..common.api_request import make_request
 
@@ -23,6 +25,11 @@ class Variable(Base):
         self.properties = properties
 
     def get(self, wait_for_statistics=False):
+        if wait_for_statistics:
+            warnings.warn(
+                "Calling variable.get with the wait_for_statistics parameter is deprecated. Please use variable.get_statistics() instead."
+            )
+
         self.properties = make_request(
             method="GET",
             path=self.uri,
@@ -38,6 +45,20 @@ class Variable(Base):
             )
 
         return self
+
+    def get_statistics(self):
+        statistics = make_request(
+            method="GET",
+            path=f"{self.uri}/statistics",
+        )
+        while statistics["status"] == "running" or statistics["status"] == "queued":
+            time.sleep(2)
+            statistics = make_request(
+                method="GET",
+                path=f"{self.uri}/statistics",
+            )
+
+        return statistics
 
     def update(self, *, label=None, description=None, value_labels=None):
         payload = {}
