@@ -1,6 +1,8 @@
 from .Dataset import Dataset
 from .Member import Member
 from .Base import Base
+from .Secret import Secret
+
 from urllib.parse import quote as quote_uri
 from ..common.api_request import make_paginated_request
 
@@ -16,6 +18,9 @@ class Organization(Base):
 
     def member(self, name):
         return Member(name, organization=self)
+
+    def secret(self, name):
+        return Secret(name, organization=self)
 
     def list_datasets(self, max_results=None, labels=None):
         query = {}

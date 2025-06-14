@@ -1,6 +1,7 @@
 from urllib.parse import quote as quote_uri
 from .Dataset import Dataset
 from .Base import Base
+from .Secret import Secret
 from .Workflow import Workflow
 from ..common.api_request import make_paginated_request
 import warnings
@@ -28,6 +29,9 @@ class User(Base):
 
     def workflow(self, name):
         return Workflow(name, user=self)
+
+    def secret(self, name):
+        return Secret(name, user=self)
 
     def list_datasets(self, max_results=None):
         datasets = make_paginated_request(
