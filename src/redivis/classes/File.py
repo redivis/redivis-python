@@ -104,7 +104,7 @@ class File(Base):
             method="GET", path=f"{self.uri}", parse_response=False, stream=True
         )
         parse_headers(self, r)
-        return BytesIO(r.content)
+        return r.raw
 
 
 def parse_headers(file, res):
