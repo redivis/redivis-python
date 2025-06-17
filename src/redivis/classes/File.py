@@ -51,7 +51,6 @@ class File(Base):
         with make_request(
             method="GET",
             path=f"{self.uri}",
-            query={"allowRedirect": "true"},
             stream=True,
             parse_response=False,
         ) as r:
@@ -91,17 +90,36 @@ class File(Base):
 
         return file_name
 
-    def read(self, *, as_text=False):
-        r = make_request(method="GET", path=f"{self.uri}", parse_response=False)
+    def read(self, *, as_text=False, start_byte=0, end_byte=None):
+        range_headers = {}
+        if start_byte:
+            range_headers["Range"] = f"bytes={start_byte}-"
+        elif end_byte:
+            range_headers["Range"] = f"bytes={start_byte}-{end_byte}"
+
+        r = make_request(
+            method="GET",
+            path=f"{self.uri}",
+            parse_response=False,
+            headers=range_headers,
+        )
         parse_headers(self, r)
         if as_text:
             return r.text
         else:
             return r.content
 
-    def stream(self):
+    def stream(self, *, start_byte=0):
+        range_headers = {}
+        if start_byte:
+            range_headers["Range"] = f"bytes={start_byte}-"
+
         r = make_request(
-            method="GET", path=f"{self.uri}", parse_response=False, stream=True
+            method="GET",
+            path=f"{self.uri}",
+            parse_response=False,
+            stream=True,
+            headers=range_headers,
         )
         parse_headers(self, r)
         return r.raw

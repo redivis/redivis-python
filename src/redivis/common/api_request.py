@@ -33,6 +33,7 @@ def make_request(
         parse_payload=parse_payload,
         stream=stream,
         files=files,
+        headers=headers,
     )
 
     logging.debug(f"Making API '{method}' request to '{args['url']}'")
