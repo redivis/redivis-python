@@ -28,17 +28,24 @@ class Table(Base):
         workflow=None,
         properties=None,
     ):
-        dataset, workflow = get_table_parents(dataset, workflow)
-        self.name = name
-        self.dataset = dataset
-        self.workflow = workflow
-
-        reference_scope = ""
+        if len(name.split(".")) != 3:
+            dataset, workflow = get_table_parents(dataset, workflow)
 
         if dataset:
             reference_scope = f"{dataset.qualified_reference}."
         elif workflow:
             reference_scope = f"{workflow.qualified_reference}."
+        else:
+            if len(name.split(".")) != 3:
+                raise Exception(
+                    "Invalid table specifier, must be the fully qualified reference if no dataset or workflow is specified"
+                )
+            reference_scope = f"{'.'.join(name.split('.')[0:2])}."
+            name = name.split(".")[-1]
+
+        self.name = name
+        self.dataset = dataset
+        self.workflow = workflow
 
         self.qualified_reference = (
             properties["qualifiedReference"]
@@ -341,8 +348,11 @@ class Table(Base):
         max_parallelization=os.cpu_count() * 5,
     ):
         files = self.list_files(max_results, file_id_variable=file_id_variable)
+
         if path is None:
             path = os.getcwd()
+        else:
+            path = os.path.expanduser(path)
 
         if progress:
             pbar_count = tqdm(total=len(files), leave=False, unit=" files")
@@ -667,6 +677,12 @@ class Table(Base):
             coerce_schema=self.properties["container"]["kind"] == "dataset",
         )
 
+    def to_stata(self):
+        """TODO"""
+
+    def to_sas(self):
+        """TODO"""
+
     def list_rows(self, max_results=None, *, variables=None, progress=True):
         warnings.warn(
             "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
@@ -749,10 +765,7 @@ def get_table_parents(dataset, workflow):
                 os.getenv("REDIVIS_DEFAULT_DATASET").split(".")[1]
             )
         ), None
-    else:
-        raise Exception(
-            "Cannot reference an unqualified table if the neither the REDIVIS_DEFAULT_WORKFLOW or REDIVIS_DEFAULT_DATASET environment variables are set."
-        )
+    return None, None
 
 
 def update_properties(instance, properties):
