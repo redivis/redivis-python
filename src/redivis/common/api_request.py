@@ -166,7 +166,7 @@ def process_request_response(
                 )
             )
             and os.getenv("REDIVIS_API_TOKEN") is None
-            and os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None
+            and os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None
         ):
             warnings.warn(
                 f"{response_json['error']}: {response_json['error_description']}"

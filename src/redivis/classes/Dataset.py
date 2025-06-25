@@ -1,5 +1,7 @@
 from .Table import Table
 from .Version import Version
+import os
+
 from .Query import Query
 from .Base import Base
 from urllib.parse import quote as quote_uri
@@ -16,12 +18,29 @@ class Dataset(Base):
         version=None,
         user=None,
         organization=None,
-        properties=None,
+        properties={},
     ):
+        if not user and not organization:
+            from .User import User
+            from .Organization import Organization
+
+            if len(name.split(".")) == 2:
+                username = name.split(".")[0]
+                name = name.split(".")[1]
+                organization = Organization(username)
+                user = User(username)
+            elif os.getenv("REDIVIS_DEFAULT_USER"):
+                user = User(os.getenv("REDIVIS_DEFAULT_USER"))
+            elif os.getenv("REDIVIS_DEFAULT_ORGANIZATION"):
+                organization = Organization(os.getenv("REDIVIS_DEFAULT_ORGANIZATION"))
+            else:
+                raise Exception(
+                    "Invalid dataset specifier, must be the fully qualified reference if no owner is specified"
+                )
+
         self.name = name.split(":")[0]
         self.user = user
         self.organization = organization
-
         reference_id = ""
         reference_id_split = re.sub(
             r":(v\d+[._]\d+|current|next|sample)", "", name
@@ -46,21 +65,32 @@ class Dataset(Base):
             version = f"v{version}"
 
         self.version_tag = version
-        self.scoped_reference = (
-            properties["scopedReference"]
-            if "scopedReference" in (properties or {})
-            else f"{self.name}{reference_id}{f':{version}' if version else ''}"
+        self.scoped_reference = properties.get(
+            "scopedReference",
+            f"{self.name}{reference_id}{f':{version}' if version else ''}",
         )
-        self.qualified_reference = (
-            properties["qualifiedReference"]
-            if "qualifiedReference" in (properties or {})
-            else (f"{(self.organization or self.user).name}.{self.scoped_reference}")
+        self.qualified_reference = properties.get(
+            "qualifiedReference",
+            f"{(self.organization or self.user).name}.{self.scoped_reference}",
         )
 
         self.uri = f"/datasets/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
+    def _rectify_ambiguous_owner(self):
+        if self.user and self.organization:
+            if self.properties.get("owner"):
+                if self.properties.get("owner")["kind"] == "user":
+                    self.organization = None
+                else:
+                    self.user = None
+            elif self.organization.exists():
+                self.user = None
+            else:
+                self.organization = None
+
     def create(self, *, public_access_level="none", description=None):
+        self._rectify_ambiguous_owner()
         if self.organization:
             path = f"/organizations/{self.organization.name}/datasets"
         else:
@@ -89,6 +119,7 @@ class Dataset(Base):
                 f"Next version already exists at {self.properties['nextVersion']['datasetUri']}. To avoid this error, set argument if_not_exists to True"
             )
 
+        self._rectify_ambiguous_owner()
         next_version_dataset = Dataset(
             name=self.scoped_reference,
             user=self.user,
@@ -215,3 +246,4 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
+    instance._rectify_ambiguous_owner()

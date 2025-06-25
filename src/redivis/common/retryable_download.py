@@ -5,6 +5,7 @@ import time
 from ..common.api_request import make_request
 from contextlib import closing
 from requests import RequestException
+from urllib3.exceptions import HTTPError
 
 
 def perform_retryable_download(
@@ -67,7 +68,7 @@ def perform_retryable_download(
                     f.write(chunk)
                     if on_progress:
                         on_progress(len(chunk))
-    except RequestException as e:
+    except (RequestException, HTTPError) as e:
         if retry_count < 10:
             time.sleep(retry_count)
             return perform_retryable_download(

@@ -32,7 +32,7 @@ def get_auth_token(scope=None):
         scope = default_scope
 
     if os.getenv("REDIVIS_API_TOKEN"):
-        if os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None and bool(
+        if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None and bool(
             getattr(sys, "ps1", sys.flags.interactive)
         ):
             warnings.warn(

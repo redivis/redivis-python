@@ -4,6 +4,7 @@ import os
 import pathlib
 import time
 from requests import RequestException
+from urllib3.exceptions import HTTPError
 from contextlib import closing
 from ..classes.Row import Row
 from tqdm.auto import tqdm
@@ -55,7 +56,7 @@ class RedivisArrowIterator:
                 )
             else:
                 self.output_schema = self.current_record_batch_reader.schema
-        except RequestException as e:
+        except (RequestException, HTTPError) as e:
             self.retry_count = self.retry_count + 1
             if self.retry_count > 10:
                 print("Download connection failed after too many retries, giving up.")
@@ -98,7 +99,7 @@ class RedivisArrowIterator:
                 self.current_stream_index += 1
                 self.__get_next_reader__()
                 return self.__next__()
-        except RequestException as e:
+        except (RequestException, HTTPError) as e:
             self.retry_count = self.retry_count + 1
             if self.retry_count > 10:
                 print("Download connection failed after too many retries, giving up.")
@@ -430,7 +431,7 @@ def process_stream(
 
             if has_content == False:
                 os.remove(os_file)
-    except RequestException as e:
+    except (RequestException, HTTPError) as e:
         if retry_count >= 10:
             print("Stream rows connection failed after too many retries, giving up.")
             raise e

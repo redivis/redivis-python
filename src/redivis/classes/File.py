@@ -140,8 +140,7 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             self.raw = r.raw
             self.retry_count = 0
             return r
-        except RequestException as e:
-            print(e)
+        except (RequestException, HTTPError) as e:
             if self.retry_count >= 10:
                 print("File download failed after too many retries, giving up.")
                 raise e
@@ -155,7 +154,7 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             chunk = self.response.raw.read(size)
             self.bytes_read += len(chunk)
             return chunk
-        except HTTPError as e:
+        except (RequestException, HTTPError) as e:
             if self.retry_count >= 10:
                 print("File download failed after too many retries, giving up.")
                 raise e
@@ -172,7 +171,7 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         try:
             self.response.raw.readinto(buffer)
             self.bytes_read += len(buffer)
-        except HTTPError as e:
+        except (RequestException, HTTPError) as e:
             if self.retry_count >= 10:
                 print("File download failed after too many retries, giving up.")
                 raise e
@@ -198,7 +197,7 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             line = self.response.raw.readline(size)
             self.bytes_read += len(line)
             return line
-        except HTTPError as e:
+        except (RequestException, HTTPError) as e:
             if self.retry_count >= 10:
                 print("File download failed after too many retries, giving up.")
                 raise e

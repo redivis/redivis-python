@@ -72,7 +72,6 @@ class Notebook(Base):
             while True:
                 time.sleep(2)
                 self.get()
-                print(self.properties.get("currentJob"))
                 if self.properties.get("currentJob") and self.properties["currentJob"][
                     "status"
                 ] in ["completed", "failed"]:
