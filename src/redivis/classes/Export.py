@@ -19,11 +19,11 @@ class Export(Base):
         id,
         *,
         table=None,
-        properties={},
+        properties=None,
     ):
         self.table = table
         self.properties = properties
-        self.uri = self.properties["uri"]
+        self.uri = (self.properties or {}).get("uri") or f"/exports/{id}"
 
     def get(self):
         self.properties = make_request(method="GET", path=self.uri)

@@ -8,7 +8,7 @@ import logging
 
 
 class Transform(Base):
-    def __init__(self, name, *, workflow=None, properties={}):
+    def __init__(self, name, *, workflow=None, properties=None):
         from .Workflow import Workflow  # avoid circular import
 
         if not workflow:
@@ -28,11 +28,11 @@ class Transform(Base):
         self.workflow = workflow
         self.name = name
 
-        self.qualified_reference = properties.get(
+        self.qualified_reference = (properties or {}).get(
             "qualifiedReference", f"{self.workflow.qualified_reference}.{self.name}"
         )
-        self.scoped_reference = properties.get("scopedReference", self.name)
-        self.uri = properties.get(
+        self.scoped_reference = (properties or {}).get("scopedReference", self.name)
+        self.uri = (properties or {}).get(
             "uri", f"/transforms/{quote_uri(self.qualified_reference, '')}"
         )
         self.properties = properties

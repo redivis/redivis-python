@@ -7,7 +7,7 @@ import os
 
 
 class DataSource(Base):
-    def __init__(self, reference, *, workflow=None, properties={}):
+    def __init__(self, reference, *, workflow=None, properties=None):
         if not workflow:
             from .Workflow import Workflow
 
@@ -18,7 +18,7 @@ class DataSource(Base):
                     "REDIVIS_DEFAULT_WORKFLOW must be set if no workflow is specified in the DataSource constructor"
                 )
         self.workflow = workflow
-        self.uri = properties.get(
+        self.uri = (properties or {}).get(
             "uri", f"{workflow.uri}/dataSources/{quote_uri(reference)}"
         )
         self.properties = properties

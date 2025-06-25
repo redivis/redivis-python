@@ -5,11 +5,12 @@ from ..common.api_request import make_request
 
 
 class Member(Base):
-    def __init__(self, name, *, organization, properties={}):
+    def __init__(self, name, *, organization, properties=None):
         self.name = name
         self.organization = organization
         self.user = User(
-            name, properties=properties["user"] if "user" in properties else {}
+            name,
+            properties=(properties or {}).get("user"),
         )
         self.uri = (
             properties["uri"]

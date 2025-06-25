@@ -18,7 +18,7 @@ class Dataset(Base):
         version=None,
         user=None,
         organization=None,
-        properties={},
+        properties=None,
     ):
         if not user and not organization:
             from .User import User
@@ -65,11 +65,11 @@ class Dataset(Base):
             version = f"v{version}"
 
         self.version_tag = version
-        self.scoped_reference = properties.get(
+        self.scoped_reference = (properties or {}).get(
             "scopedReference",
             f"{self.name}{reference_id}{f':{version}' if version else ''}",
         )
-        self.qualified_reference = properties.get(
+        self.qualified_reference = (properties or {}).get(
             "qualifiedReference",
             f"{(self.organization or self.user).name}.{self.scoped_reference}",
         )
@@ -79,7 +79,7 @@ class Dataset(Base):
 
     def _rectify_ambiguous_owner(self):
         if self.user and self.organization:
-            if self.properties.get("owner"):
+            if (self.properties or {}).get("owner"):
                 if self.properties.get("owner")["kind"] == "user":
                     self.organization = None
                 else:

@@ -14,7 +14,7 @@ from ..common.util import convert_data_to_parquet
 
 
 class Notebook(Base):
-    def __init__(self, name, *, workflow=None, properties={}):
+    def __init__(self, name, *, workflow=None, properties=None):
         from .Workflow import Workflow  # avoid circular import
 
         if not workflow:
@@ -34,11 +34,11 @@ class Notebook(Base):
         self.workflow = workflow
         self.name = name
 
-        self.qualified_reference = properties.get(
+        self.qualified_reference = (properties or {}).get(
             "qualifiedReference", f"{self.workflow.qualified_reference}.{self.name}"
         )
-        self.scoped_reference = properties.get("scopedReference", self.name)
-        self.uri = properties.get(
+        self.scoped_reference = (properties or {}).get("scopedReference", self.name)
+        self.uri = (properties or {}).get(
             "uri", f"/notebooks/{quote_uri(self.qualified_reference, '')}"
         )
         self.properties = properties
@@ -91,6 +91,7 @@ class Notebook(Base):
             path=f"{self.uri}/stop",
         )
         self.uri = self.properties["uri"]
+        return self
 
     def source_tables(self):
         self.get()

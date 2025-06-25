@@ -36,9 +36,7 @@ def current_notebook():
     import os
 
     if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is not None:
-        from .classes.Notebook import Notebook
-
-        return Notebook(os.getenv("REDIVIS_DEFAULT_NOTEBOOK"))
+        return notebook(os.getenv("REDIVIS_DEFAULT_NOTEBOOK"))
 
     return None
 
@@ -47,7 +45,7 @@ def current_workflow():
     import os
 
     if os.getenv("REDIVIS_DEFAULT_WORKFLOW") is not None:
-        return Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+        return workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
 
     return None
 
