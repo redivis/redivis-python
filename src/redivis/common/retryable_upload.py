@@ -74,7 +74,7 @@ def perform_resumable_upload(
 
             start_byte += chunk_size
             retry_count = 0  # reset retry_count after a successfully uploaded chunk
-        except Exception as e:
+        except requests.RequestException as e:
             if retry_count > 10:
                 print("A network error occurred. Upload failed after too many retries.")
                 raise e
@@ -105,7 +105,7 @@ def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
         res.raise_for_status()
         return res.headers["location"]
 
-    except Exception as e:
+    except requests.RequestException as e:
         if did_request_complete:
             raise e
         else:
@@ -151,7 +151,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
                 return 0
         else:
             raise Exception("An unknown error occurred. Please try again.")
-    except Exception as e:
+    except requests.RequestException as e:
         if retry_count > 10:
             raise e
 
@@ -181,7 +181,7 @@ def perform_standard_upload(
             url=temp_upload_url, data=data, headers=headers, verify=verify_ssl
         )
         res.raise_for_status()
-    except Exception as e:
+    except requests.RequestException as e:
         if retry_count > 10:
             print("A network error occurred. Upload failed after too many retries.")
             raise e

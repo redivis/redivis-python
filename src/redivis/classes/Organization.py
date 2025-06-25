@@ -4,7 +4,7 @@ from .Base import Base
 from .Secret import Secret
 
 from urllib.parse import quote as quote_uri
-from ..common.api_request import make_paginated_request
+from ..common.api_request import make_request, make_paginated_request
 
 
 class Organization(Base):
@@ -21,6 +21,20 @@ class Organization(Base):
 
     def secret(self, name):
         return Secret(name, organization=self)
+
+    def exists(self):
+        # TODO: we don't have a get endpoint right now, so this'll do
+        try:
+            make_paginated_request(
+                path=f"{self.uri}/datasets",
+                page_size=100,
+                max_results=1,
+            )
+            return True
+        except Exception as err:
+            if err.args[0]["status"] != 404:
+                raise err
+            return False
 
     def list_datasets(self, max_results=None, labels=None):
         query = {}

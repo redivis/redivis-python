@@ -3,7 +3,7 @@ from ..common.api_request import make_request
 
 
 class Version(Base):
-    def __init__(self, tag, *, dataset, properties={}):
+    def __init__(self, tag, *, dataset, properties=None):
         if tag != "current" and tag != "next" and not tag.lower().startswith("v"):
             tag = f"v{tag}"
 

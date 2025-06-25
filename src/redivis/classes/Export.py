@@ -10,6 +10,8 @@ import urllib
 from threading import Event
 from contextlib import closing
 
+from ..common.retryable_download import perform_retryable_download
+
 
 class Export(Base):
     def __init__(
@@ -17,11 +19,11 @@ class Export(Base):
         id,
         *,
         table=None,
-        properties={},
+        properties=None,
     ):
         self.table = table
         self.properties = properties
-        self.uri = self.properties["uri"]
+        self.uri = (self.properties or {}).get("uri") or f"/exports/{id}"
 
     def get(self):
         self.properties = make_request(method="GET", path=self.uri)
@@ -32,6 +34,8 @@ class Export(Base):
         self.wait_for_finish()
         file_count = self.properties["fileCount"]
         is_dir = False
+        if path:
+            path = os.path.expanduser(path)
         if path is None or (os.path.exists(path) and os.path.isdir(path)):
             is_dir = True
             if path is None:
@@ -168,30 +172,20 @@ def download_file(
     pbar=None,
     cancel_event,
 ):
-    with closing(
-        make_request(
-            method="GET",
-            path=uri,
-            query={"filePart": file_number},
-            stream=True,
-            parse_response=False,
-        )
-    ) as r:
+    def filename_cb(r):
+        nonlocal download_path
         if is_dir:
             file_name = get_filename(r.headers.get("Content-Disposition"))
             download_path = os.path.join(download_path, file_name)
+        return download_path
 
-        if overwrite is False and os.path.exists(download_path):
-            raise Exception(
-                f"File already exists at '{download_path}'. Set parameter overwrite=True to overwrite existing files."
-            )
-
-        with open(download_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if cancel_event.is_set():
-                    break
-                if pbar:
-                    pbar.update(len(chunk))
-                f.write(chunk)
-
-    return download_path
+    return perform_retryable_download(
+        path=uri,
+        filename_cb=filename_cb,
+        pbar=pbar,
+        cancel_event=cancel_event,
+        query={"filePart": file_number},
+        overwrite=overwrite,
+        start_byte=0,
+        on_progress=None,
+    )

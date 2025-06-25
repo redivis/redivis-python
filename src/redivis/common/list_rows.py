@@ -2,6 +2,9 @@ import concurrent.futures
 import uuid
 import os
 import pathlib
+import time
+from requests import RequestException
+from urllib3.exceptions import HTTPError
 from contextlib import closing
 from ..classes.Row import Row
 from tqdm.auto import tqdm
@@ -20,35 +23,46 @@ class RedivisArrowIterator:
         self.progressbar = progressbar
         self.coerce_schema = coerce_schema
         self.current_stream_index = 0
+        self.current_offset = 0
+        self.retry_count = 0
         self.__get_next_reader__()
 
-    def __get_next_reader__(self):
+    def __get_next_reader__(self, offset=0):
         import pyarrow
 
-        # TODO: this won't get closed properly if the iterator is not fully consumed
-        arrow_response = make_request(
-            method="get",
-            path=f'/readStreams/{self.streams[self.current_stream_index]["id"]}',
-            stream=True,
-            parse_response=False,
-        )
-        self.current_record_batch_reader = pyarrow.ipc.RecordBatchStreamReader(
-            arrow_response.raw
-        )
-        if self.coerce_schema:
-            self.variables_in_stream = list(
-                map(
-                    lambda field_name: next(
-                        x for x in self.mapped_variables if x["name"] == field_name
-                    ),
-                    self.current_record_batch_reader.schema.names,
+        try:
+            self.current_offset = offset
+            # TODO: this won't get closed properly if the iterator is not fully consumed
+            arrow_response = make_request(
+                method="get",
+                path=f'/readStreams/{self.streams[self.current_stream_index]["id"]}?offset={offset}',
+                stream=True,
+                parse_response=False,
+            )
+            self.current_record_batch_reader = pyarrow.ipc.RecordBatchStreamReader(
+                arrow_response.raw
+            )
+            if self.coerce_schema:
+                self.variables_in_stream = list(
+                    map(
+                        lambda field_name: next(
+                            x for x in self.mapped_variables if x["name"] == field_name
+                        ),
+                        self.current_record_batch_reader.schema.names,
+                    )
                 )
-            )
-            self.output_schema = pyarrow.schema(
-                map(variable_to_field, self.variables_in_stream)
-            )
-        else:
-            self.output_schema = self.current_record_batch_reader.schema
+                self.output_schema = pyarrow.schema(
+                    map(variable_to_field, self.variables_in_stream)
+                )
+            else:
+                self.output_schema = self.current_record_batch_reader.schema
+        except (RequestException, HTTPError) as e:
+            self.retry_count = self.retry_count + 1
+            if self.retry_count > 10:
+                print("Download connection failed after too many retries, giving up.")
+                raise e
+            time.sleep(self.retry_count)
+            return self.__get_next_reader__(self.current_offset)
 
     def __iter__(self):
         return self
@@ -73,6 +87,8 @@ class RedivisArrowIterator:
             if self.progressbar is not None:
                 self.progressbar.update(batch.num_rows)
 
+            self.current_offset += batch.num_rows
+            self.retry_count = 0
             return batch
         except StopIteration:
             if self.current_stream_index == len(self.streams) - 1:
@@ -83,6 +99,14 @@ class RedivisArrowIterator:
                 self.current_stream_index += 1
                 self.__get_next_reader__()
                 return self.__next__()
+        except (RequestException, HTTPError) as e:
+            self.retry_count = self.retry_count + 1
+            if self.retry_count > 10:
+                print("Download connection failed after too many retries, giving up.")
+                raise e
+            time.sleep(self.retry_count)
+            self.__get_next_reader__(self.current_offset)
+            return self.__next__()
 
 
 def list_rows(
@@ -322,87 +346,107 @@ def process_stream(
     progressbar,
     batch_preprocessor,
     cancel_event,
+    offset=0,
+    retry_count=0,
 ):
-    import pyarrow
+    try:
+        import pyarrow
 
-    with closing(
-        make_request(
-            method="get",
-            path=f'/readStreams/{stream["id"]}',
-            stream=True,
-            parse_response=False,
-        )
-    ) as arrow_response:
-        has_content = False
-        # create the os_file path
-        os_file = (
-            pathlib.Path(folder_path).joinpath(f"{stream['id']}.feather").absolute()
-        )
-        with pyarrow.OSFile(
-            str(os_file), mode="wb"
-        ) as f, pyarrow.ipc.RecordBatchStreamReader(arrow_response.raw) as reader:
-            if coerce_schema:
-                variables_in_stream = list(
-                    map(
-                        lambda field_name: next(
-                            x
-                            for x in mapped_variables
-                            if x["name"].lower() == field_name.lower()
-                        ),
-                        reader.schema.names,
-                    )
-                )
-
-                output_schema = pyarrow.schema(
-                    map(variable_to_field, variables_in_stream)
-                )
-            else:
-                output_schema = reader.schema
-            writer = None
-            for batch in reader:
-                # exit out of thread
-                if cancel_event.is_set():
-                    has_content = False
-                    break
-
+        with closing(
+            make_request(
+                method="get",
+                path=f'/readStreams/{stream["id"]}?offset={offset}',
+                stream=True,
+                parse_response=False,
+            )
+        ) as arrow_response:
+            has_content = False
+            # create the os_file path
+            os_file = (
+                pathlib.Path(folder_path).joinpath(f"{stream['id']}.feather").absolute()
+            )
+            with pyarrow.OSFile(
+                str(os_file), mode="wb"
+            ) as f, pyarrow.ipc.RecordBatchStreamReader(arrow_response.raw) as reader:
                 if coerce_schema:
-                    batch = pyarrow.RecordBatch.from_arrays(
-                        list(
-                            map(
-                                coerce_string_variable,
-                                batch.columns,
-                                variables_in_stream,
-                            )
-                        ),
-                        schema=output_schema,
+                    variables_in_stream = list(
+                        map(
+                            lambda field_name: next(
+                                x
+                                for x in mapped_variables
+                                if x["name"].lower() == field_name.lower()
+                            ),
+                            reader.schema.names,
+                        )
                     )
 
-                num_rows = batch.num_rows
-                if batch_preprocessor:
-                    batch = batch_preprocessor(batch)
+                    output_schema = pyarrow.schema(
+                        map(variable_to_field, variables_in_stream)
+                    )
+                else:
+                    output_schema = reader.schema
+                writer = None
+                for batch in reader:
+                    # exit out of thread
+                    if cancel_event.is_set():
+                        has_content = False
+                        break
 
-                if batch is not None:
-                    has_content = True
-                    if writer is None:
-                        writer = pyarrow.ipc.RecordBatchFileWriter(
-                            f,
-                            (
-                                output_schema
-                                if batch_preprocessor is None
-                                else batch.schema
+                    if coerce_schema:
+                        batch = pyarrow.RecordBatch.from_arrays(
+                            list(
+                                map(
+                                    coerce_string_variable,
+                                    batch.columns,
+                                    variables_in_stream,
+                                )
                             ),
+                            schema=output_schema,
                         )
 
-                    writer.write_batch(batch)
+                    num_rows = batch.num_rows
+                    offset += num_rows
+                    if batch_preprocessor:
+                        batch = batch_preprocessor(batch)
 
-                if progressbar is not None:
-                    progressbar.update(num_rows)
+                    if batch is not None:
+                        has_content = True
+                        if writer is None:
+                            writer = pyarrow.ipc.RecordBatchFileWriter(
+                                f,
+                                (
+                                    output_schema
+                                    if batch_preprocessor is None
+                                    else batch.schema
+                                ),
+                            )
 
-            if writer is not None:
-                writer.close()
+                        writer.write_batch(batch)
 
-        if has_content == False:
-            os.remove(os_file)
+                    if progressbar is not None:
+                        progressbar.update(num_rows)
+
+                if writer is not None:
+                    writer.close()
+
+            if has_content == False:
+                os.remove(os_file)
+    except (RequestException, HTTPError) as e:
+        if retry_count >= 10:
+            print("Stream rows connection failed after too many retries, giving up.")
+            raise e
+        time.sleep(retry_count + 1)
+        return process_stream(
+            stream,
+            folder_path,
+            mapped_variables,
+            coerce_schema,
+            progressbar,
+            batch_preprocessor,
+            cancel_event,
+            offset=offset,
+            retry_count=retry_count + 1,
+        )
 
 
 def format_tuple_type(val, type):

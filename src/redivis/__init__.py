@@ -1,7 +1,11 @@
+from .classes.Workflow import Workflow as workflow
+from .classes.Dataset import Dataset as dataset
 from .classes.User import User as user
 from .classes.Organization import Organization as organization
 from .classes.Query import Query as query
 from .classes.Table import Table as table
+from .classes.Notebook import Notebook as notebook
+from .classes.Transform import Transform as transform
 from .classes.File import File as file
 from .common.api_request import make_request as make_api_request
 import warnings
@@ -31,10 +35,19 @@ def authenticate(scope=None, force_reauthentication=False):
 def current_notebook():
     import os
 
-    if os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is not None:
-        from .classes.Notebook import Notebook
+    if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is not None:
+        return notebook(os.getenv("REDIVIS_DEFAULT_NOTEBOOK"))
 
-        return Notebook(os.getenv("REDIVIS_NOTEBOOK_JOB_ID"))
+    return None
+
+
+def current_workflow():
+    import os
+
+    if os.getenv("REDIVIS_DEFAULT_WORKFLOW") is not None:
+        return workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+
+    return None
 
 
 import pkg_resources  # part of setuptools

@@ -28,17 +28,32 @@ class Table(Base):
         workflow=None,
         properties=None,
     ):
-        dataset, workflow = get_table_parents(dataset, workflow)
-        self.name = name
-        self.dataset = dataset
-        self.workflow = workflow
-
-        reference_scope = ""
+        if len(name.split(".")) != 3:
+            dataset, workflow = get_table_parents(dataset, workflow)
 
         if dataset:
             reference_scope = f"{dataset.qualified_reference}."
         elif workflow:
             reference_scope = f"{workflow.qualified_reference}."
+        elif len(name.split(".")) == 3:
+            from .Dataset import Dataset
+            from .Workflow import Workflow
+
+            reference_scope = ".".join(name.split(".")[0:2])
+            name = name.split(".")[-1]
+            dataset = Dataset(reference_scope)
+            workflow = Workflow(reference_scope)
+            reference_scope += "."
+        else:
+            if not os.getenv("REDIVIS_DEFAULT_NOTEBOOK"):
+                raise Exception(
+                    "Invalid table specifier, must be the fully qualified reference if no dataset or workflow is specified"
+                )
+            reference_scope = ""
+
+        self.name = name
+        self.dataset = dataset
+        self.workflow = workflow
 
         self.qualified_reference = (
             properties["qualifiedReference"]
@@ -52,6 +67,18 @@ class Table(Base):
         )
         self.uri = f"/tables/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
+
+    def _rectify_ambiguous_container(self):
+        if self.dataset and self.workflow:
+            if self.properties.get("container"):
+                if self.properties.get("container")["kind"] == "dataset":
+                    self.workflow = None
+                else:
+                    self.dataset = None
+            elif self.dataset.exists():
+                self.workflow = None
+            else:
+                self.dataset = None
 
     def create(
         self, *, description=None, upload_merge_strategy="append", is_file_index=False
@@ -341,8 +368,11 @@ class Table(Base):
         max_parallelization=os.cpu_count() * 5,
     ):
         files = self.list_files(max_results, file_id_variable=file_id_variable)
+
         if path is None:
             path = os.getcwd()
+        else:
+            path = os.path.expanduser(path)
 
         if progress:
             pbar_count = tqdm(total=len(files), leave=False, unit=" files")
@@ -667,6 +697,12 @@ class Table(Base):
             coerce_schema=self.properties["container"]["kind"] == "dataset",
         )
 
+    def to_stata(self):
+        """TODO"""
+
+    def to_sas(self):
+        """TODO"""
+
     def list_rows(self, max_results=None, *, variables=None, progress=True):
         warnings.warn(
             "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
@@ -737,7 +773,7 @@ def get_table_parents(dataset, workflow):
 
     if dataset or workflow:
         return dataset, workflow
-    elif os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is not None:
+    elif os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is not None:
         return None, None
     elif os.getenv("REDIVIS_DEFAULT_WORKFLOW") is not None:
         return None, User(os.getenv("REDIVIS_DEFAULT_WORKFLOW").split(".")[0]).workflow(
@@ -749,10 +785,7 @@ def get_table_parents(dataset, workflow):
                 os.getenv("REDIVIS_DEFAULT_DATASET").split(".")[1]
             )
         ), None
-    else:
-        raise Exception(
-            "Cannot reference an unqualified table if the neither the REDIVIS_DEFAULT_WORKFLOW or REDIVIS_DEFAULT_DATASET environment variables are set."
-        )
+    return None, None
 
 
 def update_properties(instance, properties):
@@ -761,10 +794,11 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
+    instance._rectify_ambiguous_container()
 
 
 def should_use_export_api(num_bytes):
-    return num_bytes > (1e9 if os.getenv("REDIVIS_NOTEBOOK_JOB_ID") is None else 1e11)
+    return num_bytes > (1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11)
 
 
 def map_file(file):
