@@ -111,8 +111,8 @@ class Workflow(Base):
     def transform(self, name):
         return Transform(name, workflow=self)
 
-    def datasource(self, name):
-        return Datasource(name, workflow=self)
+    def datasource(self, source):
+        return Datasource(source, workflow=self)
 
 
 def update_properties(instance, properties):
