@@ -110,7 +110,7 @@ class Notebook(Base):
     def create_output_table(
         self, data=None, *, name=None, append=False, geography_variables=None
     ):
-        if not self.properties.get("currentJob"):
+        if not (self.properties or {}).get("currentJob"):
             self.get()
 
         current_notebook_job_id = self.properties.get("currentJob")["id"]
