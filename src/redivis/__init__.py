@@ -1,5 +1,6 @@
 from .classes.Workflow import Workflow as workflow
 from .classes.Dataset import Dataset as dataset
+from .classes.Datasource import Datasource as datasource
 from .classes.User import User as user
 from .classes.Organization import Organization as organization
 from .classes.Query import Query as query

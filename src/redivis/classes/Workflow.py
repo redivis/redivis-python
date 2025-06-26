@@ -1,4 +1,4 @@
-from .DataSource import DataSource
+from .Datasource import Datasource
 from .Query import Query
 from .Table import Table
 from .Notebook import Notebook
@@ -49,7 +49,7 @@ class Workflow(Base):
             max_results=max_results,
         )
         return [
-            DataSource(data_source["id"], workflow=self, properties=data_source)
+            Datasource(data_source["id"], workflow=self, properties=data_source)
             for data_source in data_sources
         ]
 
@@ -111,14 +111,8 @@ class Workflow(Base):
     def transform(self, name):
         return Transform(name, workflow=self)
 
-    def datasource(self, *, dataset=None, workflow=None):
-        if not dataset and not workflow:
-            raise Exception("Either a dataset or a workflow must be specified")
-        if isinstance(dataset, Dataset):
-            dataset = dataset.uri
-        if isinstance(workflow, Workflow):
-            workflow = workflow.uri
-        return DataSource(dataset or workflow, workflow=self)
+    def datasource(self, name):
+        return Datasource(name, workflow=self)
 
 
 def update_properties(instance, properties):
