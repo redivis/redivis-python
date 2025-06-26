@@ -72,16 +72,18 @@ class Notebook(Base):
             while True:
                 time.sleep(2)
                 self.get()
-                if self.properties.get("currentJob") and self.properties["currentJob"][
-                    "status"
-                ] in ["completed", "failed"]:
-                    if self.properties["currentJob"]["status"] == "failed":
-                        raise Exception(self.properties["currentJob"]["errorMessage"])
+                current_job = self.properties.get("currentJob") or self.properties.get(
+                    "lastRunJob"
+                )
+                if current_job and current_job["status"] in [
+                    "completed",
+                    "failed",
+                ]:
+                    if current_job["status"] == "failed":
+                        raise Exception(current_job["errorMessage"])
                     break
-                elif self.properties.get("currentJob"):
-                    logging.debug("Notebook is still in progress...")
                 else:
-                    break
+                    logging.debug("Notebook is still in progress...")
 
         return self
 
