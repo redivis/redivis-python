@@ -42,6 +42,11 @@ def current_notebook():
     return None
 
 
+def current_user():
+    res = make_api_request(method="GET", path="/users/me")
+    return user(res["name"], properties=res)
+
+
 def current_workflow():
     import os
 
