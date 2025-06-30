@@ -17,7 +17,7 @@ verify_ssl = (
     != 0
 )
 credentials_file = redivis_dir / "python_credentials"
-default_scope = ["data.edit", "organization.write"]
+default_scope = ["data.edit", "organization.write", "workflow.write"]
 client_id = "7YGtYWuQot1TEe0pHB3EPSj5"
 # Note that https is optional, since traffic can happen over http if all in the same cluster
 base_url = re.match(

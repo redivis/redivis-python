@@ -67,9 +67,9 @@ class Datasource(Base):
             mapped_tables_dict = {}
             for source, dest in mapped_tables:
                 if isinstance(source, Table):
-                    source = source.qualified_reference
+                    source = source.scoped_reference
                 if isinstance(dest, Table):
-                    dest = dest.qualified_reference
+                    dest = dest.scoped_reference
                 mapped_tables_dict[source] = dest
             mapped_tables = mapped_tables_dict
 
