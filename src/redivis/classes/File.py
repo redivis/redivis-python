@@ -166,11 +166,15 @@ class RedivisRawResponseStream(io.BufferedIOBase):
     def read1(self, size=-1):
         return self.read(size)
 
+    def readall(self):
+        return self.read()
+
     def readinto(self, buffer):
         self._raise_if_closed()
         try:
-            self.response.raw.readinto(buffer)
-            self.bytes_read += len(buffer)
+            bytes_read = self.response.raw.readinto(buffer)
+            self.bytes_read += bytes_read
+            return bytes_read
         except (RequestException, HTTPError) as e:
             if self.retry_count >= 10:
                 print("File download failed after too many retries, giving up.")
@@ -205,6 +209,16 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             self.retry_count += 1
             self.response = self._get_response()
             return self.readline(size)
+
+    def readlines(self, hint=-1):
+        self._raise_if_closed()
+        if hint is None:
+            hint = -1
+        line_count = 0
+        lines = []
+        while (hint == -1 or line_count < hint) and not self._closed:
+            lines.append(self.readline())
+        return lines
 
     def seek(self, offset, whence=os.SEEK_SET):
         self._raise_if_closed()
