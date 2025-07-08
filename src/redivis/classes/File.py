@@ -94,13 +94,13 @@ class File(Base):
         if end_byte:
             end_byte = int(end_byte)
 
-        stream = RedivisRawResponseStream(
+        stream = Stream(
             uri=self.uri, start_byte=start_byte, end_byte=end_byte, file=self
         )
         return stream
 
 
-class RedivisRawResponseStream(io.BufferedIOBase):
+class Stream(io.BufferedIOBase):
     def __init__(self, uri, start_byte=0, end_byte=None, file=None):
         super().__init__()
         self.uri = uri
@@ -125,7 +125,6 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             raise OSError(5, "Stream closed")
 
     def _get_response(self, recreate=True):
-        print("_get_response")
         self._raise_if_closed()
 
         if not recreate and self.response:
@@ -169,7 +168,6 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             return self._get_response(True)
 
     def read(self, size=-1):
-        print("read", size)
         r = self._get_response()
         if not r:
             return b""
@@ -187,15 +185,12 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             return self.read(size)
 
     def read1(self, size=-1):
-        print("read1", size)
         return self.read(size)
 
     def readall(self):
-        print("readall")
         return self.read()
 
     def readinto(self, buffer):
-        print("readinto")
         r = self._get_response()
         if not r:
             return 0
@@ -213,7 +208,6 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             return self.readinto(buffer)
 
     def raw(self):
-        print("raw")
         return self.response.raw
 
     @property
@@ -221,12 +215,10 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         return self._closed
 
     def close(self):
-        print("close")
         self._close_response()
         self._closed = True
 
     def readline(self, size=-1):
-        print("readline")
         self._get_response()
         try:
             line = self.response.raw.readline(size)
@@ -242,7 +234,6 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             return self.readline(size)
 
     def readlines(self, hint=-1):
-        print("readlines")
         self._get_response()
         if hint is None:
             hint = -1
@@ -257,7 +248,6 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         return lines
 
     def seek(self, offset, whence=os.SEEK_SET):
-        print("seek", offset, whence)
         self._raise_if_closed()
         current_bytes_read = self.bytes_read
         if whence == os.SEEK_SET:
@@ -279,7 +269,6 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         return True
 
     def tell(self):
-        print("tell", self.bytes_read)
         return self.bytes_read
 
     def writable(self):
@@ -289,7 +278,6 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         return self
 
     def __next__(self):
-        print("__next__")
         chunk = self.read(self._iter_chunk_size)
         if chunk == b"":
             self._closed = True
