@@ -109,6 +109,7 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         self.start_byte = start_byte
         self.end_byte = end_byte
         self._file = file
+        self._total_bytes = None
         self._did_parse_headers = False
         self._iter_chunk_size = 1024 * 1024
         self._closed = False
@@ -135,6 +136,11 @@ class RedivisRawResponseStream(io.BufferedIOBase):
 
             range_headers = {}
             start_byte = self.start_byte + self.bytes_read
+
+            if self._total_bytes is not None and start_byte >= self._total_bytes:
+                # Don't attempt to read past the last byte; this will raise an error from the Redivis API
+                return None
+
             if self.end_byte:
                 range_headers["Range"] = f"bytes={start_byte}-{self.end_byte}"
             elif start_byte:
@@ -149,6 +155,8 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             )
             if not self._did_parse_headers:
                 parse_headers(self._file, r)
+                self._total_bytes = self._file.properties["size"]
+                self._did_parse_headers = True
             self.retry_count = 0
             self.response = r
             return r
@@ -162,7 +170,9 @@ class RedivisRawResponseStream(io.BufferedIOBase):
 
     def read(self, size=-1):
         print("read", size)
-        self._get_response()
+        r = self._get_response()
+        if not r:
+            return b""
         try:
             chunk = self.response.raw.read(size)
             self.bytes_read += len(chunk)
@@ -186,7 +196,9 @@ class RedivisRawResponseStream(io.BufferedIOBase):
 
     def readinto(self, buffer):
         print("readinto")
-        self._get_response()
+        r = self._get_response()
+        if not r:
+            return 0
         try:
             bytes_read = self.response.raw.readinto(buffer)
             self.bytes_read += bytes_read
@@ -234,11 +246,14 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         self._get_response()
         if hint is None:
             hint = -1
-        line_count = 0
         lines = []
-        while (hint == -1 or line_count < hint) and not self._closed:
+        while (hint == -1 or self.bytes_read < hint) and not self._closed:
             # Try/catch handled in self.readline()
-            lines.append(self.readline())
+            line = self.readline()
+            if line:
+                lines.append(self.readline())
+            else:
+                break
         return lines
 
     def seek(self, offset, whence=os.SEEK_SET):
@@ -250,9 +265,9 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         elif whence == os.SEEK_CUR:
             self.bytes_read += offset
         elif whence == os.SEEK_END:
-            if not self._did_parse_headers:
+            if self._total_bytes is None:
                 self._get_response()
-            self.bytes_read = self._file.properties["size"] + offset
+            self.bytes_read = self._total_bytes + offset
 
         if current_bytes_read != self.bytes_read:
             self._close_response()
