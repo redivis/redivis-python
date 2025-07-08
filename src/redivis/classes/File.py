@@ -94,37 +94,52 @@ class File(Base):
         if end_byte:
             end_byte = int(end_byte)
 
-        stream = RedivisRawResponseStream(
-            uri=self.uri, start_byte=start_byte, end_byte=end_byte
+        stream = Stream(
+            uri=self.uri, start_byte=start_byte, end_byte=end_byte, file=self
         )
-        parse_headers(self, stream._get_response(recreate=False))
         return stream
 
 
-class RedivisRawResponseStream(io.BufferedIOBase):
-    def __init__(self, uri, start_byte=0, end_byte=None):
+class Stream(io.BufferedIOBase):
+    def __init__(self, uri, start_byte=0, end_byte=None, file=None):
         super().__init__()
         self.uri = uri
         self.retry_count = 0
         self.bytes_read = 0
         self.start_byte = start_byte
         self.end_byte = end_byte
+        self._file = file
+        self._total_bytes = None
+        self._did_parse_headers = False
         self._iter_chunk_size = 1024 * 1024
         self._closed = False
-        self.response = self._get_response()
+        self.response = None
+
+    def _close_response(self):
+        if self.response:
+            self.response.raw.close()
+            self.response = None
 
     def _raise_if_closed(self):
         if self._closed:
             raise OSError(5, "Stream closed")
 
     def _get_response(self, recreate=True):
-        if not recreate:
+        self._raise_if_closed()
+
+        if not recreate and self.response:
             return self.response
         try:
-            self._raise_if_closed()
+            # If recreating, make sure the previous response is closed
+            self._close_response()
 
             range_headers = {}
             start_byte = self.start_byte + self.bytes_read
+
+            if self._total_bytes is not None and start_byte >= self._total_bytes:
+                # Don't attempt to read past the last byte; this will raise an error from the Redivis API
+                return None
+
             if self.end_byte:
                 range_headers["Range"] = f"bytes={start_byte}-{self.end_byte}"
             elif start_byte:
@@ -137,8 +152,12 @@ class RedivisRawResponseStream(io.BufferedIOBase):
                 stream=True,
                 headers=range_headers,
             )
-            self.raw = r.raw
+            if not self._did_parse_headers:
+                parse_headers(self._file, r)
+                self._total_bytes = self._file.properties["size"]
+                self._did_parse_headers = True
             self.retry_count = 0
+            self.response = r
             return r
         except (RequestException, HTTPError) as e:
             if self.retry_count >= 10:
@@ -146,10 +165,12 @@ class RedivisRawResponseStream(io.BufferedIOBase):
                 raise e
             time.sleep(self.retry_count)
             self.retry_count += 1
-            return self._get_response()
+            return self._get_response(True)
 
     def read(self, size=-1):
-        self._raise_if_closed()
+        r = self._get_response()
+        if not r:
+            return b""
         try:
             chunk = self.response.raw.read(size)
             self.bytes_read += len(chunk)
@@ -160,24 +181,30 @@ class RedivisRawResponseStream(io.BufferedIOBase):
                 raise e
             time.sleep(self.retry_count)
             self.retry_count += 1
-            self.response = self._get_response()
+            self._get_response(True)
             return self.read(size)
 
     def read1(self, size=-1):
         return self.read(size)
 
+    def readall(self):
+        return self.read()
+
     def readinto(self, buffer):
-        self._raise_if_closed()
+        r = self._get_response()
+        if not r:
+            return 0
         try:
-            self.response.raw.readinto(buffer)
-            self.bytes_read += len(buffer)
+            bytes_read = self.response.raw.readinto(buffer)
+            self.bytes_read += bytes_read
+            return bytes_read
         except (RequestException, HTTPError) as e:
             if self.retry_count >= 10:
                 print("File download failed after too many retries, giving up.")
                 raise e
             time.sleep(self.retry_count)
             self.retry_count += 1
-            self.response = self._get_response()
+            self._get_response(True)
             return self.readinto(buffer)
 
     def raw(self):
@@ -188,11 +215,11 @@ class RedivisRawResponseStream(io.BufferedIOBase):
         return self._closed
 
     def close(self):
-        self.response.close()
+        self._close_response()
         self._closed = True
 
     def readline(self, size=-1):
-        self._raise_if_closed()
+        self._get_response()
         try:
             line = self.response.raw.readline(size)
             self.bytes_read += len(line)
@@ -203,16 +230,37 @@ class RedivisRawResponseStream(io.BufferedIOBase):
                 raise e
             time.sleep(self.retry_count)
             self.retry_count += 1
-            self.response = self._get_response()
+            self.response = self._get_response(True)
             return self.readline(size)
+
+    def readlines(self, hint=-1):
+        self._get_response()
+        if hint is None:
+            hint = -1
+        lines = []
+        while (hint == -1 or self.bytes_read < hint) and not self._closed:
+            # Try/catch handled in self.readline()
+            line = self.readline()
+            if line:
+                lines.append(self.readline())
+            else:
+                break
+        return lines
 
     def seek(self, offset, whence=os.SEEK_SET):
         self._raise_if_closed()
+        current_bytes_read = self.bytes_read
         if whence == os.SEEK_SET:
             self.bytes_read = offset
-        elif whence == os.SEEK_CUR or whence == os.SEEK_END:
+        elif whence == os.SEEK_CUR:
             self.bytes_read += offset
-        self.response = self._get_response()
+        elif whence == os.SEEK_END:
+            if self._total_bytes is None:
+                self._get_response()
+            self.bytes_read = self._total_bytes + offset
+
+        if current_bytes_read != self.bytes_read:
+            self._close_response()
 
     def readable(self):
         return True
