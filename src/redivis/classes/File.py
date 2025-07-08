@@ -101,7 +101,7 @@ class File(Base):
         return stream
 
 
-class RedivisRawResponseStream(io.BufferedIOBase):
+class RedivisRawResponseStream(io.RawIOBase):
     def __init__(self, uri, start_byte=0, end_byte=None):
         super().__init__()
         self.uri = uri
