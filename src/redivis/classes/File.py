@@ -124,7 +124,7 @@ class RedivisRawResponseStream(io.BufferedIOBase):
             return self.response
         try:
             self._raise_if_closed()
-            if self.response.raw and not self.response.raw.closed:
+            if self.response and not self.response.raw.closed:
                 self.response.raw.close()
 
             range_headers = {}
