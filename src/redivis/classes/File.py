@@ -124,7 +124,7 @@ class Stream(io.BufferedIOBase):
         if self._closed:
             raise OSError(5, "Stream closed")
 
-    def _get_response(self, recreate=True):
+    def _get_response(self, recreate=False):
         self._raise_if_closed()
 
         if not recreate and self.response:
