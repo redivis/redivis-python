@@ -233,19 +233,19 @@ class Stream(io.BufferedIOBase):
             self.response = self._get_response(True)
             return self.readline(size)
 
-    # def readlines(self, hint=-1):
-    #     self._get_response()
-    #     if hint is None:
-    #         hint = -1
-    #     lines = []
-    #     while (hint == -1 or self.bytes_read < hint) and not self._closed:
-    #         # Try/catch handled in self.readline()
-    #         line = self.readline()
-    #         if line:
-    #             lines.append(self.readline())
-    #         else:
-    #             break
-    #     return lines
+    def readlines(self, hint=-1):
+        self._get_response()
+        if hint is None:
+            hint = -1
+        lines = []
+        while (hint == -1 or self.bytes_read < hint) and not self._closed:
+            # Try/catch handled in self.readline()
+            line = self.readline()
+            if line:
+                lines.append(self.readline())
+            else:
+                break
+        return lines
 
     def seek(self, offset, whence=os.SEEK_SET):
         self._raise_if_closed()
