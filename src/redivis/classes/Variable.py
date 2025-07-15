@@ -12,16 +12,23 @@ class Variable(Base):
         *,
         table=None,
         upload=None,
+        query=None,
         properties=None,
     ):
         self.name = name
         self.table = table
         self.upload = upload
-        self.uri = (
-            properties["uri"]
-            if "uri" in (properties or {})
-            else (f"{table.uri if table else upload.uri}/variables/{self.name}")
-        )
+        self.query = query
+
+        if "uri" in (properties or {}):
+            self.uri = properties["uri"]
+        elif table:
+            self.uri = f"{table.uri}/variables/{self.name}"
+        elif upload:
+            self.uri = f"{upload.uri}/variables/{self.name}"
+        else:
+            self.uri = f"{query.uri}/variables/{self.name}"
+
         self.properties = properties
 
     def get(self, wait_for_statistics=False):
