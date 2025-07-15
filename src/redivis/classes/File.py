@@ -18,10 +18,12 @@ class File(Base):
         id,
         *,
         table=None,
+        query=None,
         properties={},
     ):
         self.id = id
         self.table = table
+        self.query = query
         self.uri = f"/rawFiles/{quote_uri(id, '')}"
         self.properties = {
             **{"kind": "rawFile", "id": id, "uri": self.uri},

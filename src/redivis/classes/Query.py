@@ -2,8 +2,11 @@ from .Base import Base
 import os
 import time
 import warnings
+from .Variable import Variable
+from .File import File
 
-from ..common.api_request import make_request
+from ..common.download_files import download_files
+from ..common.api_request import make_request, make_paginated_request
 from ..common.list_rows import list_rows
 from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
 
@@ -127,7 +130,6 @@ class Query(Base):
         self,
         max_results=None,
         *,
-        geography_variable="",
         progress=True,
         dtype_backend="pyarrow",
         date_as_object=False,
@@ -265,6 +267,67 @@ class Query(Base):
             output_type="tuple",
             progress=progress,
             coerce_schema=False,
+        )
+
+    def variable(self, name):
+        self._wait_for_finish()
+        return Variable(name, query=self)
+
+    def list_variables(self, *, max_results=None):
+        self._wait_for_finish()
+        variables = make_paginated_request(
+            path=f"{self.uri}/variables", page_size=1000, max_results=max_results
+        )
+        return [
+            Variable(variable["name"], query=self, properties=variable)
+            for variable in variables
+        ]
+
+    def list_files(self, max_results=None, *, file_id_variable=None):
+        self._wait_for_finish()
+        if file_id_variable:
+            variable = Variable(file_id_variable, query=self)
+            if not variable.get().properties["isFileId"]:
+                raise Exception(
+                    f"The variable {file_id_variable} does not represent a file id."
+                )
+        else:
+            variables = make_paginated_request(
+                path=f"{self.uri}/variables", max_results=2, query={"isFileId": True}
+            )
+            if len(variables) == 0:
+                raise Exception(
+                    f"No variable containing file ids was found on this table"
+                )
+            elif len(variables) > 1:
+                raise Exception(
+                    f"This table contains multiple variables representing a file id. Please specify the variable with file ids you want to download via the 'file_id_variable' parameter."
+                )
+
+            file_id_variable = variables[0]["name"]
+
+        rows = self.to_arrow_table(max_results=max_results, progress=False).to_pylist()
+        return [File(row[file_id_variable], query=self) for row in rows]
+
+    def download_files(
+        self,
+        path=None,
+        *,
+        overwrite=False,
+        max_results=None,
+        file_id_variable=None,
+        progress=True,
+        max_parallelization=os.cpu_count() * 5,
+    ):
+        self._wait_for_finish()
+        return download_files(
+            self,
+            path=path,
+            overwrite=overwrite,
+            max_results=max_results,
+            file_id_variable=file_id_variable,
+            progress=progress,
+            max_parallelization=max_parallelization,
         )
 
     def _wait_for_finish(self):
