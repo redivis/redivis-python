@@ -13,7 +13,7 @@ from .util import get_tempdir
 from .api_request import make_request
 from threading import Event
 
-MAX_PARALLELIZATION = 16
+MAX_PARALLELIZATION = 8
 
 
 class RedivisArrowIterator:
