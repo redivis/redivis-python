@@ -170,10 +170,11 @@ class Dataset(Base):
     def query(self, query):
         return Query(query, default_dataset=self.qualified_reference)
 
-    def release(self):
+    def release(self, *, release_notes=None):
         version_res = make_request(
             method="POST",
             path=f"{self.uri}/versions/next/release",
+            payload={"releaseNotes": release_notes},
         )
         self.uri = version_res["datasetUri"]
         self.get()

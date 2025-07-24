@@ -34,6 +34,20 @@ class Version(Base):
                 raise err
             return False
 
+    def update(self, *, label=None, release_notes=None):
+        payload = {}
+        if label is not None:
+            payload["label"] = label
+        if release_notes is not None:
+            payload["releaseNotes"] = release_notes
+
+        self.properties = make_request(
+            method="PATCH",
+            path=self.uri,
+            payload={"releaseNotes": release_notes, "label": label},
+        )
+        return self
+
     def delete(self):
         self.properties = make_request(method="DELETE", path=self.uri)
         self.uri = self.properties["uri"]

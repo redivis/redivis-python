@@ -48,6 +48,14 @@ class Member(Base):
         )
         return self
 
+    def add_comment(self, text):
+        make_request(
+            method="POST",
+            path=f"{self.uri}/comments",
+            payload={"text": text},
+        )
+        return self
+
     def update(self, *, labels=None, status=None):
         payload = {}
         if labels is not None:
