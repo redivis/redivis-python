@@ -8,7 +8,6 @@ from tqdm.auto import tqdm
 import re
 import urllib
 from threading import Event
-from contextlib import closing
 
 from ..common.retryable_download import perform_retryable_download
 

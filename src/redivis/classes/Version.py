@@ -44,7 +44,7 @@ class Version(Base):
         self.properties = make_request(
             method="PATCH",
             path=self.uri,
-            payload={"releaseNotes": release_notes, "label": label},
+            payload=payload,
         )
         return self
 
