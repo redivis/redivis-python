@@ -8,12 +8,12 @@ import warnings
 
 
 class User(Base):
-    def __init__(self, name, properties={}):
+    def __init__(self, name, properties=None):
         self.name = name
         self.uri = f"/users/{quote_uri(self.name, '')}"
         self.properties = {
             **{"kind": "user", "userName": name, "uri": self.uri},
-            **properties,
+            **(properties or {}),
         }
 
     def dataset(self, name, *, version=None):

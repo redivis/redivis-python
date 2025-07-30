@@ -42,8 +42,7 @@ def test_query_empty_result():
             WHERE FALSE
         """
     )
-    print(query.list_rows())
-    print(query.to_dataframe())
+    print(query.to_pandas_dataframe(0))
 
 
 def test_query_underscore_variable_name():

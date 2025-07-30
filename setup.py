@@ -41,11 +41,12 @@ REQUIRED = [
     # Pyarrow is always required when working with data, other libraries only needed if returning data of that type.
     "pyarrow >= 13.0.0",
     "dask >= 2023.9.3",
-    "folium >= 0.15.0",  # required for geopandas
-    "geopandas >= 0.14.0",
-    "mapclassify >= 2.6.0",  # required for geopandas
     "pandas >= 2.0.0",
     "polars >= 0.19",
+    # geopandas and its dependencies
+    "geopandas >= 0.14.0",
+    "folium >= 0.15.0",  # required for geopandas
+    "mapclassify >= 2.6.0",  # required for geopandas
     "shapely >= 2.0.1",  # required for geopandas
 ]
 
