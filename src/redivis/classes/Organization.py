@@ -1,4 +1,5 @@
 from .Dataset import Dataset
+from .Workflow import Workflow
 from .Member import Member
 from .Base import Base
 from .Secret import Secret
@@ -21,6 +22,9 @@ class Organization(Base):
 
     def secret(self, name):
         return Secret(name, organization=self)
+
+    def workflow(self, name):
+        return Workflow(name, organization=self)
 
     def exists(self):
         # TODO: we don't have a get endpoint right now, so this'll do
@@ -68,4 +72,15 @@ class Organization(Base):
         return [
             Member(member["user"]["name"], organization=self, properties=member)
             for member in members
+        ]
+
+    def list_workflows(self, max_results=None):
+        workflows = make_paginated_request(
+            path=f"{self.uri}/workflows",
+            page_size=100,
+            max_results=max_results,
+        )
+        return [
+            Workflow(workflow["name"], organization=self, properties=workflow)
+            for workflow in workflows
         ]

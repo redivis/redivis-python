@@ -1,9 +1,9 @@
+import os
 from .Datasource import Datasource
 from .Query import Query
 from .Table import Table
 from .Notebook import Notebook
 from .Transform import Transform
-from .Dataset import Dataset
 
 from .Base import Base
 from urllib.parse import quote as quote_uri
@@ -11,34 +11,44 @@ from ..common.api_request import make_request, make_paginated_request
 
 
 class Workflow(Base):
-    def __init__(self, name, *, user=None, properties=None):
+    def __init__(self, name, *, user=None, organization=None, properties=None):
         from .User import User  # avoid circular import
+        from .Organization import Organization  # avoid circular import
 
-        if not user:
+        if not user and not organization:
             if len(name.split(".")) == 2:
-                user = User(name.split(".")[0])
-                name = name.split(".")[-1]
+                username = name.split(".")[0]
+                name = name.split(".")[1]
+                organization = Organization(username)
+                user = User(username)
+            elif os.getenv("REDIVIS_DEFAULT_USER"):
+                user = User(os.getenv("REDIVIS_DEFAULT_USER"))
+            elif os.getenv("REDIVIS_DEFAULT_ORGANIZATION"):
+                organization = Organization(os.getenv("REDIVIS_DEFAULT_ORGANIZATION"))
             else:
                 raise Exception(
-                    "Invalid workflow specifier, must be the fully qualified reference if no user is specified"
+                    "Invalid workflow specifier, must be the fully qualified reference if no owner is specified"
                 )
 
         if isinstance(user, str):
             user = User(user)
 
+        if isinstance(organization, str):
+            organization = Organization(user)
+
         self.user = user
+        self.organization = organization
         self.name = name
 
-        self.qualified_reference = (
-            properties["qualifiedReference"]
-            if "qualifiedReference" in (properties or {})
-            else (f"{self.user.name}.{self.name}")
+        self.scoped_reference = (properties or {}).get(
+            "scopedReference",
+            self.name,
         )
-        self.scoped_reference = (
-            properties["scopedReference"]
-            if "scopedReference" in (properties or {})
-            else f"{self.name}"
+        self.qualified_reference = (properties or {}).get(
+            "qualifiedReference",
+            f"{(self.organization or self.user).name}.{self.scoped_reference}",
         )
+
         self.uri = f"/workflows/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
