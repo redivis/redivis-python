@@ -57,7 +57,7 @@ class Version(Base):
         self.uri = self.properties["uri"]
 
     def previous_version(self):
-        if "previousVersion" not in self.properties:
+        if "previousVersion" not in (self.properties or {}):
             self.get()
 
         if not self.properties["previousVersion"]:
@@ -68,7 +68,7 @@ class Version(Base):
         )
 
     def next_version(self):
-        if "nextVersion" not in self.properties:
+        if "nextVersion" not in (self.properties or {}):
             self.get()
 
         if not self.properties["nextVersion"]:
