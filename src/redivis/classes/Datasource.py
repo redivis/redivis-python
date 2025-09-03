@@ -1,5 +1,6 @@
 from .Table import Table
 from .Base import Base
+
 from ..common.api_request import make_request
 
 from urllib.parse import quote as quote_uri
@@ -22,6 +23,7 @@ class Datasource(Base):
             source = source.qualified_reference
 
         self.workflow = workflow
+        self.source_reference = source
         self.uri = (properties or {}).get(
             "uri", f"{workflow.uri}/dataSources/{quote_uri(source)}"
         )
@@ -36,6 +38,19 @@ class Datasource(Base):
 
         return self
 
+    def create(self):
+        from .Dataset import Dataset
+
+        payload = {}
+        if Dataset(self.source_reference).exists():
+            payload["sourceDataset"] = self.source_reference
+        else:
+            payload["sourceWorkflow"] = self.source_reference
+
+        make_request(
+            method="POST", path=f"{self.workflow.uri}/dataSources", payload=payload
+        )
+
     def exists(self):
         try:
             make_request(method="HEAD", path=self.uri)
@@ -44,6 +59,36 @@ class Datasource(Base):
             if err.args[0]["status"] != 404:
                 raise err
             return False
+
+    def source_dataset(self):
+        from .Dataset import Dataset
+
+        try:
+            source_dataset = (self.properties or {})["sourceDataset"]
+        except KeyError:
+            self.get()
+            if not "source_dataset" in self.properties:
+                raise Exception(
+                    "This datasource doesn't have a source dataset. Use the source_workflow() method instead."
+                )
+            source_dataset = self.properties["sourceDataset"]
+        return Dataset(source_dataset["qualifiedReference"], properties=source_dataset)
+
+    def source_workflow(self):
+        from .Workflow import Workflow
+
+        try:
+            source_workflow = (self.properties or {})["sourceWorkflow"]
+        except KeyError:
+            self.get()
+            if not "source_workflow" in self.properties:
+                raise Exception(
+                    "This datasource doesn't have a source workflow. Use the source_dataset() method instead."
+                )
+            source_workflow = self.properties["sourceWorkflow"]
+        return Workflow(
+            source_workflow["qualifiedReference"], properties=source_workflow
+        )
 
     def update(
         self,

@@ -5,6 +5,8 @@ import os
 from urllib.parse import quote as quote_uri
 import time
 import logging
+import warnings
+from ..common.util import get_warning
 
 
 class Transform(Base):
@@ -37,12 +39,44 @@ class Transform(Base):
         )
         self.properties = properties
 
-    def source_tables(self):
+    def referenced_tables(self):
         self.get()
         return [
             Table(source_table["qualifiedReference"], properties=source_table)
-            for source_table in self.properties["sourceTables"]
+            for source_table in self.properties["referencedTables"]
         ]
+
+    def source_tables(self):
+        warnings.warn(
+            get_warning("source_tables_deprecation"), FutureWarning, stacklevel=2
+        )
+        return self.referenced_tables()
+
+    def source_table(self):
+        self.get()
+        return Table(
+            self.properties["sourceTable"]["qualifiedReference"],
+            properties=self.properties["sourceTable"],
+        )
+
+    def update(self, *, name=None, source_table=None):
+        payload = {}
+
+        if name is not None:
+            payload["name"] = name
+        if source_table is not None:
+            if isinstance(source_table, Table):
+                payload["sourceTable"] = source_table.qualified_reference
+            else:
+                payload["sourceTable"] = source_table
+
+        response = make_request(
+            method="PATCH",
+            path=f"{self.uri}",
+            payload=payload,
+        )
+        self.properties = response
+        return self
 
     def output_table(self):
         self.get()

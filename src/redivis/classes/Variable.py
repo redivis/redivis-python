@@ -82,7 +82,7 @@ class Variable(Base):
             payload=payload,
         )
         self.properties = response
-        return
+        return self
 
     def exists(self):
         try:

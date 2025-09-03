@@ -28,6 +28,8 @@ def get_warning(kind):
         return 'The to_dataframe() method is deprecated, and has been superceded by to_pandas_dataframe().\nBy default, this new method uses the "pyarrow" dtype_backend, which is more performant and will generally work with existing code.\nTo replicate historic behavior, use to_pandas_dataframe(dtype_backend="numpy").'
     elif kind == "geodataframe_deprecation":
         return "Please use the to_geopandas_dataframe() method to ensure future compatability."
+    elif kind == "source_tables_deprecation":
+        return "The source_tables() method has been renamed to referenced_tables(); please use this instead. This method will be removed in the future."
     else:
         return "WARNING"
 

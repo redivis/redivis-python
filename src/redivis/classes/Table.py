@@ -680,7 +680,7 @@ class Table(Base):
             payload=payload,
         )
         update_properties(self, response)
-        return
+        return self
 
     def upload(self, name=""):
         return Upload(name=name, table=self)

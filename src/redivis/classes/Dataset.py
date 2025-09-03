@@ -196,6 +196,16 @@ class Dataset(Base):
         tag = self.version_tag if tag is None else tag
         return Version(tag, dataset=self)
 
+    def previous_version(self):
+        if not self.version_tag:
+            self.get()
+        return Version(self.version_tag, dataset=self).previous_version().dataset()
+
+    def next_version(self):
+        if not self.version_tag:
+            self.get()
+        return Version(self.version_tag, dataset=self).next_version().dataset()
+
     def table(self, name):
         return Table(name, dataset=self)
 
