@@ -46,6 +46,7 @@ class Version(Base):
             path=self.uri,
             payload=payload,
         )
+        self.uri = self.properties["uri"]
         return self
 
     def delete(self):

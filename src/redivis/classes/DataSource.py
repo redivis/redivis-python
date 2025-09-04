@@ -47,9 +47,11 @@ class Datasource(Base):
         else:
             payload["sourceWorkflow"] = self.source_reference
 
-        make_request(
+        self.properties = make_request(
             method="POST", path=f"{self.workflow.uri}/dataSources", payload=payload
         )
+        self.uri = self.properties["uri"]
+        return self
 
     def exists(self):
         try:
@@ -67,7 +69,7 @@ class Datasource(Base):
             source_dataset = (self.properties or {})["sourceDataset"]
         except KeyError:
             self.get()
-            if not "source_dataset" in self.properties:
+            if not "sourceDataset" in self.properties:
                 raise Exception(
                     "This datasource doesn't have a source dataset. Use the source_workflow() method instead."
                 )
@@ -81,7 +83,7 @@ class Datasource(Base):
             source_workflow = (self.properties or {})["sourceWorkflow"]
         except KeyError:
             self.get()
-            if not "source_workflow" in self.properties:
+            if not "sourceWorkflow" in self.properties:
                 raise Exception(
                     "This datasource doesn't have a source workflow. Use the source_dataset() method instead."
                 )

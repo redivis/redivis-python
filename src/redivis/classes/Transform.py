@@ -76,6 +76,7 @@ class Transform(Base):
             payload=payload,
         )
         self.properties = response
+        self.uri = self.properties["uri"]
         return self
 
     def output_table(self):
