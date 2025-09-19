@@ -167,7 +167,9 @@ class Notebook(Base):
                 temp_file_path = convert_data_to_parquet(data)
 
             size = os.stat(temp_file_path).st_size
-            pbar_bytes = tqdm(total=size, unit="B", leave=False, unit_scale=True)
+            pbar_bytes = tqdm(
+                total=size, unit="B", leave=False, unit_scale=True, mininterval=0.1
+            )
 
             res = make_request(
                 method="POST",

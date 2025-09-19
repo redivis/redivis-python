@@ -172,8 +172,16 @@ class Table(Base):
         pbar_bytes = None
         pbar_count = None
         if progress:
-            pbar_count = tqdm(total=len(files), leave=False, unit=" files")
-            pbar_bytes = tqdm(total=total_size, leave=False, unit="B", unit_scale=True)
+            pbar_count = tqdm(
+                total=len(files), leave=False, unit=" files", mininterval=0.1
+            )
+            pbar_bytes = tqdm(
+                total=total_size,
+                leave=False,
+                unit="B",
+                unit_scale=True,
+                mininterval=0.1,
+            )
 
         try:
             current_batch_timestamp = time.time()

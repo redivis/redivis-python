@@ -56,6 +56,7 @@ def perform_retryable_download(
                         leave=False,
                         unit="iB",
                         unit_scale=True,
+                        mininterval=0.1,
                     )
 
                 for chunk in r.iter_content(chunk_size=1024 * 1024):

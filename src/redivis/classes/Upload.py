@@ -124,7 +124,9 @@ class Upload(Base):
                 size = os.stat(content.name).st_size
 
             if progress:
-                pbar_bytes = tqdm(total=size, unit="B", leave=False, unit_scale=True)
+                pbar_bytes = tqdm(
+                    total=size, unit="B", leave=False, unit_scale=True, mininterval=0.1
+                )
 
             res = make_request(
                 method="POST",

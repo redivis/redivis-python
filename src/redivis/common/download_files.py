@@ -29,6 +29,7 @@ def download_files(
             leave=False,
             unit_scale=True,
             bar_format="{n_fmt} ({rate_fmt})",
+            mininterval=0.1,
         )
 
     if not os.path.exists(path):

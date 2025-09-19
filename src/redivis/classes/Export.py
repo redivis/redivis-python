@@ -71,7 +71,11 @@ class Export(Base):
         pbar = None
         if progress:
             pbar = tqdm(
-                total=self.properties["size"], leave=False, unit="iB", unit_scale=True
+                total=self.properties["size"],
+                leave=False,
+                unit="iB",
+                unit_scale=True,
+                mininterval=0.1,
             )
 
         cancel_event = Event()
@@ -122,7 +126,9 @@ class Export(Base):
     def wait_for_finish(self, *, progress=True):
         iter_count = 0
         if progress:
-            pbar = tqdm(total=100, leave=False, unit="%", unit_scale=True)
+            pbar = tqdm(
+                total=100, leave=False, unit="%", unit_scale=True, mininterval=0.1
+            )
             pbar.set_description(f"Preparing download...")
 
         while True:
