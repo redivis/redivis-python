@@ -76,7 +76,7 @@ class RedivisArrowIterator:
                 batch = pyarrow.RecordBatch.from_arrays(
                     list(
                         map(
-                            coerce_string_variable,
+                            coerce_arrow_array,
                             batch.columns,
                             self.variables_in_stream,
                         )
@@ -310,34 +310,52 @@ def variable_to_field(variable):
         return pyarrow.field(variable["name"], pyarrow.bool_())
 
 
-def coerce_string_variable(pyarrow_array, variable):
+# If streaming from a dataset or upload, data types _may_ be incorrect. We need to check and convert if possible.
+def coerce_arrow_array(pyarrow_array, variable):
     import pyarrow
 
     if variable["type"] == "string" or variable["type"] == "geography":
         return pyarrow_array
     elif variable["type"] == "integer":
-        return pyarrow.compute.cast(pyarrow_array, pyarrow.int64())
+        if pyarrow_array.type == "int64":
+            return pyarrow_array
+        else:
+            return pyarrow.compute.cast(pyarrow_array, pyarrow.int64())
     elif variable["type"] == "float":
-        return pyarrow.compute.cast(pyarrow_array, pyarrow.float64())
+        if pyarrow_array.type == "double":
+            return pyarrow_array
+        else:
+            return pyarrow.compute.cast(pyarrow_array, pyarrow.float64())
     elif variable["type"] == "date":
-        return pyarrow.compute.cast(
-            pyarrow.compute.cast(pyarrow_array, pyarrow.timestamp("us")),
-            pyarrow.date32(),
-        )
+        if pyarrow_array.type == "date32[day]":
+            return pyarrow_array
+        else:
+            return pyarrow.compute.cast(pyarrow_array, pyarrow.date32())
     elif variable["type"] == "dateTime":
-        return pyarrow.compute.cast(pyarrow_array, pyarrow.timestamp("us"))
+        if pyarrow_array.type == "timestamp[us]":
+            return pyarrow_array
+        else:
+            return pyarrow.compute.cast(pyarrow_array, pyarrow.timestamp("us"))
     elif variable["type"] == "time":
-        return pyarrow.compute.cast(
-            pyarrow.compute.cast(
-                pyarrow.compute.utf8_replace_slice(
-                    pyarrow_array, start=0, stop=0, replacement="2020-01-01T"
+        if pyarrow_array.type == "time64[us]":
+            return pyarrow_array
+        else:
+            # Hopefully someday this is supported. Until then, need to do the workaround below
+            # return pyarrow.compute.cast(pyarrow_array, pyarrow.time64("us"))
+            return pyarrow.compute.cast(
+                pyarrow.compute.cast(
+                    pyarrow.compute.utf8_replace_slice(
+                        pyarrow_array, start=0, stop=0, replacement="2020-01-01T"
+                    ),
+                    pyarrow.timestamp("us"),
                 ),
-                pyarrow.timestamp("us"),
-            ),
-            pyarrow.time64("us"),
-        )
+                pyarrow.time64("us"),
+            )
     elif variable["type"] == "boolean":
-        return pyarrow.compute.cast(pyarrow_array, pyarrow.bool_())
+        if pyarrow_array.type == "bool":
+            return pyarrow_array
+        else:
+            return pyarrow.compute.cast(pyarrow_array, pyarrow.bool_())
 
 
 def process_stream(
@@ -398,7 +416,7 @@ def process_stream(
                         batch = pyarrow.RecordBatch.from_arrays(
                             list(
                                 map(
-                                    coerce_string_variable,
+                                    coerce_arrow_array,
                                     batch.columns,
                                     variables_in_stream,
                                 )
