@@ -1,5 +1,6 @@
 import os
 from .Datasource import Datasource
+from .Parameter import Parameter
 from .Query import Query
 from .Table import Table
 from .Notebook import Notebook
@@ -95,6 +96,17 @@ class Workflow(Base):
             for transform in transforms
         ]
 
+    def list_parameters(self, *, max_results=None):
+        parameters = make_paginated_request(
+            path=f"{self.uri}/parameters",
+            page_size=100,
+            max_results=max_results,
+        )
+        return [
+            Parameter(name=parameter["name"], workflow=self, properties=parameter)
+            for parameter in parameters
+        ]
+
     def exists(self):
         try:
             make_request(method="HEAD", path=self.uri)
@@ -120,6 +132,9 @@ class Workflow(Base):
 
     def transform(self, name):
         return Transform(name, workflow=self)
+
+    def parameter(self, name):
+        return Parameter(name, workflow=self)
 
     def datasource(self, source):
         return Datasource(source, workflow=self)

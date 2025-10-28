@@ -3,6 +3,7 @@ from .classes.Dataset import Dataset as dataset
 from .classes.Datasource import Datasource as datasource
 from .classes.User import User as user
 from .classes.Organization import Organization as organization
+from .classes.Parameter import Parameter as parameter
 from .classes.Query import Query as query
 from .classes.Table import Table as table
 from .classes.Notebook import Notebook as notebook
