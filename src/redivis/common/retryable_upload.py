@@ -19,9 +19,7 @@ verify_ssl = (
 )
 
 
-def perform_resumable_upload(
-    data, size=None, temp_upload_url=None, proxy_url=None, progressbar=None
-):
+def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=None):
     retry_count = 0
     start_byte = 0
     is_file = True if hasattr(data, "read") else False
@@ -33,9 +31,6 @@ def perform_resumable_upload(
     chunk_size = file_size
     # chunk_size = min(file_size, 2**30)
     headers = {"Authorization": f"Bearer {get_auth_token()}"}
-
-    if proxy_url:
-        temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
 
     resumable_url = initiate_resumable_upload(file_size, temp_upload_url, headers)
 
@@ -165,17 +160,13 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
 
 
 def perform_standard_upload(
-    data, temp_upload_url=None, proxy_url=None, retry_count=0, progressbar=None
+    data, temp_upload_url=None, retry_count=0, progressbar=None
 ):
-    original_url = temp_upload_url
     try:
         if progressbar:
             data = CallbackIOWrapper(progressbar.update, data, "read")
 
         headers = {"Authorization": f"Bearer {get_auth_token()}"}
-
-        if proxy_url:
-            temp_upload_url = f"{proxy_url}?url={quote_uri(temp_upload_url)}"
 
         res = requests.put(
             url=temp_upload_url, data=data, headers=headers, verify=verify_ssl
@@ -188,8 +179,7 @@ def perform_standard_upload(
         time.sleep(retry_count + 1)
         return perform_standard_upload(
             data=data,
-            temp_upload_url=original_url,
-            proxy_url=proxy_url,
+            temp_upload_url=temp_upload_url,
             retry_count=retry_count + 1,
             progressbar=progressbar,
         )

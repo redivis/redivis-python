@@ -88,11 +88,9 @@ def test_upload_large_string():
         description="Some info", upload_merge_strategy="replace"
     )
 
-    with open("tests/data/us_counties_500k.geojson", "rb") as f:
+    with open("tests/data/line_breaks.csv", "rb") as f:
         data = f.read()
-        table.upload(name="us_counties_500k.geojson").create(
-            content=data, wait_for_finish=True
-        )
+        table.upload(name="line_breaks.csv").create(content=data, wait_for_finish=True)
 
 
 def test_upload_and_release():
@@ -164,7 +162,7 @@ def test_streaming_upload():
     )
     variables = upload.list_variables()
     print(variables)
-    print(variables[0].get(wait_for_statistics=True))
+    print(variables[0].get_statistics())
     print(table.list_rows())
     print(upload.list_rows())
 
@@ -208,7 +206,7 @@ def test_streaming_schema_upload():
 
     variables = upload.list_variables()
     print(variables)
-    print(variables[0].get(wait_for_statistics=True))
+    print(variables[0].get_statistics())
     print(table.list_rows())
     print(upload.list_rows())
 

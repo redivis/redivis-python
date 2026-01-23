@@ -31,25 +31,12 @@ class Variable(Base):
 
         self.properties = properties
 
-    def get(self, wait_for_statistics=False):
-        if wait_for_statistics:
-            warnings.warn(
-                "Calling variable.get with the wait_for_statistics parameter is deprecated. Please use variable.get_statistics() instead."
-            )
-
+    def get(self):
         self.properties = make_request(
             method="GET",
             path=self.uri,
         )
         self.uri = self.properties["uri"]
-        while (
-            wait_for_statistics and self.properties["statistics"]["status"] == "running"
-        ):
-            time.sleep(2)
-            self.properties = make_request(
-                method="GET",
-                path=self.uri,
-            )
 
         return self
 
