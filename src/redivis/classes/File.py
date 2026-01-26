@@ -314,12 +314,16 @@ def parse_headers(file, res):
 
 def get_filename(s):
     fname = re.findall("filename\*=([^;]+)", s, flags=re.IGNORECASE)
-    if not fname:
+    if not len(fname):
         fname = re.findall("filename=([^;]+)", s, flags=re.IGNORECASE)
-    if "utf-8''" in fname[0].lower():
+
+    if len(fname) and "utf-8''" in fname[0].lower():
         fname = re.sub("utf-8''", "", fname[0], flags=re.IGNORECASE)
         fname = urllib.unquote(fname).decode("utf8")
-    else:
+    elif len(fname):
         fname = fname[0]
+    else:
+        fname = ""
+
     # clean space and double quotes
     return fname.strip().strip('"')
