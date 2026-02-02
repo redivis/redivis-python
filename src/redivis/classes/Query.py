@@ -4,8 +4,8 @@ import time
 import warnings
 from .Variable import Variable
 from .File import File
+from pathlib import Path
 
-from ..common.download_files import download_files
 from ..common.api_request import make_request, make_paginated_request
 from ..common.list_rows import list_rows
 from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
@@ -19,28 +19,26 @@ class Query(Base):
         default_workflow=None,
         default_dataset=None,
     ):
+        self.did_initiate = False
         if not default_workflow and not default_dataset:
             if os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
                 default_workflow = os.getenv("REDIVIS_DEFAULT_WORKFLOW")
             elif os.getenv("REDIVIS_DEFAULT_DATASET"):
                 default_dataset = os.getenv("REDIVIS_DEFAULT_DATASET")
 
-        payload = {"query": query}
+        self.payload = {"query": query}
         if default_workflow:
-            payload["defaultWorkflow"] = default_workflow
+            self.payload["defaultWorkflow"] = default_workflow
         if default_dataset:
-            payload["defaultDataset"] = default_dataset
-
-        self.properties = make_request(
-            method="post",
-            path="/queries",
-            payload=payload,
-        )
-        self.uri = self.properties["uri"]
+            self.payload["defaultDataset"] = default_dataset
 
     def get(self):
+        self._initiate()
         self.properties = make_request(method="GET", path=self.uri)
         return self
+
+    # def dry_run(self):
+    #   TODO
 
     def to_arrow_dataset(
         self,
@@ -270,10 +268,12 @@ class Query(Base):
         )
 
     def variable(self, name):
+        # TODO: dry run (?) + cache variables
         self._wait_for_finish()
         return Variable(name, query=self)
 
     def list_variables(self, *, max_results=None):
+        # TODO: dry run (?) + cache variables
         self._wait_for_finish()
         variables = make_paginated_request(
             path=f"{self.uri}/variables", page_size=1000, max_results=max_results
@@ -283,54 +283,84 @@ class Query(Base):
             for variable in variables
         ]
 
-    def list_files(self, max_results=None, *, file_id_variable=None):
+    def to_directory(self, *, file_id_variable=None, file_name_variable=None):
+        from .Directory import Directory
+        import pyarrow
+
         self._wait_for_finish()
-        if file_id_variable:
-            variable = Variable(file_id_variable, query=self)
-            if not variable.get().properties["isFileId"]:
-                raise Exception(
-                    f"The variable {file_id_variable} does not represent a file id."
-                )
-        else:
-            variables = make_paginated_request(
-                path=f"{self.uri}/variables", max_results=2, query={"isFileId": True}
-            )
-            if len(variables) == 0:
-                raise Exception(
-                    f"No variable containing file ids was found on this table"
-                )
-            elif len(variables) > 1:
-                raise Exception(
-                    f"This table contains multiple variables representing a file id. Please specify the variable with file ids you want to download via the 'file_id_variable' parameter."
-                )
 
-            file_id_variable = variables[0]["name"]
-
-        rows = self.to_arrow_table(max_results=max_results, progress=False).to_pylist()
-        return [File(row[file_id_variable], query=self) for row in rows]
-
-    def download_files(
-        self,
-        path=None,
-        *,
-        overwrite=False,
-        max_results=None,
-        file_id_variable=None,
-        progress=True,
-        max_parallelization=os.cpu_count() * 5,
-    ):
-        self._wait_for_finish()
-        return download_files(
-            self,
-            path=path,
-            overwrite=overwrite,
-            max_results=max_results,
-            file_id_variable=file_id_variable,
-            progress=progress,
-            max_parallelization=max_parallelization,
+        res = make_request(
+            method="get",
+            path=f"{self.uri}/rawFiles",
+            query={
+                "format": "arrow",
+                "fileIdVariable": file_id_variable,
+                "fileNameVariable": file_name_variable,
+            },
+            stream=True,
+            parse_response=False,
         )
 
+        directory = Directory(path=Path(""), query=self)
+
+        for file_spec in (
+            pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
+        ):
+            directory._add_file(
+                File(
+                    file_spec[file_id_variable],
+                    file_spec[file_name_variable],
+                    query=self,
+                    properties=file_spec,
+                    directory=directory,
+                )
+            )
+
+        self.directory = directory
+        return self.directory
+
+    def file(self, path):
+        if not self.directory:
+            self.to_directory()
+
+        return self.directory.get(path)
+
+    def list_files(
+        self, max_results=None, *, file_id_variable=None, file_name_variable=None
+    ):
+        warnings.warn(
+            "This method is deprecated. Please use table.to_directory().list_files() instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        if not self.directory:
+            self.to_directory(file_id_variable=file_id_variable)
+
+        return self.directory.list_files(recursive=True, max_results=max_results)
+
+    def download_files(self, *args, **kwargs):
+        warnings.warn(
+            "This method is deprecated. Please use table.to_directory().download_files() instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        if not self.directory:
+            self.to_directory(**kwargs)
+
+        return self.directory.download_files(*args, **kwargs)
+
+    def _initiate(self):
+        if not self.did_initiate:
+            self.did_initiate = True
+            self.properties = make_request(
+                method="post",
+                path="/queries",
+                payload=self.payload,
+            )
+            self.uri = self.properties["uri"]
+
     def _wait_for_finish(self):
+        self._initiate()
         while True:
             if self.properties["status"] == "completed":
                 break

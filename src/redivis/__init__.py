@@ -8,11 +8,16 @@ from .classes.Query import Query as query
 from .classes.Table import Table as table
 from .classes.Notebook import Notebook as notebook
 from .classes.Transform import Transform as transform
-from .classes.File import File as file
 from .common.api_request import make_request as make_api_request
 import warnings
 
 from ._version import __version__
+
+
+def file():
+    raise Exception(
+        'Calling redivis.file() is no longer supported. Please use redivis.table("table_reference").file("filename") instead.'
+    )
 
 
 def _warning(message, category, filename, lineno, file=None, line=None):

@@ -28,10 +28,14 @@ class Export(Base):
         self.properties = make_request(method="GET", path=self.uri)
         return self
 
-    def download_files(self, *, path, overwrite, progress=True):
-        # TODO: if overwriting file, first check if file is the same size, and if so check md5 hash, and skip if identical (need md5 in header)
+    def download_files(
+        self, *, path, overwrite, progress=True, max_parallelization=None
+    ):
         self.wait_for_finish()
         file_count = self.properties["fileCount"]
+        escaped_table_name = re.sub(
+            r"\W+", "_", self.properties.get("table", {}).get("name", "table")
+        ).lower()
         is_dir = False
         if path:
             path = os.path.expanduser(path)
@@ -40,11 +44,6 @@ class Export(Base):
             if path is None:
                 path = os.getcwd()
             if file_count > 1:
-                if not hasattr(self.table.properties, "name"):
-                    self.table.get()
-                escaped_table_name = re.sub(
-                    r"\W+", "_", self.table.properties["name"]
-                ).lower()
                 path = os.path.join(path, escaped_table_name)
         elif path.endswith(os.sep) or (not os.path.exists(path) and "." not in path):
             is_dir = True
@@ -79,14 +78,13 @@ class Export(Base):
             )
 
         cancel_event = Event()
-        # Code to use multiprocess... would simplify exiting on stop, but progress doesn't currently work
-        # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
 
         output_file_paths = []
-        # TODO: this should use async, not threads
-        # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
+
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(os.cpu_count() * 5, file_count)
+            max_workers=min(
+                100, max_parallelization if max_parallelization is not None else 50
+            ),
         ) as executor:
             futures = [
                 executor.submit(
@@ -94,6 +92,7 @@ class Export(Base):
                     uri=f"{self.uri}/download",
                     download_path=path,
                     file_number=file_number,
+                    file_name=f"{escaped_table_name if file_count == 1 else str(file_number).zfill(6)}.{self.properties['format']}",
                     is_dir=is_dir,
                     overwrite=overwrite,
                     pbar=pbar,
@@ -174,22 +173,16 @@ def download_file(
     *,
     uri,
     file_number,
+    file_name,
     download_path,
     is_dir=False,
     overwrite=False,
     pbar=None,
     cancel_event,
 ):
-    def filename_cb(r):
-        nonlocal download_path
-        if is_dir:
-            file_name = get_filename(r.headers.get("Content-Disposition"))
-            download_path = os.path.join(download_path, file_name)
-        return download_path
-
     return perform_retryable_download(
         path=uri,
-        filename_cb=filename_cb,
+        filename=os.path.join(download_path, file_name) if is_dir else file_name,
         pbar=pbar,
         cancel_event=cancel_event,
         query={"filePart": file_number},
