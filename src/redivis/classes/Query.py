@@ -370,7 +370,7 @@ class Query(Base):
         )
 
     def to_stata(self):
-        self.wait_for_finish()
+        self._wait_for_finish()
         import pyarrow as pa
         from pystata import stata
 
@@ -394,7 +394,7 @@ class Query(Base):
             stata.run("describe")
 
     def to_sas(self, name=None):
-        self.wait_for_finish()
+        self._wait_for_finish()
         if name is None:
             raise Exception(
                 'A SAS dataset name must be provided. E.g., query.to_sas("mydata")'
