@@ -20,7 +20,7 @@ class File(Base):
     def __init__(
         self,
         id,
-        path=Path(""),
+        name,
         *,
         directory,
         table=None,
@@ -33,7 +33,7 @@ class File(Base):
             properties = {}
 
         self.id = id
-        self.path = path if isinstance(path, Path) else Path(path)
+        self.path = name if isinstance(name, Path) else Path(f"./{name}")
         self.name = self.path.name
         self.table = table
         self.query = query

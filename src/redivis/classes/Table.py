@@ -54,6 +54,7 @@ class Table(Base):
         self.name = name
         self.dataset = dataset
         self.workflow = workflow
+        self.directory = None
 
         self.qualified_reference = (
             properties["qualifiedReference"]

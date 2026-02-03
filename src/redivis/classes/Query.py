@@ -1,5 +1,3 @@
-import shutil
-
 from .Base import Base
 import os
 import time
@@ -30,6 +28,7 @@ class Query(Base):
                 default_dataset = os.getenv("REDIVIS_DEFAULT_DATASET")
 
         self.payload = {"query": query}
+        self.directory = None
         if default_workflow:
             self.payload["defaultWorkflow"] = default_workflow
         if default_dataset:

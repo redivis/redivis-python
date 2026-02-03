@@ -24,7 +24,7 @@ def make_request(
     headers=None,
     retry_count=0,
 ):
-    if not headers:
+    if headers is None:
         headers = {}
 
     original_parameters = locals().copy()
