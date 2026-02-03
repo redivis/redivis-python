@@ -431,7 +431,23 @@ class Query(Base):
         )
 
         ip.run_cell_magic("SAS", "", load_script)
-        shutil.rmtree(tmpdirname, ignore_errors=True)
+        print("ran load script")
+        ip.run_cell_magic(
+            "SAS",
+            "",
+            f"""
+/* Delete the CSV */
+filename todelete "{tmpdirname}/part-0.csv";
+
+data _null_;
+    rc = fdelete("todelete");
+    if rc ne 0 then
+        put "ERROR: Unable to delete file. RC=" rc;
+run;
+
+filename todelete clear;
+""",
+        )
 
     def _initiate(self):
         if not self.did_initiate:
