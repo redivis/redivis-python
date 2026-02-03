@@ -1,3 +1,5 @@
+import shutil
+
 from .Base import Base
 import os
 import time
@@ -406,7 +408,8 @@ class Query(Base):
 
         ip = get_ipython()
 
-        tmpdirname = tempfile.TemporaryDirectory().name
+        # IMPORTANT: using a context manager doesn't seem to work here...
+        tmpdirname = tempfile.mkdtemp()
         load_script_res = make_request(
             method="GET",
             path=f"{self.uri}/script",
@@ -427,8 +430,8 @@ class Query(Base):
             format="csv",
         )
 
-        print(load_script)
         ip.run_cell_magic("SAS", "", load_script)
+        shutil.rmtree(tmpdirname, ignore_errors=True)
 
     def _initiate(self):
         if not self.did_initiate:
