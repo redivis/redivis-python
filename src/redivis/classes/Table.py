@@ -339,7 +339,7 @@ class Table(Base):
         import pyarrow
 
         # We need to have the id for any ultimate calls to File.download()
-        if not self.properties.get("id"):
+        if not self.properties or not self.properties.get("id"):
             self.get()
 
         res = make_request(
