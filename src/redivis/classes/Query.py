@@ -6,6 +6,7 @@ from .Variable import Variable
 from .File import File
 from pathlib import Path
 import tempfile
+from contextlib import closing
 
 from ..common.api_request import make_request, make_paginated_request
 from ..common.list_rows import list_rows
@@ -293,35 +294,36 @@ class Query(Base):
 
         self._wait_for_finish()
 
-        res = make_request(
-            method="get",
-            path=f"{self.uri}/rawFiles",
-            query={
-                "format": "arrow",
-                "fileIdVariable": file_id_variable,
-                "fileNameVariable": file_name_variable,
-            },
-            stream=True,
-            parse_response=False,
-        )
-
-        directory = Directory(path=Path(""), query=self)
-
-        for file_spec in (
-            pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
-        ):
-            directory._add_file(
-                File(
-                    file_spec[file_id_variable],
-                    file_spec[file_name_variable],
-                    query=self,
-                    properties=file_spec,
-                    directory=directory,
-                )
+        with closing(
+            make_request(
+                method="get",
+                path=f"{self.uri}/rawFiles",
+                query={
+                    "format": "arrow",
+                    "fileIdVariable": file_id_variable,
+                    "fileNameVariable": file_name_variable,
+                },
+                stream=True,
+                parse_response=False,
             )
+        ) as res:
+            directory = Directory(path=Path(""), query=self)
 
-        self.directory = directory
-        return self.directory
+            for file_spec in (
+                pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
+            ):
+                directory._add_file(
+                    File(
+                        file_spec[file_id_variable],
+                        file_spec[file_name_variable],
+                        query=self,
+                        properties=file_spec,
+                        directory=directory,
+                    )
+                )
+
+            self.directory = directory
+            return self.directory
 
     def file(self, path):
         if not self.directory:
@@ -329,9 +331,7 @@ class Query(Base):
 
         return self.directory.get(path)
 
-    def list_files(
-        self, max_results=None, *, file_id_variable=None, file_name_variable=None
-    ):
+    def list_files(self, max_results=None, *, file_id_variable=None):
         warnings.warn(
             "This method is deprecated. Please use query.to_directory().list_files() instead",
             FutureWarning,

@@ -8,6 +8,8 @@ import glob
 import concurrent.futures
 from tqdm.auto import tqdm
 from pathlib import Path
+from contextlib import closing
+
 
 from .Upload import Upload
 from .Export import Export
@@ -343,35 +345,36 @@ class Table(Base):
         if not self.properties or not self.properties.get("id"):
             self.get()
 
-        res = make_request(
-            method="get",
-            path=f"{self.uri}/rawFiles",
-            query={
-                "format": "arrow",
-                "fileIdVariable": file_id_variable,
-                "fileNameVariable": file_name_variable,
-            },
-            stream=True,
-            parse_response=False,
-        )
-
-        directory = Directory(path=Path(""), table=self)
-
-        for file_spec in (
-            pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
-        ):
-            directory._add_file(
-                File(
-                    file_spec[file_id_variable],
-                    file_spec[file_name_variable],
-                    table=self,
-                    properties=file_spec,
-                    directory=directory,
-                )
+        with closing(
+            make_request(
+                method="get",
+                path=f"{self.uri}/rawFiles",
+                query={
+                    "format": "arrow",
+                    "fileIdVariable": file_id_variable,
+                    "fileNameVariable": file_name_variable,
+                },
+                stream=True,
+                parse_response=False,
             )
+        ) as res:
+            directory = Directory(path=Path(""), table=self)
 
-        self.directory = directory
-        return self.directory
+            for file_spec in (
+                pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
+            ):
+                directory._add_file(
+                    File(
+                        file_spec[file_id_variable],
+                        file_spec[file_name_variable],
+                        table=self,
+                        properties=file_spec,
+                        directory=directory,
+                    )
+                )
+
+            self.directory = directory
+            return self.directory
 
     def file(self, path):
         if not self.directory:
@@ -379,9 +382,7 @@ class Table(Base):
 
         return self.directory.get(path)
 
-    def list_files(
-        self, max_results=None, *, file_id_variable=None, file_name_variable=None
-    ):
+    def list_files(self, max_results=None, *, file_id_variable=None):
         warnings.warn(
             "This method is deprecated. Please use table.to_directory().list_files() instead",
             FutureWarning,
@@ -684,6 +685,9 @@ class Table(Base):
         import pyarrow as pa
         from pystata import stata
 
+        # TODO: if geospatial data, download as a shapefile and load to Stata
+        # Stata: spshape2dta out.shp
+        # Python: geopandas_df.to_file("out.shp")
         with tempfile.TemporaryDirectory() as tmpdirname:
             if not self.properties or "numBytes" not in self.properties:
                 self.get()

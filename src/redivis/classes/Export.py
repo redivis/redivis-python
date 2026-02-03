@@ -32,8 +32,6 @@ class Export(Base):
         self, *, path=None, overwrite=False, progress=True, max_parallelization=None
     ):
         self.wait_for_finish()
-        if path is None:
-            path = os.getcwd()
         file_count = self.properties["fileCount"]
         escaped_table_name = re.sub(
             r"\W+", "_", self.properties.get("table", {}).get("name", "table")
