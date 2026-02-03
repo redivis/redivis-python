@@ -4,8 +4,10 @@ import time
 import warnings
 from .Variable import Variable
 from .File import File
+from pathlib import Path
+import tempfile
+from contextlib import closing
 
-from ..common.download_files import download_files
 from ..common.api_request import make_request, make_paginated_request
 from ..common.list_rows import list_rows
 from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
@@ -19,28 +21,27 @@ class Query(Base):
         default_workflow=None,
         default_dataset=None,
     ):
+        self.did_initiate = False
         if not default_workflow and not default_dataset:
             if os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
                 default_workflow = os.getenv("REDIVIS_DEFAULT_WORKFLOW")
             elif os.getenv("REDIVIS_DEFAULT_DATASET"):
                 default_dataset = os.getenv("REDIVIS_DEFAULT_DATASET")
 
-        payload = {"query": query}
+        self.payload = {"query": query}
+        self.directory = None
         if default_workflow:
-            payload["defaultWorkflow"] = default_workflow
+            self.payload["defaultWorkflow"] = default_workflow
         if default_dataset:
-            payload["defaultDataset"] = default_dataset
-
-        self.properties = make_request(
-            method="post",
-            path="/queries",
-            payload=payload,
-        )
-        self.uri = self.properties["uri"]
+            self.payload["defaultDataset"] = default_dataset
 
     def get(self):
+        self._initiate()
         self.properties = make_request(method="GET", path=self.uri)
         return self
+
+    # def dry_run(self):
+    #   TODO
 
     def to_arrow_dataset(
         self,
@@ -270,10 +271,12 @@ class Query(Base):
         )
 
     def variable(self, name):
+        # TODO: dry run (?) + cache variables
         self._wait_for_finish()
         return Variable(name, query=self)
 
     def list_variables(self, *, max_results=None):
+        # TODO: dry run (?) + cache variables
         self._wait_for_finish()
         variables = make_paginated_request(
             path=f"{self.uri}/variables", page_size=1000, max_results=max_results
@@ -283,54 +286,163 @@ class Query(Base):
             for variable in variables
         ]
 
-    def list_files(self, max_results=None, *, file_id_variable=None):
+    def to_directory(
+        self, *, file_id_variable="file_id", file_name_variable="file_name"
+    ):
+        from .Directory import Directory
+        import pyarrow
+
         self._wait_for_finish()
-        if file_id_variable:
-            variable = Variable(file_id_variable, query=self)
-            if not variable.get().properties["isFileId"]:
-                raise Exception(
-                    f"The variable {file_id_variable} does not represent a file id."
-                )
-        else:
-            variables = make_paginated_request(
-                path=f"{self.uri}/variables", max_results=2, query={"isFileId": True}
+
+        with closing(
+            make_request(
+                method="get",
+                path=f"{self.uri}/rawFiles",
+                query={
+                    "format": "arrow",
+                    "fileIdVariable": file_id_variable,
+                    "fileNameVariable": file_name_variable,
+                },
+                stream=True,
+                parse_response=False,
             )
-            if len(variables) == 0:
-                raise Exception(
-                    f"No variable containing file ids was found on this table"
-                )
-            elif len(variables) > 1:
-                raise Exception(
-                    f"This table contains multiple variables representing a file id. Please specify the variable with file ids you want to download via the 'file_id_variable' parameter."
+        ) as res:
+            directory = Directory(path=Path(""), query=self)
+
+            for file_spec in (
+                pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
+            ):
+                directory._add_file(
+                    File(
+                        file_spec[file_id_variable],
+                        file_spec[file_name_variable],
+                        query=self,
+                        properties=file_spec,
+                        directory=directory,
+                    )
                 )
 
-            file_id_variable = variables[0]["name"]
+            self.directory = directory
+            return self.directory
 
-        rows = self.to_arrow_table(max_results=max_results, progress=False).to_pylist()
-        return [File(row[file_id_variable], query=self) for row in rows]
+    def file(self, path):
+        if not self.directory:
+            self.to_directory()
+
+        return self.directory.get(path)
+
+    def list_files(self, max_results=None, *, file_id_variable=None):
+        warnings.warn(
+            "This method is deprecated. Please use query.to_directory().list_files() instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        if not self.directory:
+            self.to_directory(file_id_variable=file_id_variable)
+
+        return self.directory.list_files(recursive=True, max_results=max_results)
 
     def download_files(
         self,
         path=None,
-        *,
         overwrite=False,
         max_results=None,
         file_id_variable=None,
+        file_name_variable=None,
         progress=True,
-        max_parallelization=os.cpu_count() * 5,
+        max_parallelization=None,
     ):
-        self._wait_for_finish()
-        return download_files(
-            self,
+        warnings.warn(
+            "This method is deprecated. Please use query.to_directory().download_files() instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        if not self.directory:
+            self.to_directory(
+                file_id_variable=file_id_variable, file_name_variable=file_name_variable
+            )
+
+        return self.directory.download_files(
             path=path,
-            overwrite=overwrite,
             max_results=max_results,
-            file_id_variable=file_id_variable,
-            progress=progress,
+            overwrite=overwrite,
             max_parallelization=max_parallelization,
+            progress=progress,
         )
 
+    def to_stata(self):
+        self._wait_for_finish()
+        import pyarrow as pa
+        from pystata import stata
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            load_script_res = make_request(
+                method="GET",
+                path=f"{self.uri}/script",
+                query={"type": "stata", "filePath": f"{tmpdirname}/part-0.csv"},
+                parse_response=False,
+            )
+            load_script = load_script_res.text
+            ds = self.to_arrow_dataset()
+            pa.dataset.write_dataset(
+                ds,
+                base_dir=tmpdirname,
+                existing_data_behavior="overwrite_or_ignore",
+                basename_template="part-{i}.csv",
+                format="csv",
+            )
+            stata.run("clear")
+            stata.run(load_script, quietly=True)
+            stata.run("describe")
+
+    def to_sas(self, name=None):
+        self._wait_for_finish()
+        if name is None:
+            raise Exception(
+                'A SAS dataset name must be provided. E.g., query.to_sas("mydata")'
+            )
+        import pyarrow as pa
+        import saspy
+        from IPython import get_ipython
+
+        ip = get_ipython()
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # IMPORTANT: SAS is running as a separate user, need to make sure the directory is readable
+            os.chmod(tmpdirname, 0o755)
+            load_script = make_request(
+                method="GET",
+                path=f"{self.uri}/script",
+                query={
+                    "type": "sas",
+                    "filePath": f"{tmpdirname}/part-0.csv",
+                    "sasDatasetName": name,
+                },
+                parse_response=False,
+            ).text
+            ds = self.to_arrow_dataset()
+            pa.dataset.write_dataset(
+                ds,
+                base_dir=tmpdirname,
+                existing_data_behavior="overwrite_or_ignore",
+                basename_template="part-{i}.csv",
+                format="csv",
+            )
+
+            ip.run_cell_magic("SAS", "", load_script)
+
+    def _initiate(self):
+        if not self.did_initiate:
+            self.did_initiate = True
+            self.properties = make_request(
+                method="post",
+                path="/queries",
+                payload=self.payload,
+            )
+            self.uri = self.properties["uri"]
+
     def _wait_for_finish(self):
+        self._initiate()
         while True:
             if self.properties["status"] == "completed":
                 break

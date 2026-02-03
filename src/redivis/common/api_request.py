@@ -21,9 +21,12 @@ def make_request(
     parse_response=True,
     stream=False,
     files=None,
-    headers={},
+    headers=None,
     retry_count=0,
 ):
+    if headers is None:
+        headers = {}
+
     original_parameters = locals().copy()
     args = get_request_args(
         method=method,

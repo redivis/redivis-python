@@ -1,5 +1,8 @@
 import os
 import io
+import warnings
+from base64 import b64decode
+from pathlib import Path
 import re
 import urllib
 import time
@@ -13,27 +16,46 @@ from ..common.retryable_download import perform_retryable_download
 
 
 class File(Base):
+
     def __init__(
         self,
         id,
+        name,
         *,
+        directory,
         table=None,
         query=None,
-        properties={},
+        properties=None,
     ):
+        if not table and not query:
+            raise ValueError("All files must either belong to a table or query.")
+        if properties is None:
+            properties = {}
+
         self.id = id
+        self.path = name if isinstance(name, Path) else Path(f"./{name}")
+        self.name = self.path.name
         self.table = table
         self.query = query
+        self.directory = directory
         self.uri = f"/rawFiles/{quote_uri(id, '')}"
-        self.properties = {
-            **{"kind": "rawFile", "id": id, "uri": self.uri},
-            **properties,
-        }
+        self.size = properties.get("size")
+        self.hash = properties.get("md5_hash")
+        if self.hash:
+            self.hash = b64decode(self.hash)
+        self.added_at = properties.get("added_at")
+        self.properties = properties
 
     def get(self):
-        res = make_request(method="HEAD", path=self.uri, parse_response=False)
-        parse_headers(self, res)
+        warnings.warn(
+            "This method is deprecated. Nothing to fetch; all file metadata already exists at file.properties",
+            FutureWarning,
+            stacklevel=2,
+        )
         return self
+
+    def __repr__(self) -> str:
+        return f"<File {str(self.path)}>"
 
     def download(
         self,
@@ -47,24 +69,27 @@ class File(Base):
         if path:
             path = os.path.expanduser(path)
 
-        def filename_cb(r):
-            nonlocal path
-            is_dir = False
-            if path is None:
-                path = os.getcwd()
-                is_dir = True
-            elif path.endswith(os.sep):
-                is_dir = True
-            elif os.path.exists(path) and os.path.isdir(path):
-                is_dir = True
-            parse_headers(self, r)
-            name = self.properties["name"]
+        is_dir = False
+        if path is None:
+            path = os.getcwd()
+            is_dir = True
+        elif path.endswith(os.sep):
+            is_dir = True
+        elif os.path.exists(path) and os.path.isdir(path):
+            is_dir = True
 
-            return os.path.join(path, name) if is_dir else path
+        query_params = {}
+        if self.table:
+            query_params["tableId"] = self.table.properties.get("id")
+        elif self.query:
+            query_params["queryId"] = self.query.properties.get("id")
 
         return perform_retryable_download(
             path=self.uri,
-            filename_cb=filename_cb,
+            filename=os.path.join(path, self.name) if is_dir else path,
+            size=self.size,
+            md5_hash=self.hash,
+            query=query_params,
             progress=progress,
             on_progress=on_progress,
             cancel_event=cancel_event,
@@ -84,7 +109,6 @@ class File(Base):
             parse_response=False,
             headers=range_headers,
         )
-        parse_headers(self, r)
         if as_text:
             return r.text
         else:
@@ -112,7 +136,6 @@ class Stream(io.BufferedIOBase):
         self.end_byte = end_byte
         self._file = file
         self._total_bytes = None
-        self._did_parse_headers = False
         self._iter_chunk_size = 1024 * 1024
         self._closed = False
         self.response = None
@@ -154,10 +177,8 @@ class Stream(io.BufferedIOBase):
                 stream=True,
                 headers=range_headers,
             )
-            if not self._did_parse_headers:
-                parse_headers(self._file, r)
-                self._total_bytes = self._file.properties["size"]
-                self._did_parse_headers = True
+
+            self._total_bytes = self._file.size
             self.retry_count = 0
             self.response = r
             return r
@@ -286,30 +307,6 @@ class Stream(io.BufferedIOBase):
             self.response.close()
             raise StopIteration
         return chunk
-
-
-def parse_headers(file, res):
-    file.properties["name"] = get_filename(res.headers["content-disposition"])
-    file.properties["contentType"] = res.headers["content-type"]
-
-    digest = None
-
-    if "Digest" in res.headers:
-        digest = res.headers["Digest"]
-    elif "x-goog-hash" in res.headers:
-        digest = res.headers["x-goog-hash"]
-
-    if digest:
-        file.properties["md5"] = digest.replace("md5=", "")
-
-    file.properties["size"] = int(
-        res.headers.get(
-            "x-redivis-size",
-            res.headers.get(
-                "x-goog-stored-content-length", res.headers.get("content-length")
-            ),
-        )
-    )
 
 
 def get_filename(s):

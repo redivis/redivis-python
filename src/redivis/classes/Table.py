@@ -2,17 +2,20 @@ from .Base import Base
 from urllib.parse import quote as quote_uri
 import warnings
 import os
+import tempfile
 import time
 import glob
 import concurrent.futures
 from tqdm.auto import tqdm
+from pathlib import Path
+from contextlib import closing
+
 
 from .Upload import Upload
 from .Export import Export
 from .Variable import Variable
 from .File import File
 from ..common.list_rows import list_rows
-from ..common.download_files import download_files
 from ..common.api_request import make_request, make_paginated_request
 from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
@@ -53,6 +56,7 @@ class Table(Base):
         self.name = name
         self.dataset = dataset
         self.workflow = workflow
+        self.directory = None
 
         self.qualified_reference = (
             properties["qualifiedReference"]
@@ -185,7 +189,6 @@ class Table(Base):
 
         try:
             current_batch_timestamp = time.time()
-            uploaded_files = []
             current_batch_files = []
             current_temp_uploads_batch = []
             target_batch_size = 1e8
@@ -294,10 +297,7 @@ class Table(Base):
                             ]
                         },
                     )
-                    uploaded_files += [
-                        File(f["id"], table=self, properties=f)
-                        for f in response["results"]
-                    ]
+
                     if progress:
                         pbar_count.update(len(current_batch_files))
 
@@ -308,8 +308,6 @@ class Table(Base):
             if progress:
                 pbar_bytes.close()
                 pbar_count.close()
-
-            return uploaded_files
         except Exception as e:
             if progress:
                 pbar_bytes.close()
@@ -337,51 +335,90 @@ class Table(Base):
             progress=progress,
         )
 
-    def list_files(self, max_results=None, *, file_id_variable=None):
-        if file_id_variable:
-            variable = Variable(file_id_variable, table=self)
-            if not variable.get().properties["isFileId"]:
-                raise Exception(
-                    f"The variable {file_id_variable} does not represent a file id."
-                )
-        else:
-            variables = make_paginated_request(
-                path=f"{self.uri}/variables", max_results=2, query={"isFileId": True}
+    def to_directory(
+        self, *, file_id_variable="file_id", file_name_variable="file_name"
+    ):
+        from .Directory import Directory
+        import pyarrow
+
+        # We need to have the id for any ultimate calls to File.download()
+        if not self.properties or not self.properties.get("id"):
+            self.get()
+
+        with closing(
+            make_request(
+                method="get",
+                path=f"{self.uri}/rawFiles",
+                query={
+                    "format": "arrow",
+                    "fileIdVariable": file_id_variable,
+                    "fileNameVariable": file_name_variable,
+                },
+                stream=True,
+                parse_response=False,
             )
-            if len(variables) == 0:
-                raise Exception(
-                    f"No variable containing file ids was found on this table"
-                )
-            elif len(variables) > 1:
-                raise Exception(
-                    f"This table contains multiple variables representing a file id. Please specify the variable with file ids you want to download via the 'file_id_variable' parameter."
+        ) as res:
+            directory = Directory(path=Path(""), table=self)
+
+            for file_spec in (
+                pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
+            ):
+                directory._add_file(
+                    File(
+                        file_spec[file_id_variable],
+                        file_spec[file_name_variable],
+                        table=self,
+                        properties=file_spec,
+                        directory=directory,
+                    )
                 )
 
-            file_id_variable = variables[0]["name"]
+            self.directory = directory
+            return self.directory
 
-        rows = self.to_arrow_table(
-            max_results=max_results, variables=[file_id_variable], progress=False
-        ).to_pylist()
-        return [File(row[file_id_variable], table=self) for row in rows]
+    def file(self, path):
+        if not self.directory:
+            self.to_directory()
+
+        return self.directory.get(path)
+
+    def list_files(self, max_results=None, *, file_id_variable=None):
+        warnings.warn(
+            "This method is deprecated. Please use table.to_directory().list_files() instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        if not self.directory:
+            self.to_directory(file_id_variable=file_id_variable)
+
+        return self.directory.list_files(recursive=True, max_results=max_results)
 
     def download_files(
         self,
         path=None,
-        *,
         overwrite=False,
         max_results=None,
         file_id_variable=None,
+        file_name_variable=None,
         progress=True,
-        max_parallelization=os.cpu_count() * 5,
+        max_parallelization=None,
     ):
-        return download_files(
-            self,
+        warnings.warn(
+            "This method is deprecated. Please use table.to_directory().download_files() instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        if not self.directory:
+            self.to_directory(
+                file_id_variable=file_id_variable, file_name_variable=file_name_variable
+            )
+
+        return self.directory.download_files(
             path=path,
-            overwrite=overwrite,
             max_results=max_results,
-            file_id_variable=file_id_variable,
-            progress=progress,
+            overwrite=overwrite,
             max_parallelization=max_parallelization,
+            progress=progress,
         )
 
     def to_arrow_dataset(
@@ -645,10 +682,78 @@ class Table(Base):
         )
 
     def to_stata(self):
-        """TODO"""
+        import pyarrow as pa
+        from pystata import stata
 
-    def to_sas(self):
-        """TODO"""
+        # TODO: if geospatial data, download as a shapefile and load to Stata
+        # Stata: spshape2dta out.shp
+        # Python: geopandas_df.to_file("out.shp")
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            if not self.properties or "numBytes" not in self.properties:
+                self.get()
+
+            load_script_res = make_request(
+                method="GET",
+                path=f"{self.uri}/script",
+                query={"type": "stata", "filePath": f"{tmpdirname}/part-0.csv"},
+                parse_response=False,
+            )
+            load_script = load_script_res.text
+            if should_use_export_api(self.properties["numBytes"]):
+                self.download(path=f"{tmpdirname}/part-0.csv", format="csv")
+            else:
+                ds = self.to_arrow_dataset()
+                pa.dataset.write_dataset(
+                    ds,
+                    base_dir=tmpdirname,
+                    existing_data_behavior="overwrite_or_ignore",
+                    basename_template="part-{i}.csv",
+                    format="csv",
+                )
+            stata.run("clear")
+            stata.run(load_script, quietly=True)
+            stata.run("describe")
+
+    def to_sas(self, name=None):
+        if name is None:
+            raise Exception(
+                'A SAS dataset name must be provided. E.g., table.to_sas("mydata")'
+            )
+        import pyarrow as pa
+        import saspy
+        from IPython import get_ipython
+
+        ip = get_ipython()
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # IMPORTANT: SAS is running as a separate user, need to make sure the directory is readable
+            os.chmod(tmpdirname, 0o755)
+            if not self.properties or "numBytes" not in self.properties:
+                self.get()
+
+            load_script = make_request(
+                method="GET",
+                path=f"{self.uri}/script",
+                query={
+                    "type": "sas",
+                    "filePath": f"{tmpdirname}/part-0.csv",
+                    "sasDatasetName": name,
+                },
+                parse_response=False,
+            ).text
+
+            if should_use_export_api(self.properties["numBytes"]):
+                self.download(path=f"{tmpdirname}/part-0.csv", format="csv")
+            else:
+                ds = self.to_arrow_dataset()
+                pa.dataset.write_dataset(
+                    ds,
+                    base_dir=tmpdirname,
+                    existing_data_behavior="overwrite_or_ignore",
+                    basename_template="part-{i}.csv",
+                    format="csv",
+                )
+            ip.run_cell_magic("SAS", "", load_script)
 
     def list_rows(self, max_results=None, *, variables=None, progress=True):
         warnings.warn(
