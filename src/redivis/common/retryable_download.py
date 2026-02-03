@@ -126,6 +126,10 @@ def check_filename(filename, overwrite, retry_count, size, md5_hash, on_progress
                 if on_progress:
                     on_progress(size)
                 return filename
+            elif not overwrite:
+                raise Exception(
+                    f"File already exists at '{filename}'. Set parameter overwrite=True to overwrite existing files."
+                )
         elif not overwrite:
             raise Exception(
                 f"File already exists at '{filename}'. Set parameter overwrite=True to overwrite existing files."

@@ -283,7 +283,9 @@ class Query(Base):
             for variable in variables
         ]
 
-    def to_directory(self, *, file_id_variable=None, file_name_variable=None):
+    def to_directory(
+        self, *, file_id_variable="file_id", file_name_variable="file_name"
+    ):
         from .Directory import Directory
         import pyarrow
 
@@ -329,7 +331,7 @@ class Query(Base):
         self, max_results=None, *, file_id_variable=None, file_name_variable=None
     ):
         warnings.warn(
-            "This method is deprecated. Please use table.to_directory().list_files() instead",
+            "This method is deprecated. Please use query.to_directory().list_files() instead",
             FutureWarning,
             stacklevel=2,
         )
@@ -338,16 +340,33 @@ class Query(Base):
 
         return self.directory.list_files(recursive=True, max_results=max_results)
 
-    def download_files(self, *args, **kwargs):
+    def download_files(
+        self,
+        path=None,
+        overwrite=False,
+        max_results=None,
+        file_id_variable=None,
+        file_name_variable=None,
+        progress=True,
+        max_parallelization=None,
+    ):
         warnings.warn(
-            "This method is deprecated. Please use table.to_directory().download_files() instead",
+            "This method is deprecated. Please use query.to_directory().download_files() instead",
             FutureWarning,
             stacklevel=2,
         )
         if not self.directory:
-            self.to_directory(**kwargs)
+            self.to_directory(
+                file_id_variable=file_id_variable, file_name_variable=file_name_variable
+            )
 
-        return self.directory.download_files(*args, **kwargs)
+        return self.directory.download_files(
+            path=path,
+            max_results=max_results,
+            overwrite=overwrite,
+            max_parallelization=max_parallelization,
+            progress=progress,
+        )
 
     def _initiate(self):
         if not self.did_initiate:

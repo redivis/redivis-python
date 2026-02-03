@@ -117,7 +117,6 @@ class Directory(Base):
         max_results=None,
         max_parallelization=None,
         overwrite=False,
-        pattern=None,
         recursive=True,
         progress=True,
     ):
@@ -145,7 +144,7 @@ class Directory(Base):
         ) as executor:
             futures = []
             files_to_download = self.list_files(
-                recursive=recursive, pattern=pattern, max_results=max_results
+                recursive=recursive, max_results=max_results
             )
 
             file_count = 0
