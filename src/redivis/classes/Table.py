@@ -683,7 +683,10 @@ class Table(Base):
         import pyarrow as pa
         from pystata import stata
 
+        print("loading stata")
+
         with tempfile.TemporaryDirectory() as tmpdirname:
+            print("tmdirname", tmpdirname)
             if not self.properties or "numBytes" not in self.properties:
                 self.get()
 
@@ -693,6 +696,7 @@ class Table(Base):
                 query={"type": "stata", "filePath": f"{tmpdirname}/part-0.csv"},
                 parse_response=False,
             )
+            print("got load script")
             if should_use_export_api(self.properties["numBytes"]):
                 self.download(path=f"{tmpdirname}/part-0.csv", format="csv")
             else:
@@ -704,8 +708,10 @@ class Table(Base):
                     basename_template="part-{i}.csv",
                     format="csv",
                 )
+            print("running stata")
             stata.run("clear")
-            stata.run(load_script_res.text)
+            stata.run(load_script_res.text, quietly=True)
+            stata.run("describe")
 
     def to_sas(self, name=None):
         if name is None:
