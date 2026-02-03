@@ -55,7 +55,7 @@ def perform_retryable_download(
             # Make sure output directory exists
             pathlib.Path(filename).parent.mkdir(exist_ok=True, parents=True)
 
-            with open(filename, "wb" if retry_count is 0 else "ab") as f:
+            with open(filename, "wb" if retry_count == 0 else "ab") as f:
                 if progress and not pbar:
                     pbar = tqdm(
                         total=int(r.headers["content-length"]),
@@ -124,7 +124,7 @@ def check_filename(filename, overwrite, retry_count, size, md5_hash, on_progress
 
             if file_hash.digest() == md5_hash:
                 if on_progress:
-                    on_progress(size)
+                    on_progress(int(size))
                 return filename
             elif not overwrite:
                 raise Exception(

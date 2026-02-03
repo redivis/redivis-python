@@ -25,10 +25,12 @@ class File(Base):
         directory,
         table=None,
         query=None,
-        properties={},
+        properties=None,
     ):
         if not table and not query:
             raise ValueError("All files must either belong to a table or query.")
+        if properties is None:
+            properties = {}
 
         self.id = id
         self.path = path if isinstance(path, Path) else Path(path)

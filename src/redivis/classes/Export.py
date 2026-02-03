@@ -29,9 +29,11 @@ class Export(Base):
         return self
 
     def download_files(
-        self, *, path, overwrite, progress=True, max_parallelization=None
+        self, *, path=None, overwrite=False, progress=True, max_parallelization=None
     ):
         self.wait_for_finish()
+        if path is None:
+            path = os.getcwd()
         file_count = self.properties["fileCount"]
         escaped_table_name = re.sub(
             r"\W+", "_", self.properties.get("table", {}).get("name", "table")
@@ -88,15 +90,18 @@ class Export(Base):
         ) as executor:
             futures = [
                 executor.submit(
-                    download_file,
-                    uri=f"{self.uri}/download",
-                    download_path=path,
-                    file_number=file_number,
-                    file_name=f"{escaped_table_name if file_count == 1 else str(file_number).zfill(6)}.{self.properties['format']}",
-                    is_dir=is_dir,
-                    overwrite=overwrite,
+                    perform_retryable_download,
+                    path=f"{self.uri}/download",
                     pbar=pbar,
                     cancel_event=cancel_event,
+                    query={"filePart": file_number},
+                    overwrite=overwrite,
+                    filename=(
+                        pathlib.Path(path)
+                        / f"{escaped_table_name if file_count == 1 else str(file_number).zfill(6)}.{self.properties['format']}"
+                        if is_dir
+                        else path
+                    ),
                 )
                 for file_number in range(file_count)
             ]
@@ -167,26 +172,3 @@ def get_filename(s):
         fname = ""
     # clean space and double quotes
     return fname.strip().strip('"')
-
-
-def download_file(
-    *,
-    uri,
-    file_number,
-    file_name,
-    download_path,
-    is_dir=False,
-    overwrite=False,
-    pbar=None,
-    cancel_event,
-):
-    return perform_retryable_download(
-        path=uri,
-        filename=os.path.join(download_path, file_name) if is_dir else file_name,
-        pbar=pbar,
-        cancel_event=cancel_event,
-        query={"filePart": file_number},
-        overwrite=overwrite,
-        start_byte=0,
-        on_progress=None,
-    )
