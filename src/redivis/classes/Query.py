@@ -381,6 +381,7 @@ class Query(Base):
                 query={"type": "stata", "filePath": f"{tmpdirname}/part-0.csv"},
                 parse_response=False,
             )
+            load_script = load_script_res.text
             ds = self.to_arrow_dataset()
             pa.dataset.write_dataset(
                 ds,
@@ -390,7 +391,7 @@ class Query(Base):
                 format="csv",
             )
             stata.run("clear")
-            stata.run(load_script_res.text, quietly=True)
+            stata.run(load_script, quietly=True)
             stata.run("describe")
 
     def to_sas(self, name=None):
@@ -405,28 +406,29 @@ class Query(Base):
 
         ip = get_ipython()
 
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            load_script_res = make_request(
-                method="GET",
-                path=f"{self.uri}/script",
-                query={
-                    "type": "sas",
-                    "filePath": f"{tmpdirname}/part-0.csv",
-                    "sasDatasetName": name,
-                },
-                parse_response=False,
-            )
-            ds = self.to_arrow_dataset()
-            pa.dataset.write_dataset(
-                ds,
-                base_dir=tmpdirname,
-                existing_data_behavior="overwrite_or_ignore",
-                basename_template="part-{i}.csv",
-                format="csv",
-            )
-            load_script = load_script_res.text
-            print(load_script)
-            ip.run_cell_magic("SAS", "", load_script)
+        tmpdirname = tempfile.TemporaryDirectory().name
+        load_script_res = make_request(
+            method="GET",
+            path=f"{self.uri}/script",
+            query={
+                "type": "sas",
+                "filePath": f"{tmpdirname}/part-0.csv",
+                "sasDatasetName": name,
+            },
+            parse_response=False,
+        )
+        load_script = load_script_res.text
+        ds = self.to_arrow_dataset()
+        pa.dataset.write_dataset(
+            ds,
+            base_dir=tmpdirname,
+            existing_data_behavior="overwrite_or_ignore",
+            basename_template="part-{i}.csv",
+            format="csv",
+        )
+
+        print(load_script)
+        ip.run_cell_magic("SAS", "", load_script)
 
     def _initiate(self):
         if not self.did_initiate:

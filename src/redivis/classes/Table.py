@@ -693,6 +693,7 @@ class Table(Base):
                 query={"type": "stata", "filePath": f"{tmpdirname}/part-0.csv"},
                 parse_response=False,
             )
+            load_script = load_script_res.text
             if should_use_export_api(self.properties["numBytes"]):
                 self.download(path=f"{tmpdirname}/part-0.csv", format="csv")
             else:
@@ -705,7 +706,7 @@ class Table(Base):
                     format="csv",
                 )
             stata.run("clear")
-            stata.run(load_script_res.text, quietly=True)
+            stata.run(load_script, quietly=True)
             stata.run("describe")
 
     def to_sas(self, name=None):
