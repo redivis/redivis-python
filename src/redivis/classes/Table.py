@@ -720,35 +720,35 @@ class Table(Base):
 
         ip = get_ipython()
 
-        # IMPORTANT: using a context manager doesn't seem to work here...
-        tmpdirname = tempfile.mkdtemp()
-        if not self.properties or "numBytes" not in self.properties:
-            self.get()
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # IMPORTANT: SAS is running as a separate user, need to make sure the directory is readable
+            os.chmod(tmpdirname, 0o755)
+            if not self.properties or "numBytes" not in self.properties:
+                self.get()
 
-        load_script_res = make_request(
-            method="GET",
-            path=f"{self.uri}/script",
-            query={
-                "type": "sas",
-                "filePath": f"{tmpdirname}/part-0.csv",
-                "sasDatasetName": name,
-            },
-            parse_response=False,
-        )
-        load_script = load_script_res.text
+            load_script = make_request(
+                method="GET",
+                path=f"{self.uri}/script",
+                query={
+                    "type": "sas",
+                    "filePath": f"{tmpdirname}/part-0.csv",
+                    "sasDatasetName": name,
+                },
+                parse_response=False,
+            ).text
 
-        if should_use_export_api(self.properties["numBytes"]):
-            self.download(path=f"{tmpdirname}/part-0.csv", format="csv")
-        else:
-            ds = self.to_arrow_dataset()
-            pa.dataset.write_dataset(
-                ds,
-                base_dir=tmpdirname,
-                existing_data_behavior="overwrite_or_ignore",
-                basename_template="part-{i}.csv",
-                format="csv",
-            )
-        ip.run_cell_magic("SAS", "", load_script)
+            if should_use_export_api(self.properties["numBytes"]):
+                self.download(path=f"{tmpdirname}/part-0.csv", format="csv")
+            else:
+                ds = self.to_arrow_dataset()
+                pa.dataset.write_dataset(
+                    ds,
+                    base_dir=tmpdirname,
+                    existing_data_behavior="overwrite_or_ignore",
+                    basename_template="part-{i}.csv",
+                    format="csv",
+                )
+            ip.run_cell_magic("SAS", "", load_script)
 
     def list_rows(self, max_results=None, *, variables=None, progress=True):
         warnings.warn(
