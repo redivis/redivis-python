@@ -5,6 +5,7 @@ import warnings
 from .Variable import Variable
 from .File import File
 from pathlib import Path
+import tempfile
 
 from ..common.api_request import make_request, make_paginated_request
 from ..common.list_rows import list_rows
@@ -367,6 +368,61 @@ class Query(Base):
             max_parallelization=max_parallelization,
             progress=progress,
         )
+
+    def to_stata(self):
+        import pyarrow as pa
+        from pystata import stata
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            load_script_res = make_request(
+                method="GET",
+                path=f"{self.uri}/script",
+                query={"type": "stata", "filePath": f"{tmpdirname}/part-0.csv"},
+                parse_response=False,
+            )
+            ds = self.to_arrow_dataset()
+            pa.dataset.write_dataset(
+                ds,
+                base_dir=tmpdirname,
+                existing_data_behavior="overwrite_or_ignore",
+                basename_template="part-{i}.csv",
+                format="csv",
+            )
+            stata.run("clear")
+            stata.run(load_script_res.text, quietly=True)
+            stata.run("describe")
+
+    def to_sas(self, name=None):
+        if name is None:
+            raise Exception(
+                'A SAS dataset name must be provided. E.g., query.to_sas("mydata")'
+            )
+        import pyarrow as pa
+        import saspy
+        from IPython import get_ipython
+
+        ip = get_ipython()
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            load_script_res = make_request(
+                method="GET",
+                path=f"{self.uri}/script",
+                query={
+                    "type": "sas",
+                    "filePath": f"{tmpdirname}/part-0.csv",
+                    "sasDatasetName": name,
+                },
+                parse_response=False,
+            )
+            ds = self.to_arrow_dataset()
+            pa.dataset.write_dataset(
+                ds,
+                base_dir=tmpdirname,
+                existing_data_behavior="overwrite_or_ignore",
+                basename_template="part-{i}.csv",
+                format="csv",
+            )
+            ip.run_cell_magic("SAS", "", load_script_res.text)
 
     def _initiate(self):
         if not self.did_initiate:
