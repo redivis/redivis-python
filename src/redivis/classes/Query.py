@@ -424,7 +424,9 @@ class Query(Base):
                 basename_template="part-{i}.csv",
                 format="csv",
             )
-            ip.run_cell_magic("SAS", "", load_script_res.text)
+            load_script = load_script_res.text
+            print(load_script)
+            ip.run_cell_magic("SAS", "", load_script)
 
     def _initiate(self):
         if not self.did_initiate:
