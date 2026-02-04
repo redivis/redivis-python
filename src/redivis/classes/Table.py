@@ -335,6 +335,7 @@ class Table(Base):
             progress=progress,
         )
 
+    # TODO: prefix? Need to handle table.directory
     def to_directory(
         self, *, file_id_variable="file_id", file_name_variable="file_name"
     ):
