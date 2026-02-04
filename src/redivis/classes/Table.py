@@ -725,6 +725,10 @@ class Table(Base):
 
         ip = get_ipython()
 
+        # TODO: if geospatial data, download as a shapefile and load to SAS
+        # SAS:
+        #   proc mapimport datafile="/scratch/df/out.shp" out='<dataset_name>';
+        #   run;
         with tempfile.TemporaryDirectory() as tmpdirname:
             # IMPORTANT: SAS is running as a separate user, need to make sure the directory is readable
             os.chmod(tmpdirname, 0o755)

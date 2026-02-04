@@ -110,6 +110,19 @@ class Directory(Base):
         # If we finished traversing parts without returning, we resolved to a directory
         return node
 
+    def mount(self, path=None, foreground=True):
+        from ..common.mount_directory import mount_directory
+
+        if path is None:
+            default_name = (
+                self.table.properties["name"] if self.parent is None else self.name
+            )
+            path = Path.cwd() / default_name
+        elif isinstance(path, str):
+            path = Path(path)
+
+        mount_directory(self, path, foreground=foreground)
+
     def download_files(
         self,
         path=None,
