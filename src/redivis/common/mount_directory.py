@@ -84,34 +84,36 @@ class RedivisFS(Operations):
 
     def read(self, path, length, offset, fh):
         """Read from a file"""
-        if fh not in self._file_handles:
-            raise FuseOSError(errno.EBADF)
+        with self._fh_lock:
+            if fh not in self._file_handles:
+                raise FuseOSError(errno.EBADF)
 
-        handle = self._file_handles[fh]
-        node = handle["node"]
+            handle = self._file_handles[fh]
+            node = handle["node"]
 
-        try:
-            # Create or reuse stream
-            if not handle["stream"] or handle["position"] != offset:
-                if handle["stream"]:
-                    handle["stream"].close()
-                handle["stream"] = node.stream(start_byte=offset)
-                handle["position"] = offset
+            try:
+                # Create or reuse stream
+                if not handle["stream"] or handle["position"] != offset:
+                    if handle["stream"]:
+                        handle["stream"].close()
+                    handle["stream"] = node.stream(start_byte=offset)
+                    handle["position"] = offset
 
-            data = handle["stream"].read(length)
-            handle["position"] += len(data)
-            return data
+                data = handle["stream"].read(length)
+                handle["position"] += len(data)
+                return data
 
-        except Exception as e:
-            raise FuseOSError(errno.EIO)
+            except Exception:
+                raise FuseOSError(errno.EIO)
 
     def release(self, path, fh):
         """Close a file"""
-        if fh in self._file_handles:
-            handle = self._file_handles[fh]
-            if handle["stream"]:
-                handle["stream"].close()
-            del self._file_handles[fh]
+        with self._fh_lock:
+            if fh in self._file_handles:
+                handle = self._file_handles[fh]
+                if handle["stream"]:
+                    handle["stream"].close()
+                del self._file_handles[fh]
         return 0
 
     def statfs(self, path):
