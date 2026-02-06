@@ -3,8 +3,6 @@ import io
 import warnings
 from base64 import b64decode
 from pathlib import Path
-import re
-import urllib
 import time
 from requests import RequestException
 from urllib3.exceptions import HTTPError

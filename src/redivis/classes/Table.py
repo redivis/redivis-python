@@ -1,18 +1,14 @@
 from urllib.parse import quote as quote_uri
-import warnings
 import os
 import time
 import glob
 import concurrent.futures
 from tqdm.auto import tqdm
-from pathlib import Path
-from contextlib import closing
 
 
 from .Upload import Upload
 from .Export import Export
 from .Variable import Variable
-from .File import File
 from ..common.TabularReader import TabularReader
 from ..common.api_request import make_request, make_paginated_request
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload

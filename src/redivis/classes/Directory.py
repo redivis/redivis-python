@@ -11,17 +11,14 @@ from tqdm.auto import tqdm
 from threading import Event
 from typing import Literal, Optional, List, Union
 
-from .Query import Query
-from .Table import Table
-
 
 class Directory(Base):
     def __init__(
         self,
         *,
         path: Union[str, Path],
-        table: Optional[Table] = None,
-        query: Optional[Query] = None,
+        table: Optional["Table"] = None,
+        query: Optional["Query"] = None,
         parent: Optional["Directory"] = None,
     ) -> None:
         if not table and not query:
@@ -72,6 +69,7 @@ class Directory(Base):
         return children
 
     def get(self, path: Union[str, Path]) -> Union["Directory", File, None]:
+        # This is to handle the case when the file was constructed via a file id, in legacy code
         if isinstance(path, str):
             # TODO: remove this after a bit
             split = path.split(".")
@@ -101,15 +99,10 @@ class Directory(Base):
         else:
             return None
 
-        # Attempt to make input_path relative to this directory's path if absolute/anchored
-        try:
-            if input_path.is_absolute() or input_path.anchor:
-                relative = input_path.relative_to(self.path)
-            else:
-                relative = input_path
-        except Exception:
-            # Not under this directory
-            return None
+        if input_path.is_absolute() or input_path.anchor:
+            relative = input_path.relative_to(self.path)
+        else:
+            relative = input_path
 
         parts = list(relative.parts)
         if not parts:
@@ -135,14 +128,18 @@ class Directory(Base):
             # Walk into children
             child = node.children.get(part)
             if not child:
-                return None
+                raise FileNotFoundError(
+                    f"No such file or directory `{self.path / path}`"
+                )
             if isinstance(child, Directory):
                 node = child
             else:
                 # Must be the last part to match a file
                 if idx == len(parts) - 1:
                     return child
-                return None
+                raise FileNotFoundError(
+                    f"No such file or directory `{self.path / path}`"
+                )
 
         # If we finished traversing parts without returning, we resolved to a directory
         return node

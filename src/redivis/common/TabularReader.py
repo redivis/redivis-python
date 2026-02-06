@@ -11,6 +11,7 @@ from ..common.list_rows import list_rows
 from ..common.api_request import make_request, make_paginated_request
 from ..common.util import get_warning
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Literal
+from datetime import datetime, timezone
 
 
 class TabularReader(Base):
@@ -19,7 +20,9 @@ class TabularReader(Base):
         self._is_query = is_query
         self._is_upload = is_upload
         self.uri = None
+        self.directory = None
         self.properties = {}
+        self.cached_directory_timestamp = None
 
     # TODO: prefix? pattern? Don't cache if these are present
     def to_directory(
@@ -32,15 +35,26 @@ class TabularReader(Base):
         if self._is_upload:
             raise Exception("Listing files on uploads is not currently supported")
 
+        if self.directory:
+            # Queries are immutable, always use the cached version
+            if self._is_query:
+                return self.directory
+
         from ..classes.Directory import Directory
         import pyarrow
 
         check_is_ready(self)
+        # Compute this here, to get the timestamp before the request was sent
+        gmt_timestamp = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        headers = {}
+        if self.cached_directory_timestamp:
+            headers["If-Modified-Since"] = self.cached_directory_timestamp
 
         with closing(
             make_request(
                 method="get",
                 path=f"{self.uri}/rawFiles",
+                headers=headers,
                 query={
                     "format": "arrow",
                     "fileIdVariable": file_id_variable,
@@ -50,7 +64,14 @@ class TabularReader(Base):
                 parse_response=False,
             )
         ) as res:
-            directory = Directory(path=Path(""), query=self)
+            if res.status_code == 304:
+                return self.directory
+
+            directory = Directory(
+                path=Path(""),
+                query=self if self._is_query else None,
+                table=self if self._is_table else None,
+            )
 
             for file_spec in (
                 pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
@@ -66,13 +87,17 @@ class TabularReader(Base):
                 )
 
             self.directory = directory
+            self.cached_directory_timestamp = gmt_timestamp
             return self.directory
 
     def file(self, path: Union[str, Path]) -> Optional[File]:
         if not self.directory:
             self.to_directory()
 
-        return self.directory.get(path)
+        node = self.directory.get(path)
+        if isinstance(node, Directory):
+            raise Exception(f"{path} is a directory, not a file")
+        return node
 
     def list_files(
         self,
