@@ -1,3 +1,5 @@
+import warnings
+
 from .Base import Base
 import os
 from pathlib import Path
@@ -12,6 +14,7 @@ class Directory(Base):
     def __init__(self, *, path, table=None, query=None, parent=None):
         if not table and not query:
             raise ValueError("All directories must either belong to a table or query.")
+
         self.path = path
         self.name = Path(path).name
         self.table = table
@@ -23,39 +26,55 @@ class Directory(Base):
     def __repr__(self) -> str:
         return f"<Dir {str(self.path)}/>"
 
-    def list(self, *, recursive=False, max_results=None):
+    def list(
+        self,
+        *,
+        recursive=False,
+        max_results=None,
+        files=True,
+        directories=True,
+    ):
+        if max_results is None:
+            max_results = float("inf")
+
         children = []
-        counter = 0
         # TODO: support glob pattern? or regex?
         for child in self.children.values():
-            if recursive and isinstance(child, Directory):
-                children.append(child)
-                children.extend(child.list(recursive=True))
-            else:
-                children.append(child)
-            counter += 1
-            if max_results is not None and counter >= max_results:
+            if len(children) >= max_results:
                 break
+            if recursive and isinstance(child, Directory):
+                if directories:
+                    children.append(child)
+                children.extend(
+                    child.list(recursive=True, max_results=max_results - len(children))
+                )
+            else:
+                if files:
+                    children.append(child)
         return children
 
-    def list_files(self, *, recursive=True, max_results=None):
-        # TODO: support glob pattern? or regex?
-        # if pattern and not re.match(pattern, str(file_relative_path)):
-        #     continue
-        files = []
-        counter = 0
-        for child in self.children.values():
-            if isinstance(child, Directory):
-                if recursive:
-                    files.extend(child.list_files(recursive=True))
-            else:
-                files.append(child)
-            counter += 1
-            if max_results is not None and counter >= max_results:
-                break
-        return files
-
     def get(self, path):
+        if isinstance(path, str):
+            # TODO: remove this after a bit
+            split = path.split(".")
+            client_id = split[0]
+            if (
+                len(split) == 2
+                and len(client_id) == 14
+                and len(client_id.split("-")) == 2
+                and len(client_id.split("-")[0]) == 4
+            ):
+                warnings.warn(
+                    "Passing file ids is deprecated, please use file names instead. E.g.: table.file('filename.csv')",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+                files = self.list(recursive=True, directories=False)
+                for f in files:
+                    if f.id == path:
+                        return f
+                return None
+
         # Normalize input to a Path
         if isinstance(path, str):
             input_path = Path(path)
@@ -110,7 +129,14 @@ class Directory(Base):
         # If we finished traversing parts without returning, we resolved to a directory
         return node
 
-    def mount(self, path=None, foreground=True):
+    def mount(self, path=None, foreground=False):
+        if (
+            os.getenv("REDIVIS_NOTEBOOK_ID") is not None
+            and os.getenv("REDIVIS_NOTEBOOK_ENABLE_FUSE") != "TRUE"
+        ):
+            raise RuntimeError(
+                "Mounting directories is not supported within the default Redivis Notebooks. You must configure a custom machine to call directory.mount()"
+            )
         from ..common.mount_directory import mount_directory
 
         if path is None:
@@ -123,14 +149,13 @@ class Directory(Base):
 
         mount_directory(self, path, foreground=foreground)
 
-    def download_files(
+    def download(
         self,
         path=None,
         *,
         max_results=None,
         max_parallelization=None,
         overwrite=False,
-        recursive=True,
         progress=True,
     ):
         if isinstance(path, str):
@@ -156,9 +181,7 @@ class Directory(Base):
             ),
         ) as executor:
             futures = []
-            files_to_download = self.list_files(
-                recursive=recursive, max_results=max_results
-            )
+            files_to_download = self.list(directories=False, max_results=max_results)
 
             file_count = 0
             total_bytes = 0

@@ -9,15 +9,9 @@ import pathlib
 import uuid
 from tqdm.auto import tqdm
 
-from ..common.util import (
-    get_geography_variable,
-    get_warning,
-    arrow_table_to_pandas,
-    convert_data_to_parquet,
-)
-from ..common.list_rows import list_rows
+from ..common.TabularReader import TabularReader
+from ..common.util import convert_data_to_parquet
 
-from .Base import Base
 from .Variable import Variable
 from ..common.api_request import make_request, make_paginated_request
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
@@ -26,7 +20,7 @@ MAX_SIMPLE_UPLOAD_SIZE = 2**20  # 1MB
 MIN_RESUMABLE_UPLOAD_SIZE = 2**25  # 32MB
 
 
-class Upload(Base):
+class Upload(TabularReader):
     def __init__(
         self,
         name,
@@ -34,6 +28,7 @@ class Upload(Base):
         table,
         properties=None,
     ):
+        super().__init__(is_upload=True)
         self.table = table
         self.name = name
         self.uri = (
@@ -43,12 +38,66 @@ class Upload(Base):
         )
         self.properties = properties
 
+    def delete(self):
+        make_request(
+            method="DELETE",
+            path=self.uri,
+        )
+
+    def exists(self):
+        try:
+            make_request(method="HEAD", path=self.uri)
+            return True
+        except Exception as err:
+            if err.args[0]["status"] != 404:
+                raise err
+            return False
+
+    def get(self):
+        self.properties = make_request(
+            method="GET",
+            path=self.uri,
+        )
+        self.uri = self.properties["uri"]
+
+    def insert_rows(self, rows, *, update_schema=False):
+        response = make_request(
+            method="POST",
+            path=f"{self.uri}/rows",
+            payload={"rows": rows, "updateSchema": update_schema},
+        )
+        return response
+
+    def list_variables(self, *, max_results=10000):
+        variables = make_paginated_request(
+            path=f"{self.uri}/variables", page_size=1000, max_results=max_results
+        )
+        return [
+            Variable(variable["name"], properties=variable, upload=self)
+            for variable in variables
+        ]
+
+    def variable(self, name):
+        return Variable(name, upload=self)
+
     def create(
         self,
         content=None,
+        # content can be:
+        # - a file path (string or pathlib.Path)
+        # - a file-like object (has a .read() method)
+        # - raw bytes or a bytearray
+        # - one of the data types returned by the to_ methods
+        # - None (in which case, a transfer specification must be provided)
+        # - TODO: a directory path (string or pathlib.Path)
+        # - TODO: a Redivis Directory
+        # - TODO: a Redivis File
+        # - TODO: a Redivis Query (need BE support)
+        # - TODO: a Redivis Table
+        # - TODO: an array of any of the above, except for tables + queries
         *,
         data=None,
-        type=None,
+        type=None,  # TODO: add rawFiles (doesn't support Table or Query)
         transfer_specification=None,
         delimiter=None,
         schema=None,
@@ -248,304 +297,3 @@ class Upload(Base):
             raise Exception(str(e))
 
         return self
-
-    def delete(self):
-        make_request(
-            method="DELETE",
-            path=self.uri,
-        )
-
-    def exists(self):
-        try:
-            make_request(method="HEAD", path=self.uri)
-            return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
-            return False
-
-    def get(self):
-        self.properties = make_request(
-            method="GET",
-            path=self.uri,
-        )
-        self.uri = self.properties["uri"]
-
-    def insert_rows(self, rows, *, update_schema=False):
-        response = make_request(
-            method="POST",
-            path=f"{self.uri}/rows",
-            payload={"rows": rows, "updateSchema": update_schema},
-        )
-        return response
-
-    def list_variables(self, *, max_results=10000):
-        variables = make_paginated_request(
-            path=f"{self.uri}/variables", page_size=1000, max_results=max_results
-        )
-        return [
-            Variable(variable["name"], properties=variable, upload=self)
-            for variable in variables
-        ]
-
-    def to_arrow_dataset(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_dataset",
-            progress=progress,
-            coerce_schema=True,
-            batch_preprocessor=batch_preprocessor,
-            max_parallelization=max_parallelization,
-        )
-
-    def to_arrow_table(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_table",
-            progress=progress,
-            coerce_schema=True,
-            batch_preprocessor=batch_preprocessor,
-            max_parallelization=max_parallelization,
-        )
-
-    def to_polars_lazyframe(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="polars_lazyframe",
-            progress=progress,
-            coerce_schema=True,
-            batch_preprocessor=batch_preprocessor,
-            max_parallelization=max_parallelization,
-        )
-
-    def to_dask_dataframe(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="dask_dataframe",
-            progress=progress,
-            coerce_schema=True,
-            batch_preprocessor=batch_preprocessor,
-            max_parallelization=max_parallelization,
-        )
-
-    def to_pandas_dataframe(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        dtype_backend="pyarrow",
-        date_as_object=False,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        arrow_table = list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_table",
-            progress=progress,
-            coerce_schema=True,
-            batch_preprocessor=batch_preprocessor,
-            max_parallelization=max_parallelization,
-        )
-        return arrow_table_to_pandas(
-            arrow_table, dtype_backend, date_as_object, max_parallelization
-        )
-
-    def to_geopandas_dataframe(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        geography_variable="",
-        progress=True,
-        dtype_backend="pyarrow",
-        date_as_object=False,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        import geopandas
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        arrow_table = list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_table",
-            progress=progress,
-            coerce_schema=True,
-            batch_preprocessor=batch_preprocessor,
-            max_parallelization=max_parallelization,
-        )
-
-        df = arrow_table_to_pandas(
-            arrow_table, dtype_backend, date_as_object, max_parallelization
-        )
-
-        if geography_variable is not None:
-            geography_variable = get_geography_variable(
-                mapped_variables, geography_variable
-            )
-            if geography_variable is None:
-                raise Exception(
-                    'Unable to find a variable with type=="geography" in the query results'
-                )
-
-        if geography_variable is not None:
-            df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(
-                df[geography_variable["name"]]
-            )
-            df = geopandas.GeoDataFrame(
-                data=df, geometry=geography_variable["name"], crs="EPSG:4326"
-            )
-
-        return df
-
-    def to_dataframe(
-        self, max_results=None, *, variables=None, geography_variable="", progress=True
-    ):
-        warnings.warn(get_warning("dataframe_deprecation"), FutureWarning, stacklevel=2)
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        arrow_table = list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_table",
-            progress=progress,
-            coerce_schema=True,
-        )
-
-        df = arrow_table.to_pandas(self_destruct=True)
-
-        if geography_variable is not None:
-            geography_variable = get_geography_variable(
-                mapped_variables, geography_variable
-            )
-
-        if geography_variable is not None:
-            import geopandas
-
-            warnings.warn(
-                get_warning("geodataframe_deprecation"), FutureWarning, stacklevel=2
-            )
-            df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(
-                df[geography_variable["name"]]
-            )
-            df = geopandas.GeoDataFrame(
-                data=df, geometry=geography_variable["name"], crs="EPSG:4326"
-            )
-
-        return df
-
-    def to_arrow_batch_iterator(
-        self, max_results=None, *, variables=None, progress=True
-    ):
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        return list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_iterator",
-            progress=progress,
-            coerce_schema=True,
-        )
-
-    def list_rows(self, max_results=None, *, variables=None, progress=True):
-        warnings.warn(
-            "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
-            FutureWarning,
-            stacklevel=2,
-        )
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        return list_rows(
-            uri=self.uri,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="tuple",
-            progress=progress,
-            coerce_schema=True,
-        )
-
-    def variable(self, name):
-        return Variable(name, upload=self)
-
-
-def get_mapped_variables(variables, uri):
-    all_variables = make_paginated_request(path=f"{uri}/variables", page_size=1000)
-
-    if variables is None:
-        return all_variables
-    else:
-        lower_variable_names = [variable.lower() for variable in variables]
-        variables_list = list(
-            filter(
-                lambda variable: variable["name"].lower() in lower_variable_names,
-                all_variables,
-            )
-        )
-        variables_list.sort(
-            key=lambda variable: lower_variable_names.index(variable["name"].lower())
-        )
-        return variables_list

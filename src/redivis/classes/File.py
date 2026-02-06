@@ -115,6 +115,14 @@ class File(Base):
             return r.content
 
     def stream(self, *, start_byte=0, end_byte=None):
+        warnings.warn(
+            "file.stream() has been deprecated, please use file.open() instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return self.open(start_byte=start_byte, end_byte=end_byte)
+
+    def open(self, *, start_byte=0, end_byte=None):
         if start_byte:
             start_byte = int(start_byte)
         if end_byte:
@@ -307,20 +315,3 @@ class Stream(io.BufferedIOBase):
             self.response.close()
             raise StopIteration
         return chunk
-
-
-def get_filename(s):
-    fname = re.findall("filename\*=([^;]+)", s, flags=re.IGNORECASE)
-    if not len(fname):
-        fname = re.findall("filename=([^;]+)", s, flags=re.IGNORECASE)
-
-    if len(fname) and "utf-8''" in fname[0].lower():
-        fname = re.sub("utf-8''", "", fname[0], flags=re.IGNORECASE)
-        fname = urllib.unquote(fname).decode("utf8")
-    elif len(fname):
-        fname = fname[0]
-    else:
-        fname = ""
-
-    # clean space and double quotes
-    return fname.strip().strip('"')
