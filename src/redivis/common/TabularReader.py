@@ -4,11 +4,13 @@ import warnings
 import os
 import tempfile
 from ..classes.File import File
+from ..classes.Directory import Directory
 from pathlib import Path
 from contextlib import closing
 from ..common.list_rows import list_rows
 from ..common.api_request import make_request, make_paginated_request
 from ..common.util import get_warning
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Literal
 
 
 class TabularReader(Base):
@@ -21,8 +23,11 @@ class TabularReader(Base):
 
     # TODO: prefix? pattern? Don't cache if these are present
     def to_directory(
-        self, *, file_id_variable="file_id", file_name_variable="file_name"
-    ):
+        self,
+        *,
+        file_id_variable: str = "file_id",
+        file_name_variable: str = "file_name",
+    ) -> Directory:
         # TODO: add file / directory methods to uploads
         if self._is_upload:
             raise Exception("Listing files on uploads is not currently supported")
@@ -63,7 +68,7 @@ class TabularReader(Base):
             self.directory = directory
             return self.directory
 
-    def file(self, path):
+    def file(self, path: Union[str, Path]) -> Optional[File]:
         if not self.directory:
             self.to_directory()
 
@@ -71,30 +76,30 @@ class TabularReader(Base):
 
     def list_files(
         self,
-        max_results=None,
+        max_results: Optional[int] = None,
         *,
-        file_id_variable="file_id",
-        file_name_variable="file_name",
-    ):
+        file_id_variable: str = "file_id",
+        file_name_variable: str = "file_name",
+    ) -> List[File]:
         if not self.directory:
             self.to_directory(
                 file_id_variable=file_id_variable, file_name_variable=file_name_variable
             )
 
         return self.directory.list(
-            directories=False, recursive=True, max_results=max_results
+            mode="files", recursive=True, max_results=max_results
         )
 
     def download_files(
         self,
-        path=None,
-        overwrite=False,
-        max_results=None,
-        file_id_variable=None,
-        file_name_variable=None,
-        progress=True,
-        max_parallelization=None,
-    ):
+        path: Optional[Union[str, Path]] = None,
+        overwrite: bool = False,
+        max_results: Optional[int] = None,
+        file_id_variable: Optional[str] = None,
+        file_name_variable: Optional[str] = None,
+        progress: bool = True,
+        max_parallelization: Optional[int] = None,
+    ) -> None:
         warnings.warn(
             "This method is deprecated. Please use to_directory().download() instead",
             FutureWarning,
@@ -115,13 +120,13 @@ class TabularReader(Base):
 
     def to_arrow_dataset(
         self,
-        max_results=None,
+        max_results: Optional[int] = None,
         *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+        batch_preprocessor: Optional[Any] = None,
+        max_parallelization: int = os.cpu_count(),
+    ) -> Any:
         check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -141,13 +146,13 @@ class TabularReader(Base):
 
     def to_arrow_table(
         self,
-        max_results=None,
+        max_results: Optional[int] = None,
         *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+        batch_preprocessor: Optional[Any] = None,
+        max_parallelization: int = os.cpu_count(),
+    ) -> Any:
         check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -167,13 +172,13 @@ class TabularReader(Base):
 
     def to_polars_lazyframe(
         self,
-        max_results=None,
+        max_results: Optional[int] = None,
         *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+        batch_preprocessor: Optional[Any] = None,
+        max_parallelization: int = os.cpu_count(),
+    ) -> Any:
         check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -193,13 +198,13 @@ class TabularReader(Base):
 
     def to_dask_dataframe(
         self,
-        max_results=None,
+        max_results: Optional[int] = None,
         *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+        batch_preprocessor: Optional[Any] = None,
+        max_parallelization: int = os.cpu_count(),
+    ) -> Any:
         check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -219,15 +224,15 @@ class TabularReader(Base):
 
     def to_pandas_dataframe(
         self,
-        max_results=None,
+        max_results: Optional[int] = None,
         *,
-        variables=None,
-        progress=True,
-        dtype_backend="pyarrow",
-        date_as_object=False,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+        dtype_backend: str = "pyarrow",
+        date_as_object: bool = False,
+        batch_preprocessor: Optional[Any] = None,
+        max_parallelization: int = os.cpu_count(),
+    ) -> Any:
         check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -250,16 +255,16 @@ class TabularReader(Base):
 
     def to_geopandas_dataframe(
         self,
-        max_results=None,
+        max_results: Optional[int] = None,
         *,
-        variables=None,
-        geography_variable="",
-        progress=True,
-        dtype_backend="pyarrow",
-        date_as_object=False,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
+        variables: Optional[Iterable[str]] = None,
+        geography_variable: Union[str, None, Literal[""]] = "",
+        progress: bool = True,
+        dtype_backend: str = "pyarrow",
+        date_as_object: bool = False,
+        batch_preprocessor: Optional[Any] = None,
+        max_parallelization: int = os.cpu_count(),
+    ) -> Any:
         import geopandas
 
         check_is_ready(self)
@@ -303,8 +308,13 @@ class TabularReader(Base):
         return df
 
     def to_dataframe(
-        self, max_results=None, *, variables=None, geography_variable="", progress=True
-    ):
+        self,
+        max_results: Optional[int] = None,
+        *,
+        variables: Optional[Iterable[str]] = None,
+        geography_variable: Union[str, None, Literal[""]] = "",
+        progress: bool = True,
+    ) -> Any:
         warnings.warn(get_warning("dataframe_deprecation"), FutureWarning, stacklevel=2)
 
         check_is_ready(self)
@@ -345,8 +355,12 @@ class TabularReader(Base):
         return df
 
     def to_arrow_batch_iterator(
-        self, max_results=None, *, variables=None, progress=True
-    ):
+        self,
+        max_results: Optional[int] = None,
+        *,
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+    ) -> Iterable[Any]:
         check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -363,15 +377,15 @@ class TabularReader(Base):
 
     def to_sas(
         self,
-        name=None,
-        max_results=None,
+        name: Optional[str] = None,
+        max_results: Optional[int] = None,
         *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-        geography_variable="",
-    ):
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+        batch_preprocessor: Optional[Any] = None,
+        max_parallelization: int = os.cpu_count(),
+        geography_variable: Union[str, None, Literal[""]] = "",
+    ) -> None:
         check_is_ready(self)
         if not name:
             raise Exception(
@@ -449,14 +463,14 @@ class TabularReader(Base):
 
     def to_stata(
         self,
-        max_results=None,
+        max_results: Optional[int] = None,
         *,
-        geography_variable="",
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
+        geography_variable: Union[str, None, Literal[""]] = "",
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+        batch_preprocessor: Optional[Any] = None,
+        max_parallelization: int = os.cpu_count(),
+    ) -> None:
         check_is_ready(self)
         import pyarrow as pa
         from pystata import stata
@@ -520,7 +534,13 @@ class TabularReader(Base):
             stata.run(load_script, quietly=True)
             stata.run("describe")
 
-    def list_rows(self, max_results=None, *, variables=None, progress=True):
+    def list_rows(
+        self,
+        max_results: Optional[int] = None,
+        *,
+        variables: Optional[Iterable[str]] = None,
+        progress: bool = True,
+    ) -> Iterable[Tuple[Any, ...]]:
         warnings.warn(
             "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
             FutureWarning,
@@ -542,7 +562,7 @@ class TabularReader(Base):
         )
 
 
-def check_is_ready(self):
+def check_is_ready(self: TabularReader) -> None:
     if self._is_query:
         self._wait_for_finish()
     elif self._is_table:
@@ -550,7 +570,9 @@ def check_is_ready(self):
             self.get()
 
 
-def get_mapped_variables(self, variables):
+def get_mapped_variables(
+    self: TabularReader, variables: Optional[Iterable[str]]
+) -> Tuple[List[Dict[str, Any]], bool]:
     coerce_schema = False  # queries and uploads will always have the correct tyeps
     if self._is_query:
         return self.properties.get("outputSchema"), coerce_schema
@@ -577,8 +599,8 @@ def get_mapped_variables(self, variables):
 
 
 def arrow_table_to_pandas(
-    arrow_table, dtype_backend, date_as_object, max_parallelization
-):
+    arrow_table: Any, dtype_backend: str, date_as_object: bool, max_parallelization: int
+) -> Any:
     import pandas as pd
     import pyarrow as pa
 
@@ -609,7 +631,10 @@ def arrow_table_to_pandas(
     return df
 
 
-def get_geography_variable(variables, geography_variable_name):
+def get_geography_variable(
+    variables: List[Dict[str, Any]],
+    geography_variable_name: Union[str, None, Literal[""]],
+) -> Optional[Dict[str, Any]]:
     if geography_variable_name == "":
         for variable in variables:
             if variable["type"] == "geography":
@@ -622,11 +647,11 @@ def get_geography_variable(variables, geography_variable_name):
                 return variable
 
         raise Exception(
-            f"The specified geography variable '{geography_variable_name()}' could not be found"
+            f"The specified geography variable '{geography_variable_name}' could not be found"
         )
 
 
-def should_use_export_api(self):
+def should_use_export_api(self: TabularReader) -> bool:
     if not self._is_table:
         return False
     if not self.properties or "numBytes" not in self.properties:

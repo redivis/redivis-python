@@ -1,6 +1,7 @@
 import warnings
 
 from .Base import Base
+from .File import File
 import os
 from pathlib import Path
 
@@ -8,10 +9,21 @@ import time
 import concurrent.futures
 from tqdm.auto import tqdm
 from threading import Event
+from typing import Literal, Optional, List, Union
+
+from .Query import Query
+from .Table import Table
 
 
 class Directory(Base):
-    def __init__(self, *, path, table=None, query=None, parent=None):
+    def __init__(
+        self,
+        *,
+        path: Union[str, Path],
+        table: Optional[Table] = None,
+        query: Optional[Query] = None,
+        parent: Optional["Directory"] = None,
+    ) -> None:
         if not table and not query:
             raise ValueError("All directories must either belong to a table or query.")
 
@@ -28,32 +40,38 @@ class Directory(Base):
 
     def list(
         self,
+        mode: Literal["all", "files", "directories"] = "all",
         *,
-        recursive=False,
-        max_results=None,
-        files=True,
-        directories=True,
-    ):
+        recursive: bool = False,
+        max_results: Optional[int] = None,
+    ) -> List[Union["Directory", File]]:
         if max_results is None:
             max_results = float("inf")
-
-        children = []
+        children: List[Union["Directory", File]] = []
         # TODO: support glob pattern? or regex?
         for child in self.children.values():
             if len(children) >= max_results:
                 break
             if recursive and isinstance(child, Directory):
-                if directories:
+                if mode == "all" or mode == "directories":
                     children.append(child)
                 children.extend(
-                    child.list(recursive=True, max_results=max_results - len(children))
+                    child.list(
+                        mode,
+                        recursive=True,
+                        max_results=max_results - len(children),
+                    )
                 )
             else:
-                if files:
+                if (
+                    mode == "all"
+                    or (mode == "files" and isinstance(child, File))
+                    or (mode == "directories" and isinstance(child, Directory))
+                ):
                     children.append(child)
         return children
 
-    def get(self, path):
+    def get(self, path: Union[str, Path]) -> Union["Directory", File, None]:
         if isinstance(path, str):
             # TODO: remove this after a bit
             split = path.split(".")
@@ -69,7 +87,7 @@ class Directory(Base):
                     FutureWarning,
                     stacklevel=2,
                 )
-                files = self.list(recursive=True, directories=False)
+                files = self.list(mode="files", recursive=True)
                 for f in files:
                     if f.id == path:
                         return f
@@ -129,7 +147,9 @@ class Directory(Base):
         # If we finished traversing parts without returning, we resolved to a directory
         return node
 
-    def mount(self, path=None, foreground=False):
+    def mount(
+        self, path: Optional[Union[str, Path]] = None, foreground: bool = False
+    ) -> None:
         if (
             os.getenv("REDIVIS_NOTEBOOK_ID") is not None
             and os.getenv("REDIVIS_NOTEBOOK_ENABLE_FUSE") != "TRUE"
@@ -151,13 +171,13 @@ class Directory(Base):
 
     def download(
         self,
-        path=None,
+        path: Optional[Union[str, Path]] = None,
         *,
-        max_results=None,
-        max_parallelization=None,
-        overwrite=False,
-        progress=True,
-    ):
+        max_results: Optional[int] = None,
+        max_parallelization: Optional[int] = None,
+        overwrite: bool = False,
+        progress: bool = True,
+    ) -> None:
         if isinstance(path, str):
             path = Path(path)
         if path is None:
@@ -181,7 +201,7 @@ class Directory(Base):
             ),
         ) as executor:
             futures = []
-            files_to_download = self.list(directories=False, max_results=max_results)
+            files_to_download = self.list(mode="files", max_results=max_results)
 
             file_count = 0
             total_bytes = 0
@@ -198,7 +218,7 @@ class Directory(Base):
                 disable=not progress,
             )
 
-            def on_progress(chunk_bytes: int):
+            def on_progress(chunk_bytes: int) -> None:
                 pbar.update(chunk_bytes)
 
             # Create and submit download tasks with per-file progress callbacks
@@ -244,7 +264,7 @@ class Directory(Base):
                 executor.shutdown(wait=True, cancel_futures=True)
                 pbar.close()
 
-    def _add_file(self, file):
+    def _add_file(self, file: File) -> None:
         relative_path_parts = file.path.relative_to(self.path).parts
 
         if len(relative_path_parts) == 1:
