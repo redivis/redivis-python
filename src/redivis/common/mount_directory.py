@@ -2,7 +2,6 @@ import os
 import stat
 import errno
 import threading
-from pathlib import Path
 
 
 from mfusepy import FUSE, FuseOSError, Operations
@@ -95,7 +94,7 @@ class RedivisFS(Operations):
             if not handle["stream"] or handle["position"] != offset:
                 if handle["stream"]:
                     handle["stream"].close()
-                handle["stream"] = node.stream(start_byte=offset)
+                handle["stream"] = node.open(start_byte=offset)
                 handle["position"] = offset
 
             data = handle["stream"].read(length)

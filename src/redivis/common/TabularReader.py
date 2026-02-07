@@ -28,8 +28,8 @@ class TabularReader(Base):
     def to_directory(
         self,
         *,
-        file_id_variable: str = "file_id",
-        file_name_variable: str = "file_name",
+        file_id_variable: Optional[str] = None,
+        file_name_variable: Optional[str] = None,
     ) -> Directory:
         # TODO: add file / directory methods to uploads
         if self._is_upload:
@@ -68,7 +68,7 @@ class TabularReader(Base):
                 return self.directory
 
             directory = Directory(
-                path=Path(""),
+                path=Path("/"),
                 query=self if self._is_query else None,
                 table=self if self._is_table else None,
             )
@@ -78,9 +78,10 @@ class TabularReader(Base):
             ):
                 directory._add_file(
                     File(
-                        file_spec[file_id_variable],
-                        file_spec[file_name_variable],
-                        query=self,
+                        file_spec["file_id"],
+                        file_spec[file_name_variable or "file_name"],
+                        query=self if self._is_query else None,
+                        table=self if self._is_table else None,
                         properties=file_spec,
                         directory=directory,
                     )
@@ -90,7 +91,7 @@ class TabularReader(Base):
             self.cached_directory_timestamp = gmt_timestamp
             return self.directory
 
-    def file(self, path: Union[str, Path]) -> Optional[File]:
+    def file(self, path: Union[str, Path]) -> File:
         if not self.directory:
             self.to_directory()
 
@@ -103,8 +104,8 @@ class TabularReader(Base):
         self,
         max_results: Optional[int] = None,
         *,
-        file_id_variable: str = "file_id",
-        file_name_variable: str = "file_name",
+        file_id_variable: Optional[str] = None,
+        file_name_variable: Optional[str] = None,
     ) -> List[File]:
         if not self.directory:
             self.to_directory(
@@ -429,7 +430,7 @@ class TabularReader(Base):
             if geography_variable == "":
                 variables = make_paginated_request(
                     path=f"{self.uri}/variables",
-                    query={type: "geography"},
+                    query={"type": "geography"},
                     max_results=2,
                 )
                 if len(variables) > 1:
@@ -481,7 +482,7 @@ class TabularReader(Base):
                     batch_preprocessor=batch_preprocessor,
                     max_parallelization=max_parallelization,
                 )
-                geopandas_df.to_file(f"${tmpdirname}/out.shp")
+                geopandas_df.to_file(f"{tmpdirname}/out.shp")
                 load_script = f"""proc mapimport datafile="{tmpdirname}/out.shp" out='{name}';\nrun;"""
 
             ip.run_cell_magic("SAS", "", load_script)
@@ -504,7 +505,7 @@ class TabularReader(Base):
             if geography_variable == "":
                 variables = make_paginated_request(
                     path=f"{self.uri}/variables",
-                    query={type: "geography"},
+                    query={"type": "geography"},
                     max_results=2,
                 )
                 if len(variables) > 1:
@@ -552,7 +553,7 @@ class TabularReader(Base):
                     batch_preprocessor=batch_preprocessor,
                     max_parallelization=max_parallelization,
                 )
-                geopandas_df.to_file(f"${tmpdirname}/out.shp")
+                geopandas_df.to_file(f"{tmpdirname}/out.shp")
                 load_script = f'spshape2dta "{tmpdirname}/out.shp"'
 
             stata.run("clear")

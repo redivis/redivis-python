@@ -33,12 +33,12 @@ class Directory(Base):
         self._lastCachedAt = time.time()
 
     def __repr__(self) -> str:
-        return f"<Dir {str(self.path)}/>"
+        return f"<Dir {str(self.path)}>"
 
     def list(
         self,
-        mode: Literal["all", "files", "directories"] = "all",
         *,
+        mode: Literal["all", "files", "directories"] = "all",
         recursive: bool = False,
         max_results: Optional[int] = None,
     ) -> List[Union["Directory", File]]:
@@ -68,7 +68,8 @@ class Directory(Base):
                     children.append(child)
         return children
 
-    def get(self, path: Union[str, Path]) -> Union["Directory", File, None]:
+    def get(self, path: Union[str, Path]) -> Union["Directory", File]:
+        is_explicit_dir = str(path).endswith("/")
         # This is to handle the case when the file was constructed via a file id, in legacy code
         if isinstance(path, str):
             # TODO: remove this after a bit
@@ -89,20 +90,17 @@ class Directory(Base):
                 for f in files:
                     if f.id == path:
                         return f
-                return None
+                FileNotFoundError(f"File not found with id `{path}`")
 
         # Normalize input to a Path
-        if isinstance(path, str):
-            input_path = Path(path)
-        elif isinstance(path, Path):
-            input_path = path
-        else:
-            return None
+        if not isinstance(path, Path):
+            path = Path(path)
 
-        if input_path.is_absolute() or input_path.anchor:
-            relative = input_path.relative_to(self.path)
+        if path.is_absolute():
+            # Need to use os.path.relpath instead of Path.relative_to to allow for paths that traverse above the current directory
+            relative = Path(os.path.relpath(path, self.path))
         else:
-            relative = input_path
+            relative = path
 
         parts = list(relative.parts)
         if not parts:
@@ -118,7 +116,7 @@ class Directory(Base):
             if part == "..":
                 if node.parent is None:
                     # Can't traverse above the root of this tree
-                    return None
+                    raise ValueError("Path traverses above the root directory")
                 node = node.parent
                 # If '..' is the last segment, return the directory reached
                 if idx == len(parts) - 1:
@@ -136,6 +134,10 @@ class Directory(Base):
             else:
                 # Must be the last part to match a file
                 if idx == len(parts) - 1:
+                    if is_explicit_dir:
+                        raise FileNotFoundError(
+                            f"Not a directory: `{self.path / path}`"
+                        )
                     return child
                 raise FileNotFoundError(
                     f"No such file or directory `{self.path / path}`"
@@ -198,7 +200,9 @@ class Directory(Base):
             ),
         ) as executor:
             futures = []
-            files_to_download = self.list(mode="files", max_results=max_results)
+            files_to_download = self.list(
+                mode="files", recursive=True, max_results=max_results
+            )
 
             file_count = 0
             total_bytes = 0
@@ -262,7 +266,7 @@ class Directory(Base):
                 pbar.close()
 
     def _add_file(self, file: File) -> None:
-        relative_path_parts = file.path.relative_to(self.path).parts
+        relative_path_parts = (Path("/") / file.path).relative_to(self.path).parts
 
         if len(relative_path_parts) == 1:
             self.children[relative_path_parts[0]] = file

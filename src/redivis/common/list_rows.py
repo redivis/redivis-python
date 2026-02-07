@@ -310,7 +310,7 @@ def variable_to_field(variable):
         return pyarrow.field(variable["name"], pyarrow.bool_())
 
 
-# If streaming from a dataset or upload, data types _may_ be incorrect. We need to check and convert if possible.
+# If streaming from a dataset, data types _may_ be incorrect. We need to check and convert if possible.
 def coerce_arrow_array(pyarrow_array, variable):
     import pyarrow
 

@@ -31,7 +31,7 @@ class File(Base):
             properties = {}
 
         self.id = id
-        self.path = name if isinstance(name, Path) else Path(f"./{name}")
+        self.path = Path(name)
         self.name = self.path.name
         self.table = table
         self.query = query
