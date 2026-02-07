@@ -1,27 +1,20 @@
-from .Base import Base
 from urllib.parse import quote as quote_uri
-import warnings
 import os
-import tempfile
 import time
 import glob
 import concurrent.futures
 from tqdm.auto import tqdm
-from pathlib import Path
-from contextlib import closing
 
 
 from .Upload import Upload
 from .Export import Export
 from .Variable import Variable
-from .File import File
-from ..common.list_rows import list_rows
+from ..common.TabularReader import TabularReader
 from ..common.api_request import make_request, make_paginated_request
-from ..common.util import get_geography_variable, get_warning, arrow_table_to_pandas
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 
 
-class Table(Base):
+class Table(TabularReader):
     def __init__(
         self,
         name,
@@ -30,6 +23,7 @@ class Table(Base):
         workflow=None,
         properties=None,
     ):
+        super().__init__(is_table=True)
         if len(name.split(".")) != 3:
             dataset, workflow = get_table_parents(dataset, workflow)
 
@@ -70,18 +64,6 @@ class Table(Base):
         )
         self.uri = f"/tables/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
-
-    def _rectify_ambiguous_container(self):
-        if self.dataset and self.workflow:
-            if self.properties.get("container"):
-                if self.properties.get("container")["kind"] == "dataset":
-                    self.workflow = None
-                else:
-                    self.dataset = None
-            elif self.dataset.exists():
-                self.workflow = None
-            else:
-                self.dataset = None
 
     def create(
         self, *, description=None, upload_merge_strategy="append", is_file_index=False
@@ -335,449 +317,6 @@ class Table(Base):
             progress=progress,
         )
 
-    def to_directory(
-        self, *, file_id_variable="file_id", file_name_variable="file_name"
-    ):
-        from .Directory import Directory
-        import pyarrow
-
-        # We need to have the id for any ultimate calls to File.download()
-        if not self.properties or not self.properties.get("id"):
-            self.get()
-
-        with closing(
-            make_request(
-                method="get",
-                path=f"{self.uri}/rawFiles",
-                query={
-                    "format": "arrow",
-                    "fileIdVariable": file_id_variable,
-                    "fileNameVariable": file_name_variable,
-                },
-                stream=True,
-                parse_response=False,
-            )
-        ) as res:
-            directory = Directory(path=Path(""), table=self)
-
-            for file_spec in (
-                pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
-            ):
-                directory._add_file(
-                    File(
-                        file_spec[file_id_variable],
-                        file_spec[file_name_variable],
-                        table=self,
-                        properties=file_spec,
-                        directory=directory,
-                    )
-                )
-
-            self.directory = directory
-            return self.directory
-
-    def file(self, path):
-        if not self.directory:
-            self.to_directory()
-
-        return self.directory.get(path)
-
-    def list_files(self, max_results=None, *, file_id_variable=None):
-        warnings.warn(
-            "This method is deprecated. Please use table.to_directory().list_files() instead",
-            FutureWarning,
-            stacklevel=2,
-        )
-        if not self.directory:
-            self.to_directory(file_id_variable=file_id_variable)
-
-        return self.directory.list_files(recursive=True, max_results=max_results)
-
-    def download_files(
-        self,
-        path=None,
-        overwrite=False,
-        max_results=None,
-        file_id_variable=None,
-        file_name_variable=None,
-        progress=True,
-        max_parallelization=None,
-    ):
-        warnings.warn(
-            "This method is deprecated. Please use table.to_directory().download_files() instead",
-            FutureWarning,
-            stacklevel=2,
-        )
-        if not self.directory:
-            self.to_directory(
-                file_id_variable=file_id_variable, file_name_variable=file_name_variable
-            )
-
-        return self.directory.download_files(
-            path=path,
-            max_results=max_results,
-            overwrite=overwrite,
-            max_parallelization=max_parallelization,
-            progress=progress,
-        )
-
-    def to_arrow_dataset(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_dataset",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-            batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self.properties["numBytes"]),
-            max_parallelization=max_parallelization,
-        )
-
-    def to_arrow_table(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_table",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-            batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self.properties["numBytes"]),
-            max_parallelization=max_parallelization,
-        )
-
-    def to_polars_lazyframe(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="polars_lazyframe",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-            batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self.properties["numBytes"]),
-            max_parallelization=max_parallelization,
-        )
-
-    def to_dask_dataframe(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-
-        return list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="dask_dataframe",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-            batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self.properties["numBytes"]),
-            max_parallelization=max_parallelization,
-        )
-
-    def to_pandas_dataframe(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        progress=True,
-        dtype_backend="pyarrow",
-        date_as_object=False,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        arrow_table = list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_table",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-            batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self.properties["numBytes"]),
-            max_parallelization=max_parallelization,
-        )
-        return arrow_table_to_pandas(
-            arrow_table, dtype_backend, date_as_object, max_parallelization
-        )
-
-    def to_geopandas_dataframe(
-        self,
-        max_results=None,
-        *,
-        variables=None,
-        geography_variable="",
-        progress=True,
-        dtype_backend="pyarrow",
-        date_as_object=False,
-        batch_preprocessor=None,
-        max_parallelization=os.cpu_count(),
-    ):
-        import geopandas
-
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        arrow_table = list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_table",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-            batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self.properties["numBytes"]),
-            max_parallelization=max_parallelization,
-        )
-
-        df = arrow_table_to_pandas(
-            arrow_table, dtype_backend, date_as_object, max_parallelization
-        )
-
-        if geography_variable is not None:
-            geography_variable = get_geography_variable(
-                mapped_variables, geography_variable
-            )
-            if geography_variable is None:
-                raise Exception(
-                    'Unable to find a variable with type=="geography" in the query results'
-                )
-
-        if geography_variable is not None:
-            df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(
-                df[geography_variable["name"]]
-            )
-            df = geopandas.GeoDataFrame(
-                data=df, geometry=geography_variable["name"], crs="EPSG:4326"
-            )
-
-        return df
-
-    def to_dataframe(
-        self, max_results=None, *, variables=None, geography_variable="", progress=True
-    ):
-        warnings.warn(get_warning("dataframe_deprecation"), FutureWarning, stacklevel=2)
-
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        arrow_table = list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_table",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-            use_export_api=should_use_export_api(self.properties["numBytes"]),
-        )
-
-        df = arrow_table.to_pandas(self_destruct=True)
-
-        if geography_variable is not None:
-            geography_variable = get_geography_variable(
-                mapped_variables, geography_variable
-            )
-
-        if geography_variable is not None:
-            import geopandas
-
-            warnings.warn(
-                get_warning("geodataframe_deprecation"), FutureWarning, stacklevel=2
-            )
-            df[geography_variable["name"]] = geopandas.GeoSeries.from_wkt(
-                df[geography_variable["name"]]
-            )
-            df = geopandas.GeoDataFrame(
-                data=df, geometry=geography_variable["name"], crs="EPSG:4326"
-            )
-
-        return df
-
-    def to_arrow_batch_iterator(
-        self, max_results=None, *, variables=None, progress=True
-    ):
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        return list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="arrow_iterator",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-        )
-
-    def to_stata(self):
-        import pyarrow as pa
-        from pystata import stata
-
-        # TODO: if geospatial data, download as a shapefile and load to Stata
-        # Stata: spshape2dta out.shp
-        # Python: geopandas_df.to_file("out.shp")
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            if not self.properties or "numBytes" not in self.properties:
-                self.get()
-
-            load_script_res = make_request(
-                method="GET",
-                path=f"{self.uri}/script",
-                query={"type": "stata", "filePath": f"{tmpdirname}/part-0.csv"},
-                parse_response=False,
-            )
-            load_script = load_script_res.text
-            if should_use_export_api(self.properties["numBytes"]):
-                self.download(path=f"{tmpdirname}/part-0.csv", format="csv")
-            else:
-                ds = self.to_arrow_dataset()
-                pa.dataset.write_dataset(
-                    ds,
-                    base_dir=tmpdirname,
-                    existing_data_behavior="overwrite_or_ignore",
-                    basename_template="part-{i}.csv",
-                    format="csv",
-                )
-            stata.run("clear")
-            stata.run(load_script, quietly=True)
-            stata.run("describe")
-
-    def to_sas(self, name=None):
-        if name is None:
-            raise Exception(
-                'A SAS dataset name must be provided. E.g., table.to_sas("mydata")'
-            )
-        import pyarrow as pa
-        import saspy
-        from IPython import get_ipython
-
-        ip = get_ipython()
-
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            # IMPORTANT: SAS is running as a separate user, need to make sure the directory is readable
-            os.chmod(tmpdirname, 0o755)
-            if not self.properties or "numBytes" not in self.properties:
-                self.get()
-
-            load_script = make_request(
-                method="GET",
-                path=f"{self.uri}/script",
-                query={
-                    "type": "sas",
-                    "filePath": f"{tmpdirname}/part-0.csv",
-                    "sasDatasetName": name,
-                },
-                parse_response=False,
-            ).text
-
-            if should_use_export_api(self.properties["numBytes"]):
-                self.download(path=f"{tmpdirname}/part-0.csv", format="csv")
-            else:
-                ds = self.to_arrow_dataset()
-                pa.dataset.write_dataset(
-                    ds,
-                    base_dir=tmpdirname,
-                    existing_data_behavior="overwrite_or_ignore",
-                    basename_template="part-{i}.csv",
-                    format="csv",
-                )
-            ip.run_cell_magic("SAS", "", load_script)
-
-    def list_rows(self, max_results=None, *, variables=None, progress=True):
-        warnings.warn(
-            "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
-            FutureWarning,
-            stacklevel=2,
-        )
-
-        if not self.properties or "container" not in self.properties:
-            self.get()
-
-        mapped_variables = get_mapped_variables(variables, self.uri)
-        return list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="tuple",
-            progress=progress,
-            coerce_schema=self.properties["container"]["kind"] == "dataset",
-            use_export_api=should_use_export_api(self.properties["numBytes"]),
-        )
-
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
         payload = {}
         if name:
@@ -800,24 +339,6 @@ class Table(Base):
 
     def variable(self, name):
         return Variable(name, table=self)
-
-
-def get_mapped_variables(variables, uri):
-    all_variables = make_paginated_request(path=f"{uri}/variables", page_size=1000)
-    if variables is None:
-        return all_variables
-    else:
-        lower_variable_names = [variable.lower() for variable in variables]
-        variables_list = list(
-            filter(
-                lambda variable: variable["name"].lower() in lower_variable_names,
-                all_variables,
-            )
-        )
-        variables_list.sort(
-            key=lambda variable: lower_variable_names.index(variable["name"].lower())
-        )
-        return variables_list
 
 
 def get_table_parents(dataset, workflow):
@@ -846,11 +367,16 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
-    instance._rectify_ambiguous_container()
-
-
-def should_use_export_api(num_bytes):
-    return num_bytes > (1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11)
+    if instance.dataset and instance.workflow:
+        if instance.properties.get("container"):
+            if instance.properties.get("container")["kind"] == "dataset":
+                instance.workflow = None
+            else:
+                instance.dataset = None
+        elif instance.dataset.exists():
+            instance.workflow = None
+        else:
+            instance.dataset = None
 
 
 def map_file(file):

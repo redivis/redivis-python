@@ -43,6 +43,7 @@ REQUIRED = [
     "dask >= 2023.9.3",
     "pandas >= 2.0.0",
     "polars >= 0.19",
+    "mfusepy >= 3.0.0",
     # geopandas and its dependencies
     "geopandas >= 0.14.0",
     "folium >= 0.15.0",  # required for geopandas

@@ -14,7 +14,7 @@ import warnings
 from ._version import __version__
 
 
-def file():
+def file(*args, **kwargs):
     raise Exception(
         'Calling redivis.file() is no longer supported. Please use redivis.table("table_reference").file("filename") instead.'
     )

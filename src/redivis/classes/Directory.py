@@ -1,4 +1,7 @@
+import warnings
+
 from .Base import Base
+from .File import File
 import os
 from pathlib import Path
 
@@ -6,12 +9,21 @@ import time
 import concurrent.futures
 from tqdm.auto import tqdm
 from threading import Event
+from typing import Literal, Optional, List, Union
 
 
 class Directory(Base):
-    def __init__(self, *, path, table=None, query=None, parent=None):
+    def __init__(
+        self,
+        *,
+        path: Union[str, Path],
+        table: Optional["Table"] = None,
+        query: Optional["Query"] = None,
+        parent: Optional["Directory"] = None,
+    ) -> None:
         if not table and not query:
             raise ValueError("All directories must either belong to a table or query.")
+
         self.path = path
         self.name = Path(path).name
         self.table = table
@@ -21,58 +33,74 @@ class Directory(Base):
         self._lastCachedAt = time.time()
 
     def __repr__(self) -> str:
-        return f"<Dir {str(self.path)}/>"
+        return f"<Dir {str(self.path)}>"
 
-    def list(self, *, recursive=False, max_results=None):
-        children = []
-        counter = 0
+    def list(
+        self,
+        *,
+        mode: Literal["all", "files", "directories"] = "all",
+        recursive: bool = False,
+        max_results: Optional[int] = None,
+    ) -> List[Union["Directory", File]]:
+        if max_results is None:
+            max_results = float("inf")
+        children: List[Union["Directory", File]] = []
         # TODO: support glob pattern? or regex?
         for child in self.children.values():
-            if recursive and isinstance(child, Directory):
-                children.append(child)
-                children.extend(child.list(recursive=True))
-            else:
-                children.append(child)
-            counter += 1
-            if max_results is not None and counter >= max_results:
+            if len(children) >= max_results:
                 break
+            if recursive and isinstance(child, Directory):
+                if mode == "all" or mode == "directories":
+                    children.append(child)
+                children.extend(
+                    child.list(
+                        mode=mode,
+                        recursive=True,
+                        max_results=max_results - len(children),
+                    )
+                )
+            else:
+                if (
+                    mode == "all"
+                    or (mode == "files" and isinstance(child, File))
+                    or (mode == "directories" and isinstance(child, Directory))
+                ):
+                    children.append(child)
         return children
 
-    def list_files(self, *, recursive=True, max_results=None):
-        # TODO: support glob pattern? or regex?
-        # if pattern and not re.match(pattern, str(file_relative_path)):
-        #     continue
-        files = []
-        counter = 0
-        for child in self.children.values():
-            if isinstance(child, Directory):
-                if recursive:
-                    files.extend(child.list_files(recursive=True))
-            else:
-                files.append(child)
-            counter += 1
-            if max_results is not None and counter >= max_results:
-                break
-        return files
-
-    def get(self, path):
-        # Normalize input to a Path
+    def get(self, path: Union[str, Path]) -> Union["Directory", File]:
+        is_explicit_dir = str(path).endswith("/")
+        # This is to handle the case when the file was constructed via a file id, in legacy code
         if isinstance(path, str):
-            input_path = Path(path)
-        elif isinstance(path, Path):
-            input_path = path
-        else:
-            return None
+            # TODO: remove this after a bit
+            split = path.split(".")
+            client_id = split[0]
+            if (
+                len(split) == 2
+                and len(client_id) == 14
+                and len(client_id.split("-")) == 2
+                and len(client_id.split("-")[0]) == 4
+            ):
+                warnings.warn(
+                    "Passing file ids is deprecated, please use file names instead. E.g.: table.file('filename.csv')",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+                files = self.list(mode="files", recursive=True)
+                for f in files:
+                    if f.id == path:
+                        return f
+                raise FileNotFoundError(f"File not found with id `{path}`")
 
-        # Attempt to make input_path relative to this directory's path if absolute/anchored
-        try:
-            if input_path.is_absolute() or input_path.anchor:
-                relative = input_path.relative_to(self.path)
-            else:
-                relative = input_path
-        except Exception:
-            # Not under this directory
-            return None
+        # Normalize input to a Path
+        if not isinstance(path, Path):
+            path = Path(path)
+
+        if path.is_absolute():
+            # Need to use os.path.relpath instead of Path.relative_to to allow for paths that traverse above the current directory
+            relative = Path(os.path.relpath(path, self.path))
+        else:
+            relative = path
 
         parts = list(relative.parts)
         if not parts:
@@ -88,7 +116,7 @@ class Directory(Base):
             if part == "..":
                 if node.parent is None:
                     # Can't traverse above the root of this tree
-                    return None
+                    raise ValueError("Path traverses above the root directory")
                 node = node.parent
                 # If '..' is the last segment, return the directory reached
                 if idx == len(parts) - 1:
@@ -98,28 +126,57 @@ class Directory(Base):
             # Walk into children
             child = node.children.get(part)
             if not child:
-                return None
+                raise FileNotFoundError(
+                    f"No such file or directory `{self.path / path}`"
+                )
             if isinstance(child, Directory):
                 node = child
             else:
                 # Must be the last part to match a file
                 if idx == len(parts) - 1:
+                    if is_explicit_dir:
+                        raise FileNotFoundError(
+                            f"Not a directory: `{self.path / path}`"
+                        )
                     return child
-                return None
+                raise FileNotFoundError(
+                    f"No such file or directory `{self.path / path}`"
+                )
 
         # If we finished traversing parts without returning, we resolved to a directory
         return node
 
-    def download_files(
+    def mount(
+        self, path: Optional[Union[str, Path]] = None, foreground: bool = False
+    ) -> None:
+        if (
+            os.getenv("REDIVIS_NOTEBOOK_ID") is not None
+            and os.getenv("REDIVIS_NOTEBOOK_ENABLE_FUSE") != "TRUE"
+        ):
+            raise RuntimeError(
+                "Mounting directories is not supported within the default Redivis Notebooks. You must configure a custom machine to call directory.mount()"
+            )
+        from ..common.mount_directory import mount_directory
+
+        if path is None:
+            default_name = (
+                self.table.properties["name"] if self.parent is None else self.name
+            )
+            path = Path.cwd() / default_name
+        elif isinstance(path, str):
+            path = Path(path)
+
+        mount_directory(self, path, foreground=foreground)
+
+    def download(
         self,
-        path=None,
+        path: Optional[Union[str, Path]] = None,
         *,
-        max_results=None,
-        max_parallelization=None,
-        overwrite=False,
-        recursive=True,
-        progress=True,
-    ):
+        max_results: Optional[int] = None,
+        max_parallelization: Optional[int] = None,
+        overwrite: bool = False,
+        progress: bool = True,
+    ) -> None:
         if isinstance(path, str):
             path = Path(path)
         if path is None:
@@ -143,8 +200,8 @@ class Directory(Base):
             ),
         ) as executor:
             futures = []
-            files_to_download = self.list_files(
-                recursive=recursive, max_results=max_results
+            files_to_download = self.list(
+                mode="files", recursive=True, max_results=max_results
             )
 
             file_count = 0
@@ -162,12 +219,12 @@ class Directory(Base):
                 disable=not progress,
             )
 
-            def on_progress(chunk_bytes: int):
+            def on_progress(chunk_bytes: int) -> None:
                 pbar.update(chunk_bytes)
 
             # Create and submit download tasks with per-file progress callbacks
             for file in files_to_download:
-                file_relative_path = file.path.relative_to(self.path)
+                file_relative_path = (Path("/") / file.path).relative_to(self.path)
                 dest_path = os.path.join(path, str(file_relative_path))
 
                 futures.append(
@@ -208,8 +265,8 @@ class Directory(Base):
                 executor.shutdown(wait=True, cancel_futures=True)
                 pbar.close()
 
-    def _add_file(self, file):
-        relative_path_parts = file.path.relative_to(self.path).parts
+    def _add_file(self, file: File) -> None:
+        relative_path_parts = (Path("/") / file.path).relative_to(self.path).parts
 
         if len(relative_path_parts) == 1:
             self.children[relative_path_parts[0]] = file

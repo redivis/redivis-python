@@ -81,7 +81,6 @@ def perform_retryable_download(
             return perform_retryable_download(
                 path=path,
                 filename=filename,
-                filename_cb=filename_cb,
                 progress=progress,
                 pbar=pbar,
                 query=query,

@@ -154,19 +154,3 @@ class Export(Base):
                     pbar.update(self.properties["percentCompleted"] - pbar.n)
                 time.sleep(min(iter_count * 0.5, 2))
                 self.get()
-
-
-def get_filename(s):
-    fname = re.findall("filename\*=([^;]+)", s, flags=re.IGNORECASE)
-    if not len(fname):
-        fname = re.findall("filename=([^;]+)", s, flags=re.IGNORECASE)
-
-    if len(fname) and "utf-8''" in fname[0].lower():
-        fname = re.sub("utf-8''", "", fname[0], flags=re.IGNORECASE)
-        fname = urllib.unquote(fname).decode("utf8")
-    elif len(fname):
-        fname = fname[0]
-    else:
-        fname = ""
-    # clean space and double quotes
-    return fname.strip().strip('"')
