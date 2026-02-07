@@ -25,8 +25,9 @@ class RedivisFS(Operations):
 
     def getattr(self, path, fh=None):
         """Get file attributes"""
-        node = self._get_node(path)
-        if not node:
+        try:
+            node = self._get_node(path)
+        except FileNotFoundError:
             raise FuseOSError(errno.ENOENT)
 
         # Default attributes
