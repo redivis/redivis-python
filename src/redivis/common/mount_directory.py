@@ -27,7 +27,7 @@ class RedivisFS(Operations):
         """Get file attributes"""
         try:
             node = self._get_node(path)
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError):
             raise FuseOSError(errno.ENOENT)
 
         # Default attributes
@@ -54,8 +54,12 @@ class RedivisFS(Operations):
 
     def readdir(self, path, fh):
         """List directory contents"""
-        node = self._get_node(path)
-        if not node or not hasattr(node, "children"):
+        try:
+            node = self._get_node(path)
+        except (FileNotFoundError, ValueError):
+            raise FuseOSError(errno.ENOENT)
+
+        if not hasattr(node, "children"):
             raise FuseOSError(errno.ENOTDIR)
 
         entries = [".", ".."]
@@ -67,8 +71,12 @@ class RedivisFS(Operations):
 
     def open(self, path, flags):
         """Open a file"""
-        node = self._get_node(path)
-        if not node or hasattr(node, "children"):
+        try:
+            node = self._get_node(path)
+        except (FileNotFoundError, ValueError):
+            raise FuseOSError(errno.ENOENT)
+
+        if hasattr(node, "children"):
             raise FuseOSError(errno.ENOENT)
 
         # Only allow read access

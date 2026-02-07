@@ -54,7 +54,7 @@ class Directory(Base):
                     children.append(child)
                 children.extend(
                     child.list(
-                        mode,
+                        mode=mode,
                         recursive=True,
                         max_results=max_results - len(children),
                     )
@@ -90,7 +90,7 @@ class Directory(Base):
                 for f in files:
                     if f.id == path:
                         return f
-                FileNotFoundError(f"File not found with id `{path}`")
+                raise FileNotFoundError(f"File not found with id `{path}`")
 
         # Normalize input to a Path
         if not isinstance(path, Path):
@@ -224,7 +224,7 @@ class Directory(Base):
 
             # Create and submit download tasks with per-file progress callbacks
             for file in files_to_download:
-                file_relative_path = file.path.relative_to(self.path)
+                file_relative_path = (Path("/") / file.path).relative_to(self.path)
                 dest_path = os.path.join(path, str(file_relative_path))
 
                 futures.append(

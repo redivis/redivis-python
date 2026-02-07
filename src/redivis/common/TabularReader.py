@@ -599,7 +599,7 @@ def check_is_ready(self: TabularReader) -> None:
 def get_mapped_variables(
     self: TabularReader, variables: Optional[Iterable[str]]
 ) -> Tuple[List[Dict[str, Any]], bool]:
-    coerce_schema = False  # queries and uploads will always have the correct tyeps
+    coerce_schema = False  # queries and uploads will always have the correct types
     if self._is_query:
         return self.properties.get("outputSchema"), coerce_schema
 
