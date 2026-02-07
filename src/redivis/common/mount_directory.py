@@ -86,42 +86,98 @@ class RedivisFS(Operations):
         with self._fh_lock:
             fh = self._next_fh
             self._next_fh += 1
-            self._file_handles[fh] = {"node": node, "stream": None, "position": 0}
+            # Add a per-handle lock so that operations on the same handle
+            # remain serialized without blocking other handles.
+            self._file_handles[fh] = {
+                "node": node,
+                "stream": None,
+                "position": 0,
+                "lock": threading.Lock(),
+            }
 
         return fh
 
     def read(self, path, length, offset, fh):
         """Read from a file"""
+        # First, look up the handle and its per-handle lock under the
+        # global file-handle lock, then release it before doing I/O.
         with self._fh_lock:
-            if fh not in self._file_handles:
+            handle = self._file_handles.get(fh)
+            if handle is None:
                 raise FuseOSError(errno.EBADF)
+            handle_lock = handle.get("lock")
 
-            handle = self._file_handles[fh]
-            node = handle["node"]
+        # Fallback in case an older handle dict is missing "lock"
+        if handle_lock is None:
+            handle_lock = threading.Lock()
+            with self._fh_lock:
+                current = self._file_handles.get(fh)
+                if current is None:
+                    raise FuseOSError(errno.EBADF)
+                if "lock" not in current:
+                    current["lock"] = handle_lock
+                else:
+                    handle_lock = current["lock"]
+
+        with handle_lock:
+            # Snapshot the current handle state under the global lock,
+            # then perform I/O without holding _fh_lock.
+            with self._fh_lock:
+                handle = self._file_handles.get(fh)
+                if handle is None:
+                    raise FuseOSError(errno.EBADF)
+                node = handle["node"]
+                stream = handle["stream"]
+                position = handle["position"]
 
             try:
                 # Create or reuse stream
-                if not handle["stream"] or handle["position"] != offset:
-                    if handle["stream"]:
-                        handle["stream"].close()
-                    handle["stream"] = node.open(start_byte=offset)
-                    handle["position"] = offset
+                if not stream or position != offset:
+                    if stream:
+                        stream.close()
+                    stream = node.open(start_byte=offset)
+                    position = offset
 
-                data = handle["stream"].read(length)
-                handle["position"] += len(data)
-                return data
+                data = stream.read(length)
+                position += len(data)
 
             except Exception:
+                # Map any I/O error to a generic EIO for FUSE
                 raise FuseOSError(errno.EIO)
+
+            # Update shared handle state under the global lock, ensuring the
+            # handle still exists.
+            with self._fh_lock:
+                current = self._file_handles.get(fh)
+                if current is None:
+                    # Handle was released while we were reading; close the
+                    # local stream and report EBADF.
+                    if stream:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+                    raise FuseOSError(errno.EBADF)
+                current["stream"] = stream
+                current["position"] = position
+
+            return data
 
     def release(self, path, fh):
         """Close a file"""
+        # Remove the handle from the table under the global lock, but perform
+        # any potentially slow close operations without holding _fh_lock.
+        stream_to_close = None
         with self._fh_lock:
-            if fh in self._file_handles:
-                handle = self._file_handles[fh]
-                if handle["stream"]:
-                    handle["stream"].close()
-                del self._file_handles[fh]
+            handle = self._file_handles.pop(fh, None)
+            if handle is not None:
+                stream_to_close = handle.get("stream")
+
+        if stream_to_close:
+            try:
+                stream_to_close.close()
+            except Exception:
+                pass
         return 0
 
     def statfs(self, path):
