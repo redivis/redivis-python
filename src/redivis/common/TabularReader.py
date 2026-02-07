@@ -428,17 +428,17 @@ class TabularReader(Base):
             os.chmod(tmpdirname, 0o755)
 
             if geography_variable == "":
-                variables = make_paginated_request(
+                geo_variables = make_paginated_request(
                     path=f"{self.uri}/variables",
                     query={"type": "geography"},
                     max_results=2,
                 )
-                if len(variables) > 1:
+                if len(geo_variables) > 1:
                     raise Exception(
                         "Multiple geography variables found; please specify which to use"
                     )
-                elif len(variables) == 1:
-                    geography_variable = variables[0]["name"]
+                elif len(geo_variables) == 1:
+                    geography_variable = geo_variables[0]["name"]
                 else:
                     geography_variable = None
 
@@ -497,23 +497,28 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count(),
     ) -> None:
+        # This will be set if there was an error during Stata initialization in a Redivis notebook
+        if os.environ["STATA_ERROR"]:
+            raise Exception(
+                f"""An error occurred during Stata initialization. Please make sure you have the correct license and edition specified.\n\nThe error message was:\n\n{os.environ.get('STATA_ERROR')}."""
+            )
         check_is_ready(self)
         import pyarrow as pa
         from pystata import stata
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             if geography_variable == "":
-                variables = make_paginated_request(
+                geo_variables = make_paginated_request(
                     path=f"{self.uri}/variables",
                     query={"type": "geography"},
                     max_results=2,
                 )
-                if len(variables) > 1:
+                if len(geo_variables) > 1:
                     raise Exception(
                         "Multiple geography variables found; please specify which to use"
                     )
-                elif len(variables) == 1:
-                    geography_variable = variables[0]["name"]
+                elif len(geo_variables) == 1:
+                    geography_variable = geo_variables[0]["name"]
                 else:
                     geography_variable = None
 
