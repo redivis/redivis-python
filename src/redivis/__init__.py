@@ -60,6 +60,3 @@ def current_workflow():
         return workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
 
     return None
-
-
-import pkg_resources  # part of setuptools

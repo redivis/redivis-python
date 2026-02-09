@@ -250,6 +250,13 @@ class Dataset(Base):
         update_properties(self, res)
         return self
 
+    def update_variables(self, variables):
+        make_request(
+            method="PATCH",
+            path=f"{self.uri}/variables",
+            payload={"variables": variables},
+        )
+
 
 def update_properties(instance, properties):
     instance.properties = properties

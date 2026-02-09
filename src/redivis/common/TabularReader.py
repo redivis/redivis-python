@@ -428,6 +428,7 @@ class TabularReader(Base):
             os.chmod(tmpdirname, 0o755)
 
             if geography_variable == "":
+                # TODO: if variables param is provided, should only search within those vars
                 geo_variables = make_paginated_request(
                     path=f"{self.uri}/variables",
                     query={"type": "geography"},
@@ -483,7 +484,7 @@ class TabularReader(Base):
                     max_parallelization=max_parallelization,
                 )
                 geopandas_df.to_file(f"{tmpdirname}/out.shp")
-                load_script = f"""proc mapimport datafile="{tmpdirname}/out.shp" out='{name}';\nrun;"""
+                load_script = f"""proc mapimport datafile="{tmpdirname}/out.shp" out={name};\nrun;"""
 
             ip.run_cell_magic("SAS", "", load_script)
 
@@ -508,6 +509,7 @@ class TabularReader(Base):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             if geography_variable == "":
+                # TODO: if variables param is provided, should only search within those vars
                 geo_variables = make_paginated_request(
                     path=f"{self.uri}/variables",
                     query={"type": "geography"},
@@ -559,7 +561,10 @@ class TabularReader(Base):
                     max_parallelization=max_parallelization,
                 )
                 geopandas_df.to_file(f"{tmpdirname}/out.shp")
-                load_script = f'spshape2dta "{tmpdirname}/out.shp"'
+                # spshape2dta creates an out.dta + out_shp.dta file in WORKDIR, but doesn't load it. Only out.dta should be loaded; the other file is linked behind the scenes
+                load_script = (
+                    f'spshape2dta "{tmpdirname}/out.shp", replace\nuse out.dta, clear'
+                )
 
             stata.run("clear")
             stata.run(load_script, quietly=True)

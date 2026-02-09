@@ -334,6 +334,13 @@ class Table(TabularReader):
         update_properties(self, response)
         return self
 
+    def update_variables(self, variables):
+        make_request(
+            method="PATCH",
+            path=f"{self.uri}/variables",
+            payload={"variables": variables},
+        )
+
     def upload(self, name=""):
         return Upload(name=name, table=self)
 

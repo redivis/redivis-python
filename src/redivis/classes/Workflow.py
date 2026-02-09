@@ -116,6 +116,13 @@ class Workflow(Base):
                 raise err
             return False
 
+    def update_variables(self, variables):
+        make_request(
+            method="PATCH",
+            path=f"{self.uri}/variables",
+            payload={"variables": variables},
+        )
+
     def get(self):
         properties = make_request(method="GET", path=self.uri)
         update_properties(self, properties)
