@@ -68,7 +68,7 @@ class Directory(Base):
                     children.append(child)
         return children
 
-    def get(self, path: Union[str, Path]) -> Union["Directory", File]:
+    def get(self, path: Union[str, Path]) -> Union["Directory", File, None]:
         is_explicit_dir = str(path).endswith("/")
         # This is to handle the case when the file was constructed via a file id, in legacy code
         if isinstance(path, str):
@@ -82,7 +82,7 @@ class Directory(Base):
                 and len(client_id.split("-")[0]) == 4
             ):
                 warnings.warn(
-                    "Passing file ids is deprecated, please use file names instead. E.g.: table.file('filename.csv')",
+                    "Passing file ids is deprecated, please use file names instead. E.g.: table.file('filename.png')",
                     FutureWarning,
                     stacklevel=2,
                 )
@@ -90,7 +90,7 @@ class Directory(Base):
                 for f in files:
                     if f.id == path:
                         return f
-                raise FileNotFoundError(f"File not found with id `{path}`")
+                return None
 
         # Normalize input to a Path
         if not isinstance(path, Path):
@@ -126,28 +126,22 @@ class Directory(Base):
             # Walk into children
             child = node.children.get(part)
             if not child:
-                raise FileNotFoundError(
-                    f"No such file or directory `{self.path / path}`"
-                )
+                return None
             if isinstance(child, Directory):
                 node = child
             else:
                 # Must be the last part to match a file
                 if idx == len(parts) - 1:
                     if is_explicit_dir:
-                        raise FileNotFoundError(
-                            f"Not a directory: `{self.path / path}`"
-                        )
+                        return None
                     return child
-                raise FileNotFoundError(
-                    f"No such file or directory `{self.path / path}`"
-                )
+                return None
 
         # If we finished traversing parts without returning, we resolved to a directory
         return node
 
     def mount(
-        self, path: Optional[Union[str, Path]] = None, foreground: bool = False
+        self, path: Optional[Union[str, Path]] = None, *, foreground: bool = False
     ) -> None:
         if (
             os.getenv("REDIVIS_NOTEBOOK_ID") is not None
@@ -159,14 +153,19 @@ class Directory(Base):
         from ..common.mount_directory import mount_directory
 
         if path is None:
-            default_name = (
-                self.table.properties["name"] if self.parent is None else self.name
-            )
+            if self.parent is not None:
+                default_name = self.name
+            elif self.table:
+                default_name = self.table.properties["name"]
+            else:
+                default_name = "redivis_mount"
+
             path = Path.cwd() / default_name
         elif isinstance(path, str):
             path = Path(path)
 
         mount_directory(self, path, foreground=foreground)
+        return path
 
     def download(
         self,

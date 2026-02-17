@@ -21,14 +21,19 @@ class RedivisFS(Operations):
 
         # Remove leading slash and get node
         clean_path = path.lstrip("/")
-        return self.directory.get(clean_path)
+        try:
+            node = self.directory.get(clean_path)
+        except ValueError:
+            raise FuseOSError(errno.ENOENT)
+
+        if node is None:
+            raise FuseOSError(errno.ENOENT)
+        else:
+            return node
 
     def getattr(self, path, fh=None):
         """Get file attributes"""
-        try:
-            node = self._get_node(path)
-        except (FileNotFoundError, ValueError):
-            raise FuseOSError(errno.ENOENT)
+        node = self._get_node(path)
 
         # Default attributes
         attrs = {
@@ -54,10 +59,7 @@ class RedivisFS(Operations):
 
     def readdir(self, path, fh):
         """List directory contents"""
-        try:
-            node = self._get_node(path)
-        except (FileNotFoundError, ValueError):
-            raise FuseOSError(errno.ENOENT)
+        node = self._get_node(path)
 
         if not hasattr(node, "children"):
             raise FuseOSError(errno.ENOTDIR)
@@ -71,10 +73,7 @@ class RedivisFS(Operations):
 
     def open(self, path, flags):
         """Open a file"""
-        try:
-            node = self._get_node(path)
-        except (FileNotFoundError, ValueError):
-            raise FuseOSError(errno.ENOENT)
+        node = self._get_node(path)
 
         if hasattr(node, "children"):
             raise FuseOSError(errno.ENOENT)
