@@ -7,7 +7,6 @@ from tqdm.auto import tqdm
 
 
 from .Upload import Upload
-from .Export import Export
 from .Variable import Variable
 from ..common.TabularReader import TabularReader
 from ..common.api_request import make_request, make_paginated_request
@@ -219,7 +218,7 @@ class Table(TabularReader):
                             perform_resumable_upload(
                                 data=data,
                                 progressbar=pbar_bytes,
-                                temp_upload_url=temp_upload["url"],
+                                url=temp_upload["url"],
                             )
                         else:
                             data = (
@@ -229,7 +228,7 @@ class Table(TabularReader):
                             )
                             perform_standard_upload(
                                 data=data,
-                                temp_upload_url=temp_upload["url"],
+                                url=temp_upload["url"],
                                 progressbar=pbar_bytes,
                             )
 
@@ -296,26 +295,6 @@ class Table(TabularReader):
                 pbar_count.close()
 
             raise e
-
-    def download(
-        self,
-        path=None,
-        *,
-        format="csv",
-        overwrite=False,
-        progress=True,
-    ):
-        res = make_request(
-            method="POST",
-            path=f"{self.uri}/exports",
-            payload={"format": format},
-        )
-        export_job = Export(res["id"], table=self, properties=res)
-        return export_job.download_files(
-            path=path,
-            overwrite=overwrite,
-            progress=progress,
-        )
 
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
         payload = {}

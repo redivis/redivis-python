@@ -19,7 +19,8 @@ verify_ssl = (
 )
 
 
-def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=None):
+# TODO: add Content-MD5 header to final requests
+def perform_resumable_upload(data, size=None, url=None, progressbar=None):
     retry_count = 0
     start_byte = 0
     is_file = True if hasattr(data, "read") else False
@@ -32,7 +33,7 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
     # chunk_size = min(file_size, 2**30)
     headers = {"Authorization": f"Bearer {get_auth_token()}"}
 
-    resumable_url = initiate_resumable_upload(file_size, temp_upload_url, headers)
+    resumable_url = initiate_resumable_upload(file_size, url, headers)
 
     while (
         start_byte < file_size or start_byte == 0
@@ -57,19 +58,20 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
                 url=resumable_url,
                 verify=verify_ssl,
                 headers={
-                    **headers,
-                    **{
-                        "Content-Length": f"{end_byte - start_byte + 1}",
-                        "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
-                    },
+                    "Content-Length": f"{end_byte - start_byte + 1}",
+                    "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
                 },
                 data=chunk,
             )
             res.raise_for_status()
 
+            # TODO: look at range header in response to determine next start byte instead of assuming chunk was fully uploaded successfully
+            #    Do the same in R + JS
+
             start_byte += chunk_size
             retry_count = 0  # reset retry_count after a successfully uploaded chunk
         except requests.RequestException as e:
+            print(e)
             if retry_count > 10:
                 print("A network error occurred. Upload failed after too many retries.")
                 raise e
@@ -82,17 +84,16 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
             )
 
 
-def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
+def initiate_resumable_upload(size, url, headers, retry_count=0):
     did_request_complete = False
     try:
         res = requests.post(
-            temp_upload_url,
+            url,
             verify=verify_ssl,
             headers={
                 **headers,
                 **{
                     "x-upload-content-length": str(size),
-                    "x-goog-resumable": "start",
                 },
             },
         )
@@ -108,9 +109,7 @@ def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
                 print("A network error occurred. Upload failed after too many retries.")
                 raise e
             time.sleep(retry_count + 1)
-            initiate_resumable_upload(
-                size, temp_upload_url, headers, retry_count=retry_count + 1
-            )
+            initiate_resumable_upload(size, url, headers, retry_count=retry_count + 1)
 
 
 def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
@@ -159,9 +158,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
         )
 
 
-def perform_standard_upload(
-    data, temp_upload_url=None, retry_count=0, progressbar=None
-):
+def perform_standard_upload(data, url=None, retry_count=0, progressbar=None):
     try:
         if progressbar:
             data = CallbackIOWrapper(progressbar.update, data, "read")
@@ -169,7 +166,10 @@ def perform_standard_upload(
         headers = {"Authorization": f"Bearer {get_auth_token()}"}
 
         res = requests.put(
-            url=temp_upload_url, data=data, headers=headers, verify=verify_ssl
+            url=url,
+            data=data,
+            headers=headers,
+            verify=verify_ssl,
         )
         res.raise_for_status()
     except requests.RequestException as e:
@@ -179,7 +179,7 @@ def perform_standard_upload(
         time.sleep(retry_count + 1)
         return perform_standard_upload(
             data=data,
-            temp_upload_url=temp_upload_url,
+            url=url,
             retry_count=retry_count + 1,
             progressbar=progressbar,
         )

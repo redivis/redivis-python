@@ -183,12 +183,12 @@ class Notebook(Base):
                     perform_resumable_upload(
                         data=f,
                         progressbar=pbar_bytes,
-                        temp_upload_url=temp_upload["url"],
+                        url=temp_upload["url"],
                     )
                 else:
                     perform_standard_upload(
                         data=f,
-                        temp_upload_url=temp_upload["url"],
+                        url=temp_upload["url"],
                         progressbar=pbar_bytes,
                     )
 

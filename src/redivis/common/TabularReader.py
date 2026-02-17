@@ -3,6 +3,8 @@ from ..classes.Base import Base
 import warnings
 import os
 import tempfile
+from .Export import Export
+
 from ..classes.File import File
 from ..classes.Directory import Directory
 from pathlib import Path
@@ -91,9 +93,13 @@ class TabularReader(Base):
             self.cached_directory_timestamp = gmt_timestamp
             return self.directory
 
-    def file(self, path: Union[str, Path]) -> File:
+    def file(
+        self, path: Union[str, Path], *, file_id_variable=None, file_name_variable=None
+    ) -> File:
         if not self.directory:
-            self.to_directory()
+            self.to_directory(
+                file_id_variable=file_id_variable, file_name_variable=file_name_variable
+            )
 
         node = self.directory.get(path)
         if isinstance(node, Directory):
@@ -114,6 +120,35 @@ class TabularReader(Base):
 
         return self.directory.list(
             mode="files", recursive=True, max_results=max_results
+        )
+
+    def download(
+        self,
+        path: Optional[Union[str, Path]] = None,
+        *,
+        format: Literal[
+            "csv", "parquet", "jsonl", "avro", "sas7bdat", "dta", "sav"
+        ] = "csv",
+        overwrite: bool = False,
+        progress: bool = True,
+    ):
+        if self._is_upload:
+            raise Exception("Download uploads as a file is not currently supported")
+        if self._is_query:
+            raise Exception(
+                "Downloading query results as a file is not currently supported"
+            )
+
+        res = make_request(
+            method="POST",
+            path=f"{self.uri}/exports",
+            payload={"format": format},
+        )
+        export_job = Export(res["id"], table=self, properties=res)
+        return export_job.download_files(
+            path=path,
+            overwrite=overwrite,
+            progress=progress,
         )
 
     def download_files(
