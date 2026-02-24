@@ -39,6 +39,9 @@ class Upload(TabularReader):
         )
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Upload {self.table.uri}.{self.name}>"
+
     def delete(self):
         make_request(
             method="DELETE",

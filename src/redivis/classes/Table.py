@@ -66,6 +66,9 @@ class Table(TabularReader):
         self.uri = f"/tables/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Table {self.qualified_reference}>"
+
     def create(
         self, *, description=None, upload_merge_strategy="append", is_file_index=False
     ):

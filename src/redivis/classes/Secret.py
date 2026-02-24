@@ -13,6 +13,9 @@ class Secret(Base):
         self.uri = f"{base_path}/secrets/{name}"
         self.properties = None
 
+    def __repr__(self):
+        return f"<Secret {self.user.name if self.user else self.organization.name}.{self.name}>"
+
     def get_value(self):
         secret = make_request(path=self.uri)
         return secret["value"]

@@ -55,6 +55,9 @@ class Workflow(Base):
         self.uri = f"/workflows/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Workflow {self.qualified_reference}>"
+
     def list_datasources(self, *, max_results=None):
         data_sources = make_paginated_request(
             path=f"{self.uri}/dataSources",

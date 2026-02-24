@@ -19,6 +19,9 @@ class Member(Base):
         )
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Member {self.organization.name}.{self.name}>"
+
     def get(self):
         self.properties = make_request(
             method="GET",

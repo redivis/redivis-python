@@ -29,6 +29,9 @@ class Datasource(Base):
         )
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Datasource {self.source_reference}>"
+
     def get(self):
         self.properties = make_request(
             method="GET",

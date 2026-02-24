@@ -6,7 +6,7 @@ class RedivisError(Exception):
         super().__init__(message)
         self.message = message
 
-    def __str__(self):
+    def __repr__(self):
         return self.message
 
 
@@ -17,7 +17,7 @@ class APIError(RedivisError):
         self.message = message
         self.description = error_description
 
-    def __str__(self):
+    def __repr__(self):
         return f"[{self.status_code} {self.message}] {self.description}"
 
 
@@ -28,7 +28,7 @@ class NotFoundError(APIError):
         self.message = message
         self.description = error_description
 
-    def __str__(self):
+    def __repr__(self):
         return self.description or self.message
 
 
@@ -39,7 +39,7 @@ class AuthorizationError(APIError):
         self.message = message
         self.description = error_description
 
-    def __str__(self):
+    def __repr__(self):
         return f"[{self.status_code} {self.message}] {self.description}"
 
 
@@ -54,7 +54,7 @@ class NetworkError(RedivisError):
         self.message = message
         self.original_exception = original_exception
 
-    def __str__(self):
+    def __repr__(self):
         if self.original_exception:
             return f"{self.message}: {self.original_exception}"
         return self.message
@@ -65,7 +65,7 @@ class ValueError(RedivisError, builtins.ValueError):
         super().__init__(message)
         self.message = message
 
-    def __str__(self):
+    def __repr__(self):
         return self.message
 
 
@@ -77,7 +77,7 @@ class JobError(RedivisError):
         self.kind = kind
         self.status = status
 
-    def __str__(self):
+    def __repr__(self):
         return f"[{self.kind} {self.status}] {self.message}"
 
 
@@ -86,5 +86,5 @@ class DeprecationError(RedivisError):
         super().__init__(message)
         self.message = message
 
-    def __str__(self):
+    def __repr__(self):
         return self.message

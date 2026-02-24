@@ -40,6 +40,9 @@ class Transform(Base):
         )
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Transform {self.qualified_reference}>"
+
     def referenced_tables(self):
         self.get()
         return [
