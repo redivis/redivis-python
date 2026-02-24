@@ -72,22 +72,35 @@ def _install_excepthook():
     _original_hook = sys.excepthook
 
     def _format_filtered_tb(exc_type, exc_value, exc_tb):
-        # Extract all frames, keep only those outside the redivis package
+
         entries = traceback.extract_tb(exc_tb)
+
+        # Extract all frames, keep only those outside the redivis package
+        # Also exclude ipython noise
+        # Directories to filter out of tracebacks
+        _filter_dirs = [
+            _package_dir,
+            os.path.join("IPython", ""),
+            os.path.join("ipykernel", ""),
+        ]
+
         user_entries = [
             e
             for e in entries
-            if not os.path.abspath(e.filename).startswith(_package_dir)
+            if not any(d in os.path.abspath(e.filename) for d in _filter_dirs)
         ]
 
         lines = []
-        # Always include the standard traceback header
         lines.append("Traceback (most recent call last):\n")
         if user_entries:
             lines.extend(traceback.format_list(user_entries))
         else:
-            # No user frames; indicate that only internal redivis frames were omitted
-            lines.append("  (full traceback omitted from redivis internals)\n")
+            # No user frames; show the last frame before filtering so there's some context
+            last_entry = entries[-1] if entries else None
+            if last_entry:
+                lines.extend(traceback.format_list([last_entry]))
+            else:
+                lines.append("  (full traceback omitted from redivis internals)\n")
 
         lines.append(f"{exc_type.__name__}: {exc_value}\n")
         return "".join(lines)
