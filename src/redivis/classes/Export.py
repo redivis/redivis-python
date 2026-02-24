@@ -143,17 +143,17 @@ class Export(Base):
                 if progress:
                     pbar.close()
                 raise exceptions.JobError(
-                    kind=self.properties["kind"],
-                    message=self.properties["errorMessage"],
-                    status=self.properties["status"],
+                    kind=self.properties.get("kind"),
+                    message=self.properties.get("errorMessage"),
+                    status=self.properties.get("status"),
                 )
             elif self.properties["status"] == "cancelled":
                 if progress:
                     pbar.close()
                 raise exceptions.JobError(
-                    kind=self.properties["kind"],
-                    message=self.properties["errorMessage"],
-                    status=self.properties["status"],
+                    kind=self.properties.get("kind"),
+                    message=self.properties.get("errorMessage", "Export was cancelled"),
+                    status=self.properties.get("status"),
                 )
             else:
                 iter_count += 1

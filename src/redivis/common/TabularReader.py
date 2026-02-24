@@ -97,11 +97,10 @@ class TabularReader(Base):
             return self.directory
 
     def file(self, path: Union[str, Path]) -> File:
-        if (
-            self.directory is not None
-            and int(datetime.now(timezone.utc).timestamp() * 1000)
-            - self.cached_directory_timestamp
-            > 5 * 1000  # cache for 5s
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if self.directory is None or (
+            self.cached_directory_timestamp is not None
+            and now_ms - self.cached_directory_timestamp > 5000  # cache for 5s
         ):
             self.to_directory()
 

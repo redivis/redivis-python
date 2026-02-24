@@ -141,7 +141,7 @@ def process_request_response(
     response_json = {}
     try:
         # Retry with exponential backoff on service unavailable
-        if r.status_code == 503 and original_parameters["retry_count"] < 10:
+        if r.status_code == 503 and original_parameters["retry_count"] < 0:
             logging.debug("API is currently unavailable, retrying...")
             time.sleep(original_parameters["retry_count"])
             original_parameters["retry_count"] += 1

@@ -81,9 +81,14 @@ def _install_excepthook():
         ]
 
         lines = []
+        # Always include the standard traceback header
+        lines.append("Traceback (most recent call last):\n")
         if user_entries:
-            lines.append("Traceback (most recent call last):\n")
             lines.extend(traceback.format_list(user_entries))
+        else:
+            # No user frames; indicate that only internal redivis frames were omitted
+            lines.append("  (full traceback omitted from redivis internals)\n")
+
         lines.append(f"{exc_type.__name__}: {exc_value}\n")
         return "".join(lines)
 

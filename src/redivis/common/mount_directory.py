@@ -3,7 +3,7 @@ import stat
 import errno
 import threading
 
-
+from ..common import exceptions
 from mfusepy import FUSE, FuseOSError, Operations
 
 
@@ -212,6 +212,7 @@ def mount_directory(directory, path, foreground):
         mount_thread = threading.Thread(
             target=FUSE,
             args=(fs, str(mount_path)),
+            # IMPORTANT: foreground=True still needs to be set here, otherwise FUSE crashes (though it's actually in the background since we're running in a daemonized thread)
             kwargs={"nothreads": False, "foreground": True},
             daemon=True,
         )

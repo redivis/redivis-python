@@ -123,9 +123,9 @@ class Transform(Base):
                 ]:
                     if current_job["status"] == "failed":
                         raise exceptions.JobError(
-                            message=current_job["errorMessage"],
-                            status=current_job["status"],
-                            kind=current_job["kind"],
+                            message=current_job.get("errorMessage"),
+                            status=current_job.get("status"),
+                            kind=current_job.get("kind"),
                         )
                     break
                 else:
