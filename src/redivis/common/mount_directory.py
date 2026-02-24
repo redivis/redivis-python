@@ -3,7 +3,7 @@ import stat
 import errno
 import threading
 
-
+from ..common import exceptions
 from mfusepy import FUSE, FuseOSError, Operations
 
 
@@ -23,7 +23,7 @@ class RedivisFS(Operations):
         clean_path = path.lstrip("/")
         try:
             node = self.directory.get(clean_path)
-        except ValueError:
+        except exceptions.ValueError:
             raise FuseOSError(errno.ENOENT)
 
         if node is None:
@@ -197,13 +197,24 @@ def mount_directory(directory, path, foreground):
     mount_path.mkdir(parents=True, exist_ok=True)
 
     if not mount_path.is_dir():
-        raise ValueError(f"Mount path {path} is not a directory")
+        raise exceptions.ValueError(f"Mount path {path} is not a directory")
 
     # Check if mount point is empty
     if any(mount_path.iterdir()):
-        raise ValueError(f"Mount path {path} is not empty")
+        raise exceptions.ValueError(f"Mount path {path} is not empty")
 
     # Create and start FUSE filesystem
     fs = RedivisFS(directory)
     print(f"Mounted directory at {mount_path}")
-    fuse = FUSE(fs, str(mount_path), nothreads=False, foreground=foreground)
+    if foreground:
+        FUSE(fs, str(mount_path), nothreads=False, foreground=True)
+    else:
+        mount_thread = threading.Thread(
+            target=FUSE,
+            args=(fs, str(mount_path)),
+            # IMPORTANT: foreground=True still needs to be set here, otherwise FUSE crashes (though it's actually in the background since we're running in a daemonized thread)
+            kwargs={"nothreads": False, "foreground": True},
+            daemon=True,
+        )
+        mount_thread.start()
+        return mount_thread

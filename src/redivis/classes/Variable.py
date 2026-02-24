@@ -1,5 +1,6 @@
 import time
-import warnings
+
+from ..common import exceptions
 
 from .Base import Base
 from ..common.api_request import make_request
@@ -75,7 +76,5 @@ class Variable(Base):
         try:
             make_request(method="HEAD", path=self.uri)
             return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
+        except exceptions.NotFoundError:
             return False

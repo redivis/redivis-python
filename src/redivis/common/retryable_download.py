@@ -4,6 +4,8 @@ import pathlib
 from base64 import b64decode
 import time
 import hashlib
+
+from ..common import exceptions
 from ..common.api_request import make_request
 from contextlib import closing
 from requests import RequestException
@@ -97,8 +99,10 @@ def perform_retryable_download(
                 retry_count=retry_count + 1,
             )
         else:
-            print("Download connection failed after too many retries, giving up.")
-            raise e
+            raise exceptions.NetworkError(
+                message=f"A network error occurred. Download failed after {retry_count} retries.",
+                original_exception=e,
+            ) from e
 
     if progress:
         pbar.close()
@@ -126,11 +130,12 @@ def check_filename(filename, overwrite, retry_count, size, md5_hash, on_progress
                     on_progress(int(size))
                 return filename
             elif not overwrite:
-                raise Exception(
+
+                raise exceptions.ValueError(
                     f"File already exists at '{filename}'. Set parameter overwrite=True to overwrite existing files."
                 )
         elif not overwrite:
-            raise Exception(
+            raise exceptions.ValueError(
                 f"File already exists at '{filename}'. Set parameter overwrite=True to overwrite existing files."
             )
     return None

@@ -1,6 +1,6 @@
 from .Table import Table
 from .Base import Base
-
+from ..common import exceptions
 from ..common.api_request import make_request
 
 from urllib.parse import quote as quote_uri
@@ -16,7 +16,7 @@ class Datasource(Base):
             if os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
                 workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
             else:
-                raise Exception(
+                raise exceptions.ValueError(
                     "REDIVIS_DEFAULT_WORKFLOW must be set if no workflow is specified in the Datasource constructor"
                 )
         if isinstance(source, Dataset) or isinstance(source, Workflow):
@@ -57,9 +57,7 @@ class Datasource(Base):
         try:
             make_request(method="HEAD", path=self.uri)
             return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
+        except exceptions.NotFoundError:
             return False
 
     def source_dataset(self):
@@ -70,7 +68,7 @@ class Datasource(Base):
         except KeyError:
             self.get()
             if not "sourceDataset" in self.properties:
-                raise Exception(
+                raise exceptions.ValueError(
                     "This datasource doesn't have a source dataset. Use the source_workflow() method instead."
                 )
             source_dataset = self.properties["sourceDataset"]
@@ -84,7 +82,7 @@ class Datasource(Base):
         except KeyError:
             self.get()
             if not "sourceWorkflow" in self.properties:
-                raise Exception(
+                raise exceptions.ValueError(
                     "This datasource doesn't have a source workflow. Use the source_dataset() method instead."
                 )
             source_workflow = self.properties["sourceWorkflow"]
@@ -128,11 +126,11 @@ class Datasource(Base):
                 )
             if not source_dataset or source_workflow:
                 if sample:
-                    raise Exception(
+                    raise exceptions.ValueError(
                         "Sampling is not applicable to datasources that reference a workflow"
                     )
                 if version:
-                    raise Exception(
+                    raise exceptions.ValueError(
                         "Versions are not applicable to datasources that reference a workflow"
                     )
 

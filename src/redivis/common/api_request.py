@@ -9,6 +9,7 @@ import time
 
 from .auth import get_auth_token, refresh_credentials
 from .._version import __version__
+from .util import raise_api_error
 
 
 def make_request(
@@ -140,7 +141,7 @@ def process_request_response(
     response_json = {}
     try:
         # Retry with exponential backoff on service unavailable
-        if r.status_code == 503 and original_parameters["retry_count"] < 10:
+        if r.status_code == 503 and original_parameters["retry_count"] < 0:
             logging.debug("API is currently unavailable, retrying...")
             time.sleep(original_parameters["retry_count"])
             original_parameters["retry_count"] += 1
@@ -189,9 +190,14 @@ def process_request_response(
             return make_request(**original_parameters)
     except Exception:
         if method == "head":
-            raise Exception(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
+            error_payload = r.headers.get("X-REDIVIS-ERROR-PAYLOAD")
+            response_text = (
+                unquote(error_payload) if error_payload is not None else r.text
+            )
+            raise_api_error(response_text=response_text, response=r)
+
         else:
-            raise Exception(r.text)
+            raise_api_error(response_text=r.text, response=r)
 
     if "X-REDIVIS-WARNING" in r.headers:
         global previously_printed_warnings
@@ -200,7 +206,7 @@ def process_request_response(
             previously_printed_warnings[r.headers["X-REDIVIS-WARNING"]] = True
 
     if r.status_code >= 400:
-        raise Exception(response_json)
+        return raise_api_error(response_json=response_json, response=r)
     elif parse_response:
         return response_json
     else:

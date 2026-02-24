@@ -1,6 +1,7 @@
 import os
 import time
 from .Variable import Variable
+from ..common import exceptions
 
 from ..common.TabularReader import TabularReader
 from ..common.api_request import make_request, make_paginated_request
@@ -69,11 +70,17 @@ class Query(TabularReader):
             if self.properties["status"] == "completed":
                 break
             elif self.properties["status"] == "failed":
-                raise Exception(
-                    f"Query job failed with message: {self.properties['errorMessage']}"
+                raise exceptions.JobError(
+                    message=self.properties.get("errorMessage"),
+                    status=self.properties.get("status"),
+                    kind=self.properties.get("kind"),
                 )
             elif self.properties["status"] == "cancelled":
-                raise Exception(f"Query job was cancelled")
+                raise exceptions.JobError(
+                    message="Query Job was cancelled",
+                    status=self.properties.get("status"),
+                    kind=self.properties.get("kind"),
+                )
             else:
                 time.sleep(2)
                 self.get()

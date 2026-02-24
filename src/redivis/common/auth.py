@@ -8,6 +8,9 @@ from pathlib import Path
 import re
 import requests
 
+from . import exceptions
+from .util import raise_api_error
+
 redivis_dir = Path.home() / ".redivis"
 cached_credentials = None
 verify_ssl = (
@@ -120,7 +123,9 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
     started_polling_at = time.time()
     while True:
         if time.time() - started_polling_at > 60 * 10:
-            raise Exception("Timed out waiting for device authorization")
+            raise exceptions.RedivisError(
+                "Timed out after 10 minutes while waiting for device authorization"
+            )
 
         time.sleep(parsed_response["interval"] or 5)
 
@@ -142,9 +147,9 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
             if res.json()["error"] == "authorization_pending":
                 """authorization pending"""
             else:
-                raise Exception(res.json())
+                raise_api_error(response_json=res.json(), response=res)
         else:
-            raise Exception(res.json())
+            raise_api_error(response_json=res.json(), response=res)
 
     cached_credentials = res.json()
 

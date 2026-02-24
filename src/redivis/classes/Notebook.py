@@ -1,5 +1,6 @@
 from .Table import Table
 from .Base import Base
+from ..common import exceptions
 from ..common.api_request import make_request
 from tqdm.auto import tqdm
 import time
@@ -25,7 +26,7 @@ class Notebook(Base):
             elif os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
                 workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
             else:
-                raise Exception(
+                raise exceptions.ValueError(
                     "Invalid notebook specifier, must be the fully qualified reference if no workflow is specified"
                 )
 
@@ -57,9 +58,7 @@ class Notebook(Base):
         try:
             make_request(method="HEAD", path=self.uri)
             return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
+        except exceptions.NotFoundError:
             return False
 
     def run(self, *, wait_for_finish=True):
@@ -81,7 +80,11 @@ class Notebook(Base):
                     "failed",
                 ]:
                     if current_job["status"] == "failed":
-                        raise Exception(current_job["errorMessage"])
+                        raise exceptions.JobError(
+                            message=current_job.get("errorMessage"),
+                            status=current_job.get("status"),
+                            kind=current_job.get("kind"),
+                        )
                     break
                 else:
                     logging.debug("Notebook is still in progress...")
@@ -160,7 +163,7 @@ class Notebook(Base):
                     should_remove_tempfile = False
                     temp_file_path = data
                 else:
-                    raise Exception(
+                    raise exceptions.ValueError(
                         "Only paths to parquet files (ending in .parquet) are supported when a string argument is provided"
                     )
             else:

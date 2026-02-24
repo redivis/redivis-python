@@ -9,6 +9,7 @@ from tqdm.auto import tqdm
 from .Upload import Upload
 from .Export import Export
 from .Variable import Variable
+from ..common import exceptions
 from ..common.TabularReader import TabularReader
 from ..common.api_request import make_request, make_paginated_request
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
@@ -42,7 +43,7 @@ class Table(TabularReader):
             reference_scope += "."
         else:
             if not os.getenv("REDIVIS_DEFAULT_NOTEBOOK"):
-                raise Exception(
+                raise exceptions.ValueError(
                     "Invalid table specifier, must be the fully qualified reference if no dataset or workflow is specified"
                 )
             reference_scope = ""
@@ -100,9 +101,7 @@ class Table(TabularReader):
         try:
             make_request(method="HEAD", path=self.uri)
             return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
+        except exceptions.NotFoundError:
             return False
 
     def list_uploads(self, *, max_results=None):
@@ -131,7 +130,7 @@ class Table(TabularReader):
         max_parallelization=os.cpu_count() * 5,
     ):
         if (files is None) == (directory is None):
-            raise Exception("Either files or directory must be specified")
+            raise exceptions.ValueError("Either files or directory must be specified")
 
         total_size = 0
 
@@ -394,7 +393,7 @@ def map_file(file):
 
     if "name" not in file:
         if "data" in file:
-            raise Exception(
+            raise exceptions.ValueError(
                 'All file specifications with a "data" key must specify a name'
             )
 

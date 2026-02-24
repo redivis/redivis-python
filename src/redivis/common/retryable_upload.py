@@ -5,9 +5,9 @@ import requests
 import os
 import logging
 from tqdm.utils import CallbackIOWrapper
-from urllib.parse import quote as quote_uri
 
 from .auth import get_auth_token
+from ..common import exceptions
 
 verify_ssl = (
     False
@@ -71,8 +71,10 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
             retry_count = 0  # reset retry_count after a successfully uploaded chunk
         except requests.RequestException as e:
             if retry_count > 10:
-                print("A network error occurred. Upload failed after too many retries.")
-                raise e
+                raise exceptions.NetworkError(
+                    message=f"A network error occurred. Upload failed after {retry_count} retries.",
+                    original_exception=e,
+                ) from e
 
             retry_count += 1
             time.sleep(retry_count)
@@ -102,11 +104,13 @@ def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
 
     except requests.RequestException as e:
         if did_request_complete:
-            raise e
+            raise exceptions.NetworkError(original_exception=e)
         else:
             if retry_count > 10:
-                print("A network error occurred. Upload failed after too many retries.")
-                raise e
+                raise exceptions.NetworkError(
+                    message=f"A network error occurred. Upload failed after {retry_count} retries.",
+                    original_exception=e,
+                ) from e
             time.sleep(retry_count + 1)
             initiate_resumable_upload(
                 size, temp_upload_url, headers, retry_count=retry_count + 1
@@ -140,15 +144,19 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
                 if match.group(0) and not math.isnan(int(match.group(1))):
                     return int(match.group(1)) + 1
                 else:
-                    raise Exception("An unknown error occurred. Please try again.")
+                    raise exceptions.RedivisError(
+                        "An unknown error occurred. Please try again."
+                    )
             # If GCS hasn't received any bytes, the header will be missing
             else:
                 return 0
         else:
-            raise Exception("An unknown error occurred. Please try again.")
+            raise exceptions.RedivisError(
+                "An unknown error occurred. Please try again."
+            )
     except requests.RequestException as e:
         if retry_count > 10:
-            raise e
+            raise exceptions.NetworkError(original_exception=e) from e
 
         time.sleep(retry_count + 1)
         return retry_partial_upload(
@@ -174,8 +182,10 @@ def perform_standard_upload(
         res.raise_for_status()
     except requests.RequestException as e:
         if retry_count > 10:
-            print("A network error occurred. Upload failed after too many retries.")
-            raise e
+            raise exceptions.NetworkError(
+                message=f"A network error occurred. Upload failed after {retry_count} retries.",
+                original_exception=e,
+            ) from e
         time.sleep(retry_count + 1)
         return perform_standard_upload(
             data=data,

@@ -1,3 +1,4 @@
+from ..common import exceptions
 from ..classes.Base import Base
 
 import warnings
@@ -33,7 +34,9 @@ class TabularReader(Base):
     ) -> Directory:
         # TODO: add file / directory methods to uploads
         if self._is_upload:
-            raise Exception("Listing files on uploads is not currently supported")
+            raise exceptions.ValueError(
+                "Listing files on uploads is not currently supported"
+            )
 
         if self.directory:
             # Queries are immutable, always use the cached version
@@ -45,10 +48,12 @@ class TabularReader(Base):
 
         check_is_ready(self)
         # Compute this here, to get the timestamp before the request was sent
-        gmt_timestamp = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         headers = {}
         if self.cached_directory_timestamp:
-            headers["If-Modified-Since"] = self.cached_directory_timestamp
+            headers["If-Modified-Since"] = datetime.fromtimestamp(
+                self.cached_directory_timestamp / 1000, tz=timezone.utc
+            ).strftime("%a, %d %b %Y %H:%M:%S GMT")
 
         with closing(
             make_request(
@@ -88,16 +93,20 @@ class TabularReader(Base):
                 )
 
             self.directory = directory
-            self.cached_directory_timestamp = gmt_timestamp
+            self.cached_directory_timestamp = now_ms
             return self.directory
 
     def file(self, path: Union[str, Path]) -> File:
-        if not self.directory:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if self.directory is None or (
+            self.cached_directory_timestamp is not None
+            and now_ms - self.cached_directory_timestamp > 5000  # cache for 5s
+        ):
             self.to_directory()
 
         node = self.directory.get(path)
         if isinstance(node, Directory):
-            raise Exception(f"{path} is a directory, not a file")
+            raise exceptions.ValueError(f"{path} is a directory, not a file")
         return node
 
     def list_files(
@@ -107,10 +116,9 @@ class TabularReader(Base):
         file_id_variable: Optional[str] = None,
         file_name_variable: Optional[str] = None,
     ) -> List[File]:
-        if not self.directory:
-            self.to_directory(
-                file_id_variable=file_id_variable, file_name_variable=file_name_variable
-            )
+        self.to_directory(
+            file_id_variable=file_id_variable, file_name_variable=file_name_variable
+        )
 
         return self.directory.list(
             mode="files", recursive=True, max_results=max_results
@@ -131,10 +139,9 @@ class TabularReader(Base):
             FutureWarning,
             stacklevel=2,
         )
-        if not self.directory:
-            self.to_directory(
-                file_id_variable=file_id_variable, file_name_variable=file_name_variable
-            )
+        self.to_directory(
+            file_id_variable=file_id_variable, file_name_variable=file_name_variable
+        )
 
         return self.directory.download(
             path=path,
@@ -319,7 +326,7 @@ class TabularReader(Base):
                 mapped_variables, geography_variable
             )
             if geography_variable is None:
-                raise Exception(
+                raise exceptions.NotFoundError(
                     'Unable to find a variable with type=="geography" in the query results'
                 )
 
@@ -414,7 +421,7 @@ class TabularReader(Base):
     ) -> None:
         check_is_ready(self)
         if not name:
-            raise Exception(
+            raise exceptions.ValueError(
                 'A SAS dataset name must be provided. E.g., table.to_sas("mydata")'
             )
         import pyarrow as pa
@@ -435,7 +442,7 @@ class TabularReader(Base):
                     max_results=2,
                 )
                 if len(geo_variables) > 1:
-                    raise Exception(
+                    raise exceptions.ValueError(
                         "Multiple geography variables found; please specify which to use"
                     )
                 elif len(geo_variables) == 1:
@@ -500,7 +507,7 @@ class TabularReader(Base):
     ) -> None:
         # This will be set if there was an error during Stata initialization in a Redivis notebook
         if os.getenv("STATA_ERROR"):
-            raise Exception(
+            raise exceptions.RedivisError(
                 f"""An error occurred during Stata initialization. Please make sure you have the correct license and edition specified.\n\nThe error message was:\n\n{os.getenv('STATA_ERROR')}."""
             )
         check_is_ready(self)
@@ -516,7 +523,7 @@ class TabularReader(Base):
                     max_results=2,
                 )
                 if len(geo_variables) > 1:
-                    raise Exception(
+                    raise exceptions.ValueError(
                         "Multiple geography variables found; please specify which to use"
                     )
                 elif len(geo_variables) == 1:
@@ -610,8 +617,6 @@ def get_mapped_variables(
     self: TabularReader, variables: Optional[Iterable[str]]
 ) -> Tuple[List[Dict[str, Any]], bool]:
     coerce_schema = False  # queries and uploads will always have the correct types
-    if self._is_query:
-        return self.properties.get("outputSchema"), coerce_schema
 
     if self._is_table:
         coerce_schema = self.properties["container"]["kind"] == "dataset"
@@ -644,7 +649,7 @@ def arrow_table_to_pandas(
     pa.set_io_thread_count(max_parallelization)
 
     if dtype_backend not in ["numpy", "numpy_nullable", "pyarrow"]:
-        raise Exception(
+        raise exceptions.ValueError(
             f"Unknown dtype_backend. Must be one of 'pyarrow'|'numpy_nullable'|'numpy'. Default is 'pyarrow'"
         )
 
@@ -682,7 +687,7 @@ def get_geography_variable(
             if variable["name"] == geography_variable_name:
                 return variable
 
-        raise Exception(
+        raise exceptions.NotFoundError(
             f"The specified geography variable '{geography_variable_name}' could not be found"
         )
 

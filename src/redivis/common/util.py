@@ -5,6 +5,8 @@ import shutil
 import pathlib
 import uuid
 
+from ..common import exceptions
+
 
 def get_warning(kind):
     if kind == "dataframe_deprecation":
@@ -82,8 +84,34 @@ def convert_data_to_parquet(data):
         elif isinstance(data, polars.DataFrame):
             data.write_parquet(temp_file_path)
         else:
-            raise Exception(
+            raise exceptions.ValueError(
                 "Unknown datatype provided. Must be an instance of pandas.DataFrame, pyarrow.Dataset, pyarrow.Table, dask.DataFrame, polars.LazyFrame, or polars.DataFrame"
             )
 
     return temp_file_path
+
+
+def raise_api_error(response_json=None, response_text=None, response=None):
+    status_code = response.status_code if response else response_json.get("status")
+    error = response_json.get("error") if response_json else "api_error"
+    description = (
+        response_json.get("error_description") if response_json else response_text
+    )
+    if status_code == 404:
+        raise exceptions.NotFoundError(
+            message=error,
+            status_code=404,
+            error_description=description,
+        ) from None
+    elif status_code == 403:
+        raise exceptions.AuthorizationError(
+            message=error,
+            status_code=403,
+            error_description=description,
+        ) from None
+    else:
+        raise exceptions.APIError(
+            message=error,
+            status_code=status_code,
+            error_description=description,
+        ) from None
