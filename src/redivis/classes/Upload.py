@@ -294,9 +294,9 @@ class Upload(TabularReader):
                         break
                     else:
                         logging.debug("Upload is still in progress...")
-        except Exception as e:
+        except Exception:
             if remove_on_fail and self.properties["status"] == "failed":
                 self.delete()
-            raise e
+            raise
 
         return self
