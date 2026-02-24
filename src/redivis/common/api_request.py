@@ -9,7 +9,7 @@ import time
 
 from .auth import get_auth_token, refresh_credentials
 from .._version import __version__
-from ..common import exceptions
+from .util import raise_api_error
 
 
 def make_request(

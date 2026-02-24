@@ -508,7 +508,7 @@ class TabularReader(Base):
     ) -> None:
         # This will be set if there was an error during Stata initialization in a Redivis notebook
         if os.getenv("STATA_ERROR"):
-            raise RedivisError(
+            raise exceptions.RedivisError(
                 f"""An error occurred during Stata initialization. Please make sure you have the correct license and edition specified.\n\nThe error message was:\n\n{os.getenv('STATA_ERROR')}."""
             )
         check_is_ready(self)

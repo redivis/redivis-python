@@ -89,3 +89,29 @@ def convert_data_to_parquet(data):
             )
 
     return temp_file_path
+
+
+def raise_api_error(response_json=None, response_text=None, response=None):
+    status_code = response.status_code
+    error = response_json.get("error") if response_json else "api_error"
+    description = (
+        response_json.get("error_description") if response_json else response_text
+    )
+    if status_code == 404:
+        raise exceptions.NotFoundError(
+            status_code=404,
+            error=error,
+            error_description=description,
+        ) from None
+    elif status_code == 403:
+        raise exceptions.AuthorizationError(
+            status_code=403,
+            error=error,
+            error_description=description,
+        ) from None
+    else:
+        raise exceptions.APIError(
+            status_code=status_code,
+            error=error,
+            error_description=description,
+        ) from None

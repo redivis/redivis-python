@@ -74,7 +74,7 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
                 raise exceptions.NetworkError(
                     message=f"A network error occurred. Upload failed after {retry_count} retries.",
                     original_exception=e,
-                )
+                ) from e
 
             retry_count += 1
             time.sleep(retry_count)
@@ -110,7 +110,7 @@ def initiate_resumable_upload(size, temp_upload_url, headers, retry_count=0):
                 raise exceptions.NetworkError(
                     message=f"A network error occurred. Upload failed after {retry_count} retries.",
                     original_exception=e,
-                )
+                ) from e
             time.sleep(retry_count + 1)
             initiate_resumable_upload(
                 size, temp_upload_url, headers, retry_count=retry_count + 1
@@ -144,15 +144,19 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url, headers):
                 if match.group(0) and not math.isnan(int(match.group(1))):
                     return int(match.group(1)) + 1
                 else:
-                    raise RedivisError("An unknown error occurred. Please try again.")
+                    raise exceptions.RedivisError(
+                        "An unknown error occurred. Please try again."
+                    )
             # If GCS hasn't received any bytes, the header will be missing
             else:
                 return 0
         else:
-            raise RedivisError("An unknown error occurred. Please try again.")
+            raise exceptions.RedivisError(
+                "An unknown error occurred. Please try again."
+            )
     except requests.RequestException as e:
         if retry_count > 10:
-            raise exceptions.NetworkError(original_exception=e)
+            raise exceptions.NetworkError(original_exception=e) from e
 
         time.sleep(retry_count + 1)
         return retry_partial_upload(
@@ -181,7 +185,7 @@ def perform_standard_upload(
             raise exceptions.NetworkError(
                 message=f"A network error occurred. Upload failed after {retry_count} retries.",
                 original_exception=e,
-            )
+            ) from e
         time.sleep(retry_count + 1)
         return perform_standard_upload(
             data=data,

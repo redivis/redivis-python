@@ -64,7 +64,7 @@ class RedivisArrowIterator:
                 raise exceptions.NetworkError(
                     message=f"Download connection failed after {self.retry_count} retries.",
                     original_exception=e,
-                )
+                ) from e
 
             time.sleep(self.retry_count)
             return self.__get_next_reader__(self.current_offset)
@@ -110,7 +110,7 @@ class RedivisArrowIterator:
                 raise exceptions.NetworkError(
                     message=f"A network error occurred. Download connection failed after {self.retry_count} retries.",
                     original_exception=e,
-                )
+                ) from e
             time.sleep(self.retry_count)
             self.__get_next_reader__(self.current_offset)
             return self.__next__()
@@ -463,7 +463,7 @@ def process_stream(
             raise exceptions.NetworkError(
                 message=f"A network error occurred. Stream rows connection failed after {retry_count} retries.",
                 original_exception=e,
-            )
+            ) from e
         time.sleep(retry_count + 1)
         return process_stream(
             stream,

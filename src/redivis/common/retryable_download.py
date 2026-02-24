@@ -102,7 +102,7 @@ def perform_retryable_download(
             raise exceptions.NetworkError(
                 message=f"A network error occurred. Download failed after {retry_count} retries.",
                 original_exception=e,
-            )
+            ) from e
 
     if progress:
         pbar.close()
