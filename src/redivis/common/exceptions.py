@@ -71,8 +71,9 @@ class ValueError(RedivisError, builtins.ValueError):
 
 class JobError(RedivisError):
     def __init__(self, message=None, kind=None, status="status unknown"):
-        super().__init__(self.message)
-        self.message = message or f"Job finished with status: {status}"
+        final_message = message or f"Job finished with status: {status}"
+        super().__init__(final_message)
+        self.message = final_message
         self.kind = kind
         self.status = status
 

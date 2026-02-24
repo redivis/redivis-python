@@ -135,4 +135,5 @@ def _install_excepthook():
         pass
 
 
-_install_excepthook()
+if os.getenv("REDIVIS_INSTALL_EXCEPTHOOK", "1").lower() not in ("0", "false", "no"):
+    _install_excepthook()

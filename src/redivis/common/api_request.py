@@ -190,9 +190,11 @@ def process_request_response(
             return make_request(**original_parameters)
     except Exception:
         if method == "head":
-            raise_api_error(
-                response_text=unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]), response=r
+            error_payload = r.headers.get("X-REDIVIS-ERROR-PAYLOAD")
+            response_text = (
+                unquote(error_payload) if error_payload is not None else r.text
             )
+            raise_api_error(response_text=response_text, response=r)
 
         else:
             raise_api_error(response_text=r.text, response=r)
