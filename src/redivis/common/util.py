@@ -99,19 +99,19 @@ def raise_api_error(response_json=None, response_text=None, response=None):
     )
     if status_code == 404:
         raise exceptions.NotFoundError(
+            message=error,
             status_code=404,
-            error=error,
             error_description=description,
         ) from None
     elif status_code == 403:
         raise exceptions.AuthorizationError(
+            message=error,
             status_code=403,
-            error=error,
             error_description=description,
         ) from None
     else:
         raise exceptions.APIError(
+            message=error,
             status_code=status_code,
-            error=error,
             error_description=description,
         ) from None

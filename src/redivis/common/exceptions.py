@@ -11,10 +11,10 @@ class RedivisError(Exception):
 
 
 class APIError(RedivisError):
-    def __init__(self, status_code, error, error_description=""):
-        super().__init__(error_description or error)
+    def __init__(self, message, status_code, error_description=""):
+        super().__init__(error_description or message)
         self.status_code = status_code
-        self.message = error
+        self.message = message
         self.description = error_description
 
     def __str__(self):
@@ -22,10 +22,10 @@ class APIError(RedivisError):
 
 
 class NotFoundError(APIError):
-    def __init__(self, error="", status_code=404, error_description=""):
-        super().__init__(status_code, error, error_description)
+    def __init__(self, message="", status_code=404, error_description=""):
+        super().__init__(message, status_code, error_description)
         self.status_code = status_code
-        self.message = error
+        self.message = message
         self.description = error_description
 
     def __str__(self):
@@ -33,10 +33,10 @@ class NotFoundError(APIError):
 
 
 class AuthorizationError(APIError):
-    def __init__(self, status_code, error="", error_description=""):
-        super().__init__(status_code, error, error_description)
+    def __init__(self, message, status_code, error_description=""):
+        super().__init__(message, status_code, error_description)
         self.status_code = status_code
-        self.message = error
+        self.message = message
         self.description = error_description
 
     def __str__(self):
