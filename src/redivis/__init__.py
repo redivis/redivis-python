@@ -8,14 +8,19 @@ from .classes.Query import Query as query
 from .classes.Table import Table as table
 from .classes.Notebook import Notebook as notebook
 from .classes.Transform import Transform as transform
+from .common import exceptions
 from .common.api_request import make_request as make_api_request
 import warnings
+import sys
+import traceback
+import os
 
 from ._version import __version__
 
 
 def file(*args, **kwargs):
-    raise Exception(
+
+    raise exceptions.DeprecationError(
         'Calling redivis.file() is no longer supported. Please use redivis.table("table_reference").file("filename") instead.'
     )
 
@@ -60,3 +65,56 @@ def current_workflow():
         return workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
 
     return None
+
+
+def _install_excepthook():
+    _package_dir = os.path.dirname(os.path.abspath(__file__))
+    _original_hook = sys.excepthook
+
+    def _format_filtered_tb(exc_type, exc_value, exc_tb):
+        # Extract all frames, keep only those outside the redivis package
+        entries = traceback.extract_tb(exc_tb)
+        user_entries = [
+            e
+            for e in entries
+            if not os.path.abspath(e.filename).startswith(_package_dir)
+        ]
+
+        lines = []
+        if user_entries:
+            lines.append("Traceback (most recent call last):\n")
+            lines.extend(traceback.format_list(user_entries))
+        lines.append(f"{exc_type.__name__}: {exc_value}\n")
+        return "".join(lines)
+
+    def _custom_excepthook(exc_type, exc_value, exc_tb):
+        if isinstance(exc_value, exceptions.RedivisError):
+            print(
+                _format_filtered_tb(exc_type, exc_value, exc_tb),
+                file=sys.stderr,
+                end="",
+            )
+        else:
+            _original_hook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _custom_excepthook
+
+    try:
+        from IPython import get_ipython
+
+        ipython = get_ipython()
+        if ipython is not None:
+
+            def _ipython_custom_exc(shell, exc_type, exc_value, exc_tb, tb_offset=None):
+                print(
+                    _format_filtered_tb(exc_type, exc_value, exc_tb),
+                    file=sys.stderr,
+                    end="",
+                )
+
+            ipython.set_custom_exc((exceptions.RedivisError,), _ipython_custom_exc)
+    except ImportError:
+        pass
+
+
+_install_excepthook()

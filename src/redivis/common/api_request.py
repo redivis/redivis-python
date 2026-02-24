@@ -9,6 +9,7 @@ import time
 
 from .auth import get_auth_token, refresh_credentials
 from .._version import __version__
+from ..common import exceptions
 
 
 def make_request(
@@ -189,9 +190,12 @@ def process_request_response(
             return make_request(**original_parameters)
     except Exception:
         if method == "head":
-            raise Exception(unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]))
+            raise_api_error(
+                response_text=unquote(r.headers["X-REDIVIS-ERROR-PAYLOAD"]), response=r
+            )
+
         else:
-            raise Exception(r.text)
+            raise_api_error(response_text=r.text, response=r)
 
     if "X-REDIVIS-WARNING" in r.headers:
         global previously_printed_warnings
@@ -200,7 +204,7 @@ def process_request_response(
             previously_printed_warnings[r.headers["X-REDIVIS-WARNING"]] = True
 
     if r.status_code >= 400:
-        raise Exception(response_json)
+        return raise_api_error(response_json=response_json, response=r)
     elif parse_response:
         return response_json
     else:

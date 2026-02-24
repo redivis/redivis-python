@@ -4,8 +4,7 @@ from .Base import Base
 from .File import File
 import os
 from pathlib import Path
-
-import time
+from ..common import exceptions
 import concurrent.futures
 from tqdm.auto import tqdm
 from threading import Event
@@ -22,7 +21,9 @@ class Directory(Base):
         parent: Optional["Directory"] = None,
     ) -> None:
         if not table and not query:
-            raise ValueError("All directories must either belong to a table or query.")
+            raise exceptions.ValueError(
+                "All directories must either belong to a table or query."
+            )
 
         self.path = path
         self.name = Path(path).name
@@ -30,17 +31,16 @@ class Directory(Base):
         self.query = query
         self.parent = parent
         self.children = {}
-        self._lastCachedAt = time.time()
 
     def __repr__(self) -> str:
         return f"<Dir {str(self.path)}>"
 
     def list(
         self,
+        max_results: Optional[int] = None,
         *,
         mode: Literal["all", "files", "directories"] = "all",
         recursive: bool = False,
-        max_results: Optional[int] = None,
     ) -> List[Union["Directory", File]]:
         if max_results is None:
             max_results = float("inf")
@@ -116,7 +116,9 @@ class Directory(Base):
             if part == "..":
                 if node.parent is None:
                     # Can't traverse above the root of this tree
-                    raise ValueError("Path traverses above the root directory")
+                    raise exceptions.ValueError(
+                        "Path traverses above the root directory"
+                    )
                 node = node.parent
                 # If '..' is the last segment, return the directory reached
                 if idx == len(parts) - 1:

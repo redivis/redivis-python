@@ -8,6 +8,8 @@ from .Transform import Transform
 
 from .Base import Base
 from urllib.parse import quote as quote_uri
+
+from ..common import exceptions
 from ..common.api_request import make_request, make_paginated_request
 
 
@@ -27,7 +29,7 @@ class Workflow(Base):
             elif os.getenv("REDIVIS_DEFAULT_ORGANIZATION"):
                 organization = Organization(os.getenv("REDIVIS_DEFAULT_ORGANIZATION"))
             else:
-                raise Exception(
+                raise exceptions.ValueError(
                     "Invalid workflow specifier, must be the fully qualified reference if no owner is specified"
                 )
 
@@ -111,9 +113,7 @@ class Workflow(Base):
         try:
             make_request(method="HEAD", path=self.uri)
             return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
+        except exceptions.NotFoundError:
             return False
 
     def update_variables(self, variables):

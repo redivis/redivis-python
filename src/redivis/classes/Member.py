@@ -1,7 +1,7 @@
-import time
 from .Base import Base
 from .User import User
 from ..common.api_request import make_request
+from ..common import exceptions
 
 
 class Member(Base):
@@ -76,7 +76,5 @@ class Member(Base):
         try:
             make_request(method="HEAD", path=self.uri)
             return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
+        except exceptions.NotFoundError:
             return False

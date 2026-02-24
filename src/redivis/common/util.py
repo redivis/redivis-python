@@ -5,6 +5,8 @@ import shutil
 import pathlib
 import uuid
 
+from ..common import exceptions
+
 
 def get_warning(kind):
     if kind == "dataframe_deprecation":
@@ -82,7 +84,7 @@ def convert_data_to_parquet(data):
         elif isinstance(data, polars.DataFrame):
             data.write_parquet(temp_file_path)
         else:
-            raise Exception(
+            raise exceptions.ValueError(
                 "Unknown datatype provided. Must be an instance of pandas.DataFrame, pyarrow.Dataset, pyarrow.Table, dask.DataFrame, polars.LazyFrame, or polars.DataFrame"
             )
 

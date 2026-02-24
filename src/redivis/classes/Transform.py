@@ -1,4 +1,5 @@
 from .Base import Base
+from ..common import exceptions
 from ..common.api_request import make_request
 from .Table import Table
 import os
@@ -20,7 +21,7 @@ class Transform(Base):
             elif os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
                 workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
             else:
-                raise Exception(
+                raise exceptions.ValueError(
                     "Invalid transform specifier, must be the fully qualified reference if no workflow is specified"
                 )
 
@@ -99,9 +100,7 @@ class Transform(Base):
         try:
             make_request(method="HEAD", path=self.uri)
             return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
+        except exceptions.NotFoundError:
             return False
 
     def run(self, *, wait_for_finish=True):
@@ -123,7 +122,11 @@ class Transform(Base):
                     "failed",
                 ]:
                     if current_job["status"] == "failed":
-                        raise Exception(current_job["errorMessage"])
+                        raise exceptions.JobError(
+                            message=current_job["errorMessage"],
+                            status=current_job["status"],
+                            kind=current_job["kind"],
+                        )
                     break
                 else:
                     logging.debug("Transform is still in progress...")

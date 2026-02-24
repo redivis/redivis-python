@@ -3,10 +3,11 @@ import os
 import time
 import concurrent.futures
 import pathlib
+
+from ..common import exceptions
 from ..common.api_request import make_request
 from tqdm.auto import tqdm
 import re
-import urllib
 from threading import Event
 
 from ..common.retryable_download import perform_retryable_download
@@ -48,7 +49,7 @@ class Export(Base):
         elif path.endswith(os.sep) or (not os.path.exists(path) and "." not in path):
             is_dir = True
         elif file_count > 1:
-            raise Exception(
+            raise exceptions.ValueError(
                 f"Path '{path}' is a file, but the export consists of multiple files. Please specify the path to a directory"
             )
 
@@ -57,7 +58,7 @@ class Export(Base):
             and os.path.exists(path)
             and (not is_dir or file_count > 1)
         ):
-            raise Exception(
+            raise exceptions.ValueError(
                 f"File already exists at '{path}'. Set parameter overwrite=True to overwrite existing files."
             )
 
@@ -141,13 +142,19 @@ class Export(Base):
             elif self.properties["status"] == "failed":
                 if progress:
                     pbar.close()
-                raise Exception(
-                    f"Export job failed with message: {self.properties['errorMessage']}"
+                raise exceptions.JobError(
+                    kind=self.properties["kind"],
+                    message=self.properties["errorMessage"],
+                    status=self.properties["status"],
                 )
             elif self.properties["status"] == "cancelled":
                 if progress:
                     pbar.close()
-                raise Exception(f"Export job was cancelled")
+                raise exceptions.JobError(
+                    kind=self.properties["kind"],
+                    message=self.properties["errorMessage"],
+                    status=self.properties["status"],
+                )
             else:
                 iter_count += 1
                 if progress:

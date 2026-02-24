@@ -6,6 +6,8 @@ import time
 from requests import RequestException
 from urllib3.exceptions import HTTPError
 from contextlib import closing
+
+from ..common import exceptions
 from ..classes.Row import Row
 from tqdm.auto import tqdm
 import shutil
@@ -59,8 +61,11 @@ class RedivisArrowIterator:
         except (RequestException, HTTPError) as e:
             self.retry_count = self.retry_count + 1
             if self.retry_count > 10:
-                print("Download connection failed after too many retries, giving up.")
-                raise e
+                raise exceptions.NetworkError(
+                    message=f"Download connection failed after {self.retry_count} retries.",
+                    original_exception=e,
+                )
+
             time.sleep(self.retry_count)
             return self.__get_next_reader__(self.current_offset)
 
@@ -102,8 +107,10 @@ class RedivisArrowIterator:
         except (RequestException, HTTPError) as e:
             self.retry_count = self.retry_count + 1
             if self.retry_count > 10:
-                print("Download connection failed after too many retries, giving up.")
-                raise e
+                raise exceptions.NetworkError(
+                    message=f"A network error occurred. Download connection failed after {self.retry_count} retries.",
+                    original_exception=e,
+                )
             time.sleep(self.retry_count)
             self.__get_next_reader__(self.current_offset)
             return self.__next__()
@@ -137,7 +144,7 @@ def list_rows(
     progressbar = None
 
     if max_parallelization < 1:
-        raise ValueError("max_parallelization must be greater than 0")
+        raise exceptions.ValueError("max_parallelization must be greater than 0")
 
     pyarrow.set_cpu_count(max_parallelization)
     pyarrow.set_io_thread_count(max_parallelization)
@@ -453,8 +460,10 @@ def process_stream(
                 os.remove(os_file)
     except (RequestException, HTTPError) as e:
         if retry_count >= 10:
-            print("Stream rows connection failed after too many retries, giving up.")
-            raise e
+            raise exceptions.NetworkError(
+                message=f"A network error occurred. Stream rows connection failed after {retry_count} retries.",
+                original_exception=e,
+            )
         time.sleep(retry_count + 1)
         return process_stream(
             stream,

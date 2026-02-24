@@ -9,6 +9,7 @@ import pathlib
 import uuid
 from tqdm.auto import tqdm
 
+from ..common import exceptions
 from ..common.TabularReader import TabularReader
 from ..common.util import convert_data_to_parquet
 
@@ -48,9 +49,7 @@ class Upload(TabularReader):
         try:
             make_request(method="HEAD", path=self.uri)
             return True
-        except Exception as err:
-            if err.args[0]["status"] != 404:
-                raise err
+        except exceptions.NotFoundError:
             return False
 
     def get(self):
@@ -132,7 +131,7 @@ class Upload(TabularReader):
         size = None
 
         if isinstance(content, str) and len(content) > 4096:  # maximum path length
-            raise Exception(
+            raise exceptions.ValueError(
                 "`content` argument was a string, but is an invalid file path. To upload data as content, make sure that the `content` argument is provided as binary data."
             )
 
@@ -231,7 +230,7 @@ class Upload(TabularReader):
             return self
 
         if replace_on_conflict is True and rename_on_conflict is True:
-            raise Exception(
+            raise exceptions.ValueError(
                 "Invalid parameters. replace_on_conflict and rename_on_conflict cannot both be True."
             )
 
@@ -239,7 +238,7 @@ class Upload(TabularReader):
             if replace_on_conflict is True:
                 self.delete()
             elif rename_on_conflict is not True:
-                raise Exception(
+                raise exceptions.ValueError(
                     f"An upload with the name {self.name} already exists on this version of the table. If you want to upload this file anyway, set the parameter rename_on_conflict=True or replace_on_conflict=True."
                 )
 
@@ -287,13 +286,17 @@ class Upload(TabularReader):
                         or self.properties["status"] == "failed"
                     ):
                         if self.properties["status"] == "failed" and raise_on_fail:
-                            raise Exception(self.properties["errorMessage"])
+                            raise exceptions.JobError(
+                                message=self.properties.get("errorMessage"),
+                                status=self.properties.get("status"),
+                                kind=self.properties.get("kind"),
+                            )
                         break
                     else:
                         logging.debug("Upload is still in progress...")
         except Exception as e:
             if remove_on_fail and self.properties["status"] == "failed":
                 self.delete()
-            raise Exception(str(e))
+            raise e
 
         return self

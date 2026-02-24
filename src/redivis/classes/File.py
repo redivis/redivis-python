@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 from requests import RequestException
 from urllib3.exceptions import HTTPError
+from ..common import exceptions
 from .Base import Base
 from ..common.api_request import make_request
 from urllib.parse import quote as quote_uri
@@ -26,7 +27,9 @@ class File(Base):
         properties=None,
     ):
         if not table and not query:
-            raise ValueError("All files must either belong to a table or query.")
+            raise exceptions.ValueError(
+                "All files must either belong to a table or query."
+            )
         if properties is None:
             properties = {}
 
