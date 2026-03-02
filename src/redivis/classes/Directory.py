@@ -169,9 +169,10 @@ class Directory(Base):
         elif isinstance(path, str):
             path = Path(path)
 
-        mount_directory(self, path, foreground=foreground)
-        self._mount_path = path
-        return path
+        mount_path = path.expanduser()
+        mount_directory(self, mount_path, foreground=foreground)
+        self._mount_path = mount_path
+        return mount_path
 
     def unmount(self) -> None:
         if self._mount_path is None:
@@ -186,6 +187,7 @@ class Directory(Base):
                 subprocess.run(["umount", mount_path], check=True, capture_output=True)
             elif sys.platform == "win32":
                 import ctypes
+
                 kernel32 = ctypes.windll.kernel32
                 if not kernel32.DefineDosDeviceW(0x00000002, mount_path, None):
                     raise OSError(f"Failed to unmount {mount_path}")

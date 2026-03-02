@@ -134,7 +134,7 @@ class RedivisFS(Operations):
                 if not stream or position != offset:
                     if stream:
                         stream.close()
-                    stream = node.open(mode="rb",start_byte=offset)
+                    stream = node.open(mode="rb", start_byte=offset)
                     position = offset
 
                 data = stream.read(length)
@@ -193,7 +193,8 @@ def _run_fuse_and_cleanup(fs, mount_path):
     """Run the FUSE event loop and remove the mount directory when it exits."""
     try:
         FUSE(fs, str(mount_path), nothreads=False, foreground=True)
-    except Exception:
+    except Exception as e:
+        print(e)
         pass
     finally:
         try:
