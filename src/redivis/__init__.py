@@ -137,3 +137,11 @@ def _install_excepthook():
 
 if os.getenv("REDIVIS_INSTALL_EXCEPTHOOK", "1").lower() not in ("0", "false", "no"):
     _install_excepthook()
+
+# Register fsspec filesystem if available
+try:
+    from .common.fsspec import register
+
+    register()
+except ImportError:
+    pass  # fsspec not installed or optional dependency
