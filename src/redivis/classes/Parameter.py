@@ -32,6 +32,9 @@ class Parameter(Base):
             else f"{workflow.uri}/parameters/{name}"
         )
 
+    def __repr__(self):
+        return f"<Parameter @{self.workflow.qualified_reference}.{self.name}>"
+
     def exists(self):
         try:
             make_request(method="HEAD", path=self.uri)

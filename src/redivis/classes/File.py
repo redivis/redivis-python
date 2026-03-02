@@ -123,12 +123,26 @@ class File(Base):
         )
         return self.open(start_byte=start_byte, end_byte=end_byte)
 
-    def open(self, *, start_byte=0, end_byte=None):
+    def open(self, mode="r", encoding="utf-8", *, start_byte=0, end_byte=None):
+        if mode not in ("r", "rb", "rt"):
+            raise exceptions.ValueError(
+                "Only read modes ('r', 'rb', 'rt') are supported for file.open()"
+            )
+
+        if mode == "rt":
+            mode = "r"
         if start_byte:
             start_byte = int(start_byte)
         if end_byte:
             end_byte = int(end_byte)
 
+        if mode == "r":
+            return io.TextIOWrapper(
+                Stream(
+                    uri=self.uri, start_byte=start_byte, end_byte=end_byte, file=self
+                ),
+                encoding=encoding,
+            )
         stream = Stream(
             uri=self.uri, start_byte=start_byte, end_byte=end_byte, file=self
         )

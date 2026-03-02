@@ -1,4 +1,6 @@
 import warnings
+import subprocess
+import sys
 
 from .Base import Base
 from .File import File
@@ -31,6 +33,7 @@ class Directory(Base):
         self.query = query
         self.parent = parent
         self.children = {}
+        self._mount_path = None
 
     def __repr__(self) -> str:
         return f"<Dir {str(self.path)}>"
@@ -166,8 +169,47 @@ class Directory(Base):
         elif isinstance(path, str):
             path = Path(path)
 
-        mount_directory(self, path, foreground=foreground)
-        return path
+        mount_path = path.expanduser()
+        mount_directory(self, mount_path, foreground=foreground)
+        self._mount_path = mount_path
+        return mount_path
+
+    def unmount(self) -> None:
+        if self._mount_path is None:
+            raise exceptions.ValueError(
+                "This directory is not currently mounted. Call mount() first."
+            )
+
+        mount_path = str(self._mount_path)
+
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["umount", mount_path], check=True, capture_output=True)
+            elif sys.platform == "win32":
+                import ctypes
+
+                kernel32 = ctypes.windll.kernel32
+                if not kernel32.DefineDosDeviceW(0x00000002, mount_path, None):
+                    raise OSError(f"Failed to unmount {mount_path}")
+            else:
+                subprocess.run(
+                    ["fusermount", "-u", mount_path], check=True, capture_output=True
+                )
+        except subprocess.CalledProcessError as e:
+            raise OSError(
+                f"Failed to unmount {mount_path}: {e.stderr.decode().strip()}"
+            )
+
+        self._mount_path = None
+
+        # The FUSE background thread also removes the directory on exit,
+        # but attempt removal here as well in case that hasn't run yet.
+        try:
+            Path(mount_path).rmdir()
+        except OSError:
+            pass
+
+        print(f"Unmounted directory at {mount_path}")
 
     def download(
         self,

@@ -30,6 +30,9 @@ class Query(TabularReader):
         if default_dataset:
             self.payload["defaultDataset"] = default_dataset
 
+    def __repr__(self):
+        return f"<Query {self.payload.get('id', '[uninitiated]')}>"
+
     def get(self):
         self._initiate()
         self.properties = make_request(method="GET", path=self.uri)

@@ -134,7 +134,7 @@ class RedivisFS(Operations):
                 if not stream or position != offset:
                     if stream:
                         stream.close()
-                    stream = node.open(start_byte=offset)
+                    stream = node.open(mode="rb", start_byte=offset)
                     position = offset
 
                 data = stream.read(length)
@@ -189,31 +189,38 @@ class RedivisFS(Operations):
         }
 
 
+def _run_fuse_and_cleanup(fs, mount_path):
+    """Run the FUSE event loop and remove the mount directory when it exits."""
+    try:
+        FUSE(fs, str(mount_path), nothreads=False, foreground=True)
+    except Exception as e:
+        print(e)
+        pass
+    finally:
+        try:
+            mount_path.rmdir()
+        except OSError:
+            pass
+
+
 def mount_directory(directory, path, foreground):
 
-    # Ensure mount point exists
-
     mount_path = path.expanduser()
-    mount_path.mkdir(parents=True, exist_ok=True)
 
-    if not mount_path.is_dir():
-        raise exceptions.ValueError(f"Mount path {path} is not a directory")
+    if mount_path.exists():
+        raise exceptions.ValueError(f"Mount path {mount_path} already exists")
 
-    # Check if mount point is empty
-    if any(mount_path.iterdir()):
-        raise exceptions.ValueError(f"Mount path {path} is not empty")
+    mount_path.mkdir(parents=True)
 
     # Create and start FUSE filesystem
     fs = RedivisFS(directory)
     print(f"Mounted directory at {mount_path}")
     if foreground:
-        FUSE(fs, str(mount_path), nothreads=False, foreground=True)
+        _run_fuse_and_cleanup(fs, mount_path)
     else:
         mount_thread = threading.Thread(
-            target=FUSE,
-            args=(fs, str(mount_path)),
-            # IMPORTANT: foreground=True still needs to be set here, otherwise FUSE crashes (though it's actually in the background since we're running in a daemonized thread)
-            kwargs={"nothreads": False, "foreground": True},
+            target=_run_fuse_and_cleanup,
+            args=(fs, mount_path),
             daemon=True,
         )
         mount_thread.start()

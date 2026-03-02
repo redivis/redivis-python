@@ -19,6 +19,9 @@ class Version(Base):
         )
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Version {self._dataset.qualified_reference}>"
+
     def get(self):
         self.properties = make_request(
             method="GET",

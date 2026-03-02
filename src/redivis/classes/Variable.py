@@ -32,6 +32,11 @@ class Variable(Base):
 
         self.properties = properties
 
+    def __repr__(self):
+        if self.properties and self.properties.get("type"):
+            return f"<Variable {self.name} ({self.properties.get('type')})>"
+        return f"<Variable {self.name}>"
+
     def get(self):
         self.properties = make_request(
             method="GET",

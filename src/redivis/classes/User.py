@@ -16,6 +16,9 @@ class User(Base):
             **(properties or {}),
         }
 
+    def __repr__(self):
+        return f"<User {self.name}>"
+
     def dataset(self, name, *, version=None):
         return Dataset(name, user=self, version=version)
 

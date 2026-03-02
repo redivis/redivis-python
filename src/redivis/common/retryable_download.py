@@ -4,12 +4,14 @@ import pathlib
 from base64 import b64decode
 import time
 import hashlib
-
+import re
 from ..common import exceptions
 from ..common.api_request import make_request
 from contextlib import closing
 from requests import RequestException
 from urllib3.exceptions import HTTPError
+
+md5_regexp = re.compile(r"(?:^|,)\s*md5\s*=\s*([^,\s]+)\s*(?=,|$)", re.IGNORECASE)
 
 
 def perform_retryable_download(
@@ -46,13 +48,19 @@ def perform_retryable_download(
                 headers={"Range": f"bytes={start_byte}-"} if start_byte else None,
             )
         ) as r:
+            should_check_filename = size is None or md5_hash is None
             size = r.headers.get("x-redivis-size")
-            md5_hash = r.headers.get("x-redivis-hash")
-            exact_file_exists = check_filename(
-                filename, overwrite, retry_count, size, md5_hash, on_progress
-            )
-            if exact_file_exists:
-                return filename
+
+            # Looks like "crc32c=U26yZA==, md5=uE0r1xmbDXTJAGiWL6xlHw==, ..."
+            md5_match = md5_regexp.search(r.headers.get("x-redivis-hash", ""))
+            md5_hash = md5_match.group(1).strip() if md5_match else None
+
+            if should_check_filename:
+                exact_file_exists = check_filename(
+                    filename, overwrite, retry_count, size, md5_hash, on_progress
+                )
+                if exact_file_exists:
+                    return filename
 
             # Make sure output directory exists
             pathlib.Path(filename).parent.mkdir(exist_ok=True, parents=True)
@@ -91,14 +99,13 @@ def perform_retryable_download(
                 overwrite=overwrite,
                 cancel_event=cancel_event,
                 start_byte=(
-                    os.path.getsize(filename)
-                    if filename and os.path.exists(filename)
-                    else 0
+                    os.path.getsize(filename) if os.path.exists(filename) else 0
                 ),
                 on_progress=on_progress,
                 retry_count=retry_count + 1,
             )
         else:
+            # TODO: remove partially downloaded files
             raise exceptions.NetworkError(
                 message=f"A network error occurred. Download failed after {retry_count} retries.",
                 original_exception=e,

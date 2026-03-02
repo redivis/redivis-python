@@ -45,6 +45,9 @@ class Notebook(Base):
         )
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Notebook {self.qualified_reference}>"
+
     def get(self):
         self.properties = make_request(
             method="GET",

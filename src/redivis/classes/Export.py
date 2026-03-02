@@ -21,9 +21,13 @@ class Export(Base):
         table=None,
         properties=None,
     ):
+        self.id = id
         self.table = table
         self.properties = properties
         self.uri = (self.properties or {}).get("uri") or f"/exports/{id}"
+
+    def __repr__(self):
+        return f"<Export {self.id}>"
 
     def get(self):
         self.properties = make_request(method="GET", path=self.uri)

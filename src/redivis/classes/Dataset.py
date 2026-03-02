@@ -78,6 +78,9 @@ class Dataset(Base):
         self.uri = f"/datasets/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
+    def __repr__(self):
+        return f"<Dataset {self.qualified_reference}>"
+
     def _rectify_ambiguous_owner(self):
         if self.user and self.organization:
             if (self.properties or {}).get("owner"):

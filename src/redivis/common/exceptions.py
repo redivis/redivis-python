@@ -6,6 +6,9 @@ class RedivisError(Exception):
         super().__init__(message)
         self.message = message
 
+    def __repr__(self):
+        return self.__str__()
+
     def __str__(self):
         return self.message
 
@@ -16,6 +19,9 @@ class APIError(RedivisError):
         self.status_code = status_code
         self.message = message
         self.description = error_description
+
+    def __repr__(self):
+        return self.__str__()
 
     def __str__(self):
         return f"[{self.status_code} {self.message}] {self.description}"
@@ -28,6 +34,9 @@ class NotFoundError(APIError):
         self.message = message
         self.description = error_description
 
+    def __repr__(self):
+        return self.__str__()
+
     def __str__(self):
         return self.description or self.message
 
@@ -38,6 +47,9 @@ class AuthorizationError(APIError):
         self.status_code = status_code
         self.message = message
         self.description = error_description
+
+    def __repr__(self):
+        return self.__str__()
 
     def __str__(self):
         return f"[{self.status_code} {self.message}] {self.description}"
@@ -54,6 +66,9 @@ class NetworkError(RedivisError):
         self.message = message
         self.original_exception = original_exception
 
+    def __repr__(self):
+        return self.__str__()
+
     def __str__(self):
         if self.original_exception:
             return f"{self.message}: {self.original_exception}"
@@ -64,6 +79,9 @@ class ValueError(RedivisError, builtins.ValueError):
     def __init__(self, message):
         super().__init__(message)
         self.message = message
+
+    def __repr__(self):
+        return self.__str__()
 
     def __str__(self):
         return self.message
@@ -77,6 +95,9 @@ class JobError(RedivisError):
         self.kind = kind
         self.status = status
 
+    def __repr__(self):
+        return self.__str__()
+
     def __str__(self):
         return f"[{self.kind} {self.status}] {self.message}"
 
@@ -85,6 +106,9 @@ class DeprecationError(RedivisError):
     def __init__(self, message):
         super().__init__(message)
         self.message = message
+
+    def __repr__(self):
+        return self.__str__()
 
     def __str__(self):
         return self.message
