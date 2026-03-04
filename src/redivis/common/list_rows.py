@@ -138,7 +138,7 @@ def list_rows(
 
     if isinstance(instance, ReadStream):
         read_session = {
-            "streams": [instance],
+            "streams": [{"id": instance.id}],
             "numRows": instance.properties.get("estimatedRows", 0),
         }
         max_parallelization = 1
@@ -195,7 +195,7 @@ def list_rows(
     # because we can't efficiently copy results between processes when working in parallel
     if (
         use_export_api
-        or type in ["arrow_dataset", "dask_dataframe", "polars_lazyframe"]
+        or output_type in ["arrow_dataset", "dask_dataframe", "polars_lazyframe"]
         or (len(read_session["streams"]) > 1 and max_parallelization > 1)
     ):
         folder = pathlib.Path().joinpath(

@@ -197,7 +197,7 @@ def _run_fuse_and_cleanup(fs, mount_path):
             str(mount_path),
             nothreads=False,
             foreground=True,
-            max_threads=os.cpu_count(),
+            max_threads=os.cpu_count() or 2,
         )
     except Exception as e:
         print(e)

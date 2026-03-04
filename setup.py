@@ -20,7 +20,7 @@ DESCRIPTION = "Redivis python client library"
 URL = "https://github.com/redivis/redivis-python"
 EMAIL = "support@redivis.com"
 AUTHOR = "Redivis Inc."
-REQUIRES_PYTHON = ">=3.6.0"
+REQUIRES_PYTHON = ">=3.7.0"
 
 # Parse version string from _version.py file
 VERSIONFILE = "src/redivis/_version.py"
@@ -142,7 +142,6 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",

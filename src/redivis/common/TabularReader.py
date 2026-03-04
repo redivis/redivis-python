@@ -1,5 +1,3 @@
-from functools import cache
-
 from ..common import exceptions
 from ..classes.Base import Base
 
@@ -15,8 +13,11 @@ from ..common.api_request import make_request, make_paginated_request
 from ..common.util import get_warning
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Literal
 from datetime import datetime, timezone
+import weakref
 
-cached_directories: Dict[str, Directory] = {}
+cached_directories: weakref.WeakValueDictionary[str, Directory] = (
+    weakref.WeakValueDictionary()
+)
 
 
 class TabularReader(Base):
@@ -150,6 +151,11 @@ class TabularReader(Base):
         if self._is_read_stream:
             raise exceptions.ValueError("Cannot call to_read_stream() on a ReadStream.")
 
+        if target_count is None:
+            target_count = os.cpu_count() or 1
+        if target_count < 1:
+            raise exceptions.ValueError("target_count must be at least 1")
+
         payload = {"requestedStreamCount": target_count, "format": "arrow"}
 
         if variables is not None:
@@ -207,7 +213,7 @@ class TabularReader(Base):
         variables: Optional[Iterable[str]] = None,
         progress: bool = True,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -232,7 +238,7 @@ class TabularReader(Base):
         variables: Optional[Iterable[str]] = None,
         progress: bool = True,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -257,7 +263,7 @@ class TabularReader(Base):
         variables: Optional[Iterable[str]] = None,
         progress: bool = True,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -282,7 +288,7 @@ class TabularReader(Base):
         variables: Optional[Iterable[str]] = None,
         progress: bool = True,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -309,7 +315,7 @@ class TabularReader(Base):
         dtype_backend: str = "pyarrow",
         date_as_object: bool = False,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
@@ -340,7 +346,7 @@ class TabularReader(Base):
         dtype_backend: str = "pyarrow",
         date_as_object: bool = False,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
         import geopandas
 
