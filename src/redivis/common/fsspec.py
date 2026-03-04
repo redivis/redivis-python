@@ -111,3 +111,32 @@ def register():
         register_implementation("redivis", RedivisFileSystem, clobber=True)
     except ImportError:
         pass
+
+    _register_pystac_io()
+
+
+def _register_pystac_io():
+    """If pystac is installed, patch its default StacIO to route redivis:// URIs through fsspec."""
+    try:
+        import fsspec
+        from pystac import StacIO
+        from pystac.stac_io import DefaultStacIO
+
+        class FsspecAwareStacIO(DefaultStacIO):
+            def read_text_from_href(self, href: str) -> str:
+                if href.startswith("redivis://"):
+                    with fsspec.open(href, "rb") as f:
+                        return f.read().decode("utf-8")
+                return super().read_text_from_href(href)
+
+            def write_text_to_href(self, href: str, txt: str) -> None:
+                if href.startswith("redivis://"):
+                    raise exceptions.ValueError(
+                        "Writing to redivis:// is not supported"
+                    )
+                return super().write_text_to_href(href, txt)
+
+        StacIO.set_default(FsspecAwareStacIO)
+
+    except ImportError:
+        pass  # pystac not installed — nothing to do

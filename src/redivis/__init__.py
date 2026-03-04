@@ -10,6 +10,8 @@ from .classes.Notebook import Notebook as notebook
 from .classes.Transform import Transform as transform
 from .common import exceptions
 from .common.api_request import make_request as make_api_request
+
+# Note: these should be deleted at the end to clean up the namespace
 import warnings
 import sys
 import traceback
@@ -65,6 +67,28 @@ def current_workflow():
         return workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
 
     return None
+
+
+__all__ = [
+    "workflow",
+    "dataset",
+    "datasource",
+    "user",
+    "organization",
+    "parameter",
+    "query",
+    "table",
+    "notebook",
+    "transform",
+    "exceptions",
+    "make_api_request",
+    "__version__",
+    "authenticate",
+    "current_notebook",
+    "current_user",
+    "current_workflow",
+    "file",
+]
 
 
 def _install_excepthook():
@@ -143,5 +167,15 @@ try:
     from .common.fsspec import register
 
     register()
-except ImportError:
-    pass  # fsspec not installed or optional dependency
+except (ImportError, ModuleNotFoundError):
+    # fsspec or its integration is not installed; registration is optional
+    pass
+except Exception as exc:
+    # Unexpected error during registration; warn rather than fail silently
+    warnings.warn(
+        f"Failed to register Redivis fsspec filesystem due to an unexpected error: {exc}",
+        RuntimeWarning,
+    )
+
+# clean up namespace
+del os, sys, warnings, traceback
