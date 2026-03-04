@@ -92,6 +92,7 @@ __all__ = [
 def _install_excepthook():
     import sys
     import traceback
+    import os
 
     _package_dir = os.path.dirname(os.path.abspath(__file__))
     _original_hook = sys.excepthook
