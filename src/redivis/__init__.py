@@ -13,8 +13,6 @@ from .common.api_request import make_request as make_api_request
 
 # Note: these should be deleted at the end to clean up the namespace
 import warnings
-import sys
-import traceback
 import os
 
 from ._version import __version__
@@ -92,6 +90,10 @@ __all__ = [
 
 
 def _install_excepthook():
+    import sys
+    import traceback
+    import os
+
     _package_dir = os.path.dirname(os.path.abspath(__file__))
     _original_hook = sys.excepthook
 
@@ -148,11 +150,22 @@ def _install_excepthook():
         if ipython is not None:
 
             def _ipython_custom_exc(shell, exc_type, exc_value, exc_tb, tb_offset=None):
-                print(
-                    _format_filtered_tb(exc_type, exc_value, exc_tb),
-                    file=sys.stderr,
-                    end="",
-                )
+                try:
+                    print(
+                        _format_filtered_tb(exc_type, exc_value, exc_tb),
+                        file=sys.stderr,
+                        end="",
+                    )
+                except Exception as e:
+                    print(
+                        "An error occurred while formatting the exception:",
+                        e,
+                        file=sys.stderr,
+                    )
+                    # Fallback to original IPython exception handler
+                    shell.showtraceback(
+                        (exc_type, exc_value, exc_tb), tb_offset=tb_offset
+                    )
 
             ipython.set_custom_exc((exceptions.RedivisError,), _ipython_custom_exc)
     except ImportError:
@@ -178,4 +191,4 @@ except Exception as exc:
     )
 
 # clean up namespace
-del os, sys, warnings, traceback
+del os, warnings
