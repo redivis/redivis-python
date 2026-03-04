@@ -149,7 +149,9 @@ class TabularReader(Base):
         from ..classes.ReadStream import ReadStream
 
         if self._is_read_stream:
-            raise exceptions.ValueError("Cannot call to_read_stream() on a ReadStream.")
+            raise exceptions.ValueError(
+                "Cannot call to_read_streams() on a ReadStream."
+            )
 
         if target_count is None:
             target_count = os.cpu_count() or 1

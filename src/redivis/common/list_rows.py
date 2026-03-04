@@ -264,7 +264,12 @@ def list_rows(
                 progressbar.close()
 
         if folder_path is None:
-            return pyarrow.Table.from_batches(all_batches)
+            if all_batches:
+                return pyarrow.Table.from_batches(all_batches)
+
+            # No batches were returned; construct an empty table with the expected schema
+            schema = pyarrow.schema(map(variable_to_field, mapped_variables))
+            return pyarrow.Table.from_batches([], schema=schema)
         elif use_export_api:
             if output_type == "polars_lazyframe":
                 import polars
