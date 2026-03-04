@@ -1,3 +1,5 @@
+from functools import cache
+
 from ..common import exceptions
 from ..classes.Base import Base
 
@@ -14,16 +16,19 @@ from ..common.util import get_warning
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Literal
 from datetime import datetime, timezone
 
+cached_directories: Dict[str, Directory] = {}
+
 
 class TabularReader(Base):
-    def __init__(self, is_table=False, is_query=False, is_upload=False):
+    def __init__(
+        self, is_table=False, is_query=False, is_upload=False, is_read_stream=False
+    ):
         self._is_table = is_table
         self._is_query = is_query
         self._is_upload = is_upload
-        self.uri = None
+        self._is_read_stream = is_read_stream
         self.directory = None
         self.properties = {}
-        self.cached_directory_timestamp = None
 
     # TODO: prefix? pattern? Don't cache if these are present
     def to_directory(
@@ -37,22 +42,33 @@ class TabularReader(Base):
             raise exceptions.ValueError(
                 "Listing files on uploads is not currently supported"
             )
+        if self._is_read_stream:
+            raise exceptions.ValueError(
+                "Listing files on read streams is not supported"
+            )
 
-        if self.directory:
+        # We need to check that the query has finished.
+        # However, for tables, we don't need to fetch the table metadata before building the directory
+        #   and it's important that we don't, since the cached_directories map is based on the user-provided URI
+        # TODO: in the future, we should map all URIs to a canonical URI for caching
+        if self._is_query:
+            check_is_ready(self)
+
+        if self.directory is None and cached_directories.get(self.uri):
+            self.directory = cached_directories[self.uri]
+
+        if self.directory and self._is_query:
             # Queries are immutable, always use the cached version
-            if self._is_query:
-                return self.directory
+            return self.directory
 
-        from ..classes.Directory import Directory
         import pyarrow
 
-        check_is_ready(self)
         # Compute this here, to get the timestamp before the request was sent
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         headers = {}
-        if self.cached_directory_timestamp:
+        if self.directory:
             headers["If-Modified-Since"] = datetime.fromtimestamp(
-                self.cached_directory_timestamp / 1000, tz=timezone.utc
+                self.directory._last_cached_at / 1000, tz=timezone.utc
             ).strftime("%a, %d %b %Y %H:%M:%S GMT")
 
         with closing(
@@ -70,6 +86,7 @@ class TabularReader(Base):
             )
         ) as res:
             if res.status_code == 304:
+                self.directory._last_cached_at = now_ms
                 return self.directory
 
             directory = Directory(
@@ -93,14 +110,17 @@ class TabularReader(Base):
                 )
 
             self.directory = directory
-            self.cached_directory_timestamp = now_ms
+            self.directory._last_cached_at = now_ms
+            cached_directories[self.uri] = self.directory
             return self.directory
 
     def file(self, path: Union[str, Path]) -> File:
+        if self.directory is None and cached_directories.get(self.uri):
+            self.directory = cached_directories[self.uri]
+
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         if self.directory is None or (
-            self.cached_directory_timestamp is not None
-            and now_ms - self.cached_directory_timestamp > 5000  # cache for 5s
+            now_ms - self.directory._last_cached_at > 30000  # cache for 30s
         ):
             self.to_directory()
 
@@ -123,6 +143,35 @@ class TabularReader(Base):
         return self.directory.list(
             mode="files", recursive=True, max_results=max_results
         )
+
+    def to_read_streams(self, target_count=os.cpu_count(), variables=None):
+        from ..classes.ReadStream import ReadStream
+
+        if self._is_read_stream:
+            raise exceptions.ValueError("Cannot call to_read_stream() on a ReadStream.")
+
+        payload = {"requestedStreamCount": target_count, "format": "arrow"}
+
+        if variables is not None:
+            payload["selectedVariables"] = variables
+
+        read_session = make_request(
+            method="post",
+            path=f"{self.uri}/readSessions",
+            parse_response=True,
+            payload=payload,
+        )
+        read_streams = [
+            ReadStream(
+                id=stream["id"],
+                table=self if self._is_table else None,
+                query=self if self._is_query else None,
+                upload=self if self._is_upload else None,
+                properties=stream,
+            )
+            for stream in read_session["streams"]
+        ]
+        return read_streams
 
     def download_files(
         self,
@@ -160,12 +209,11 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count(),
     ) -> Any:
-        check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
         return list_rows(
             uri=self.uri,
-            table=self,
+            instance=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -186,12 +234,11 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count(),
     ) -> Any:
-        check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
         return list_rows(
             uri=self.uri,
-            table=self,
+            instance=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -212,12 +259,11 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count(),
     ) -> Any:
-        check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
         return list_rows(
             uri=self.uri,
-            table=self,
+            instance=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -238,12 +284,11 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count(),
     ) -> Any:
-        check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
         return list_rows(
             uri=self.uri,
-            table=self,
+            instance=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -266,12 +311,11 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count(),
     ) -> Any:
-        check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
         arrow_table = list_rows(
             uri=self.uri,
-            table=self,
+            instance=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -300,12 +344,11 @@ class TabularReader(Base):
     ) -> Any:
         import geopandas
 
-        check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
         arrow_table = list_rows(
             uri=self.uri,
-            table=self,
+            instance=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -350,12 +393,11 @@ class TabularReader(Base):
     ) -> Any:
         warnings.warn(get_warning("dataframe_deprecation"), FutureWarning, stacklevel=2)
 
-        check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
         arrow_table = list_rows(
             uri=self.uri,
-            table=self,
+            instance=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -394,12 +436,11 @@ class TabularReader(Base):
         variables: Optional[Iterable[str]] = None,
         progress: bool = True,
     ) -> Iterable[Any]:
-        check_is_ready(self)
         mapped_variables, coerce_schema = get_mapped_variables(self, variables)
 
         return list_rows(
             uri=self.uri,
-            table=self,
+            instance=self,
             max_results=max_results,
             selected_variables=variables,
             mapped_variables=mapped_variables,
@@ -583,25 +624,9 @@ class TabularReader(Base):
         *,
         variables: Optional[Iterable[str]] = None,
         progress: bool = True,
-    ) -> Iterable[Tuple[Any, ...]]:
-        warnings.warn(
-            "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization.",
-            FutureWarning,
-            stacklevel=2,
-        )
-        check_is_ready(self)
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
-
-        return list_rows(
-            uri=self.uri,
-            table=self,
-            max_results=max_results,
-            selected_variables=variables,
-            mapped_variables=mapped_variables,
-            output_type="tuple",
-            progress=progress,
-            coerce_schema=coerce_schema,
-            use_export_api=should_use_export_api(self),
+    ):
+        raise exceptions.DeprecationError(
+            "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization."
         )
 
 
@@ -616,6 +641,18 @@ def check_is_ready(self: TabularReader) -> None:
 def get_mapped_variables(
     self: TabularReader, variables: Optional[Iterable[str]]
 ) -> Tuple[List[Dict[str, Any]], bool]:
+    if self._is_read_stream:
+        return get_mapped_variables(
+            (
+                self.table
+                if self.table is not None
+                else self.upload if self.upload is not None else self.query
+            ),
+            variables,
+        )
+
+    check_is_ready(self)
+
     coerce_schema = False  # queries and uploads will always have the correct types
 
     if self._is_table:
@@ -698,5 +735,5 @@ def should_use_export_api(self: TabularReader) -> bool:
     if not self.properties or "numBytes" not in self.properties:
         self.get()
     return self.properties.get("numBytes") > (
-        1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11
+        1e10 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11
     )

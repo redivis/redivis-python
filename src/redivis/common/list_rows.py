@@ -5,10 +5,9 @@ import pathlib
 import time
 from requests import RequestException
 from urllib3.exceptions import HTTPError
-from contextlib import closing
+from contextlib import closing, nullcontext
 
 from ..common import exceptions
-from ..classes.Row import Row
 from tqdm.auto import tqdm
 import shutil
 from .util import get_tempdir
@@ -126,74 +125,96 @@ def list_rows(
     progress=True,
     coerce_schema=False,
     batch_preprocessor=None,
-    table=None,
+    instance=None,
     use_export_api=False,
     max_parallelization=os.cpu_count(),
 ):
     import pyarrow
     import pyarrow.dataset as pyarrow_dataset  # need to import separately, it's not on the pyarrow import
+    from ..classes.Table import Table
+    from ..classes.ReadStream import ReadStream
 
-    use_export_api = (
-        use_export_api
-        and table
-        and output_type != "arrow_iterator"
-        and selected_variables is None
-        and batch_preprocessor is None
-        and max_results is None
-    )
     progressbar = None
 
-    if max_parallelization < 1:
-        raise exceptions.ValueError("max_parallelization must be greater than 0")
+    if isinstance(instance, ReadStream):
+        read_session = {
+            "streams": [instance],
+            "numRows": instance.properties.get("estimatedRows", 0),
+        }
+        max_parallelization = 1
+    else:
+        if max_parallelization < 1:
+            raise exceptions.ValueError("max_parallelization must be greater than 0")
 
-    pyarrow.set_cpu_count(max_parallelization)
-    pyarrow.set_io_thread_count(max_parallelization)
+        pyarrow.set_cpu_count(max_parallelization)
+        pyarrow.set_io_thread_count(max_parallelization)
 
-    payload = {"requestedStreamCount": min(MAX_PARALLELIZATION, max_parallelization)}
-
-    if max_results is not None:
-        payload["maxResults"] = max_results
-
-    if selected_variables is not None:
-        payload["selectedVariables"] = selected_variables
-
-    if not use_export_api:
-        read_session = make_request(
-            method="post",
-            path=f"{uri}/readSessions",
-            parse_response=True,
-            payload=payload,
+        use_export_api = (
+            use_export_api
+            and isinstance(instance, Table)
+            and output_type != "arrow_iterator"
+            and selected_variables is None
+            and batch_preprocessor is None
+            and max_results is None
         )
+        payload = {
+            "requestedStreamCount": min(MAX_PARALLELIZATION, max_parallelization)
+        }
 
-        if progress:
-            progressbar = tqdm(
-                total=read_session["numRows"], leave=False, mininterval=0.1
+        if max_results is not None:
+            payload["maxResults"] = max_results
+
+        if selected_variables is not None:
+            payload["selectedVariables"] = selected_variables
+
+        if not use_export_api:
+            read_session = make_request(
+                method="post",
+                path=f"{uri}/readSessions",
+                parse_response=True,
+                payload=payload,
             )
 
-        if output_type == "arrow_iterator":
-            return RedivisArrowIterator(
-                streams=read_session["streams"],
-                mapped_variables=mapped_variables,
-                progressbar=progressbar,
-                coerce_schema=coerce_schema,
-            )
+            if progress:
+                progressbar = tqdm(
+                    total=read_session["numRows"], leave=False, mininterval=0.1
+                )
 
-    folder = pathlib.Path().joinpath(
-        get_tempdir(),
-        "tables",
-        f"{uuid.uuid4()}",
-    )
+            if output_type == "arrow_iterator":
+                return RedivisArrowIterator(
+                    streams=read_session["streams"],
+                    mapped_variables=mapped_variables,
+                    progressbar=progressbar,
+                    coerce_schema=coerce_schema,
+                )
 
+    folder = None
+    folder_path = None
     # get the absolute folder path, as a string
-    folder_path = str(folder.absolute())
+    # We need to always write to disk if we're doing things in parallel,
+    # because we can't efficiently copy results between processes when working in parallel
+    if (
+        use_export_api
+        or type in ["arrow_dataset", "dask_dataframe", "polars_lazyframe"]
+        or (len(read_session["streams"]) > 1 and max_parallelization > 1)
+    ):
+        folder = pathlib.Path().joinpath(
+            get_tempdir(),
+            "tables",
+            f"{uuid.uuid4()}",
+        )
+        folder_path = str(folder.absolute())
 
     try:
+        arrow_dataset = None
+        all_batches = []
         if use_export_api:
-            table.download(folder_path + "/", format="parquet", progress=progress)
-            arrow_dataset = pyarrow_dataset.dataset(folder_path, format="parquet")
+            instance.download(folder_path + "/", format="parquet", progress=progress)
         else:
-            # create the folder, if it doesn't exist
-            folder.mkdir(parents=True, exist_ok=True)
+            if folder_path is not None:
+                # create the folder, if it doesn't exist
+                folder.mkdir(parents=True, exist_ok=True)
+
             # Use download_state to notify worker threads when to quit.
             # See: https://stackoverflow.com/a/29237343/101923
             cancel_event = Event()
@@ -202,6 +223,7 @@ def list_rows(
             # with concurrent.futures.ProcessPoolExecutor(max_workers=len(read_session["streams"]), mp_context=mp.get_context('fork')) as executor:
 
             # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
+            futures = []
             if len(read_session["streams"]):
                 with concurrent.futures.ThreadPoolExecutor(
                     max_workers=min(max_parallelization, len(read_session["streams"]))
@@ -230,7 +252,9 @@ def list_rows(
                             )
                             for future in freshly_done:
                                 # Call result() on any finished threads to raise any exceptions encountered.
-                                future.result()
+                                res = future.result()
+                                if folder_path is None and res:
+                                    all_batches.extend(res)
                     finally:
                         cancel_event.set()
                         # Shutdown all background threads, now that they should know to exit early.
@@ -238,6 +262,32 @@ def list_rows(
 
             if progressbar:
                 progressbar.close()
+
+        if folder_path is None:
+            return pyarrow.Table.from_batches(all_batches)
+        elif use_export_api:
+            if output_type == "polars_lazyframe":
+                import polars
+
+                return polars.scan_parquet(f"{folder_path}/*")
+            elif output_type == "dask_dataframe":
+                import dask.dataframe as dd
+
+                return dd.read_parquet(folder_path, dtype_backend="pyarrow")
+
+            arrow_dataset = pyarrow_dataset.dataset(folder_path, format="parquet")
+            if output_type == "arrow_dataset":
+                return arrow_dataset
+            else:
+                arrow_table = arrow_dataset.to_table()
+                shutil.rmtree(folder_path, ignore_errors=True)
+                return arrow_table
+        else:
+            if output_type == "polars_lazyframe":
+                import polars
+
+                return polars.scan_ipc(f"{folder_path}/*", memory_map=True)
+
             arrow_dataset = pyarrow_dataset.dataset(
                 folder_path,
                 format="feather",
@@ -250,10 +300,6 @@ def list_rows(
 
         if output_type == "arrow_dataset":
             return arrow_dataset
-        elif output_type == "polars_lazyframe":
-            import polars
-
-            return polars.scan_ipc(f"{folder_path}/*", memory_map=True)
         elif output_type == "dask_dataframe":
             import dask.dataframe as dd
 
@@ -272,29 +318,18 @@ def list_rows(
             pyarrow_dataset.write_dataset(
                 arrow_dataset, parquet_base_dir, format="parquet"
             )
+            shutil.rmtree(folder_path, ignore_errors=True)
             return dd.read_parquet(parquet_base_dir, dtype_backend="pyarrow")
         else:
             arrow_table = arrow_dataset.to_table()
-
-            if output_type == "arrow_table":
-                return arrow_table
-            elif output_type == "tuple":
-                variable_name_to_index = {}
-                for index, variable in enumerate(mapped_variables):
-                    variable_name_to_index[variable["name"]] = index
-
-                pydict = arrow_table.to_pydict()
-                keys = list(pydict.keys())
-
-                return [
-                    Row(
-                        [pydict[variable["name"]][i] for variable in mapped_variables],
-                        variable_name_to_index,
-                    )
-                    for i in range(len(pydict[keys[0]]))
-                ]
+            shutil.rmtree(folder_path, ignore_errors=True)
+            return arrow_table
     finally:
-        if output_type != "arrow_dataset" and output_type != "polars_lazyframe":
+        if (
+            folder_path
+            and output_type != "arrow_dataset"
+            and output_type != "polars_lazyframe"
+        ):
             shutil.rmtree(folder_path, ignore_errors=True)
 
 
@@ -387,14 +422,22 @@ def process_stream(
                 parse_response=False,
             )
         ) as arrow_response:
+            record_batches = [] if folder_path is None else None
             has_content = False
             # create the os_file path
             os_file = (
                 pathlib.Path(folder_path).joinpath(f"{stream['id']}.feather").absolute()
+                if folder_path is not None
+                else None
             )
-            with pyarrow.OSFile(
-                str(os_file), mode="wb"
-            ) as f, pyarrow.ipc.RecordBatchStreamReader(arrow_response.raw) as reader:
+            file_context = (
+                pyarrow.OSFile(str(os_file), mode="wb")
+                if folder_path is not None
+                else nullcontext()
+            )
+            with file_context as f, pyarrow.ipc.RecordBatchStreamReader(
+                arrow_response.raw
+            ) as reader:
                 if coerce_schema:
                     variables_in_stream = list(
                         map(
@@ -438,17 +481,20 @@ def process_stream(
 
                     if batch is not None:
                         has_content = True
-                        if writer is None:
-                            writer = pyarrow.ipc.RecordBatchFileWriter(
-                                f,
-                                (
-                                    output_schema
-                                    if batch_preprocessor is None
-                                    else batch.schema
-                                ),
-                            )
+                        if folder_path is None:
+                            record_batches.append(batch)
+                        else:
+                            if writer is None:
+                                writer = pyarrow.ipc.RecordBatchFileWriter(
+                                    f,
+                                    (
+                                        output_schema
+                                        if batch_preprocessor is None
+                                        else batch.schema
+                                    ),
+                                )
 
-                        writer.write_batch(batch)
+                            writer.write_batch(batch)
 
                     if progressbar is not None:
                         progressbar.update(num_rows)
@@ -456,7 +502,9 @@ def process_stream(
                 if writer is not None:
                     writer.close()
 
-            if has_content == False:
+            if folder_path is None:
+                return record_batches
+            elif not has_content:
                 os.remove(os_file)
     except (RequestException, HTTPError) as e:
         if retry_count >= 10:
@@ -476,22 +524,3 @@ def process_stream(
             offset=offset,
             retry_count=retry_count + 1,
         )
-
-
-def format_tuple_type(val, type):
-    if val is None:
-        return val
-    elif type == "integer":
-        return int(val)
-    elif type == "float":
-        return float(val)
-    elif type == "date":
-        return str(val)
-    elif type == "dateTime":
-        return str(val)
-    elif type == "time":
-        return str(val)
-    elif type == "boolean":
-        return bool(val)
-    else:
-        return str(val)

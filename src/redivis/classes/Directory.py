@@ -34,6 +34,7 @@ class Directory(Base):
         self.parent = parent
         self.children = {}
         self._mount_path = None
+        self._last_cached_at = None
 
     def __repr__(self) -> str:
         return f"<Dir {str(self.path)}>"

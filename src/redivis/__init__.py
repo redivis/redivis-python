@@ -143,5 +143,5 @@ try:
     from .common.fsspec import register
 
     register()
-except ImportError:
+except Exception:
     pass  # fsspec not installed or optional dependency

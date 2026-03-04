@@ -192,7 +192,13 @@ class RedivisFS(Operations):
 def _run_fuse_and_cleanup(fs, mount_path):
     """Run the FUSE event loop and remove the mount directory when it exits."""
     try:
-        FUSE(fs, str(mount_path), nothreads=False, foreground=True)
+        FUSE(
+            fs,
+            str(mount_path),
+            nothreads=False,
+            foreground=True,
+            max_threads=os.cpu_count(),
+        )
     except Exception as e:
         print(e)
         pass
