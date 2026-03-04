@@ -190,4 +190,4 @@ except Exception as exc:
     )
 
 # clean up namespace
-del os, sys, warnings, traceback
+del os, warnings
