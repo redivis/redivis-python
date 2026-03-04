@@ -13,8 +13,6 @@ from .common.api_request import make_request as make_api_request
 
 # Note: these should be deleted at the end to clean up the namespace
 import warnings
-import sys
-import traceback
 import os
 
 from ._version import __version__
@@ -92,6 +90,9 @@ __all__ = [
 
 
 def _install_excepthook():
+    import sys
+    import traceback
+
     _package_dir = os.path.dirname(os.path.abspath(__file__))
     _original_hook = sys.excepthook
 
