@@ -6,6 +6,7 @@ from tqdm.auto import tqdm
 import time
 import logging
 
+
 import warnings
 import pathlib
 import os
@@ -165,9 +166,13 @@ class Notebook(Base):
                 if data.endswith(".parquet"):
                     should_remove_tempfile = False
                     temp_file_path = data
+                elif data.endswith(".csv"):
+                    import pandas
+
+                    data = pandas.read_csv(data)
                 else:
                     raise exceptions.ValueError(
-                        "Only paths to parquet files (ending in .parquet) are supported when a string argument is provided"
+                        "Only paths to parquet files (ending in .parquet) or CSV files (ending in .csv) are supported when a string argument is provided"
                     )
             else:
                 temp_file_path = convert_data_to_parquet(data)

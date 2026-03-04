@@ -145,7 +145,7 @@ class TabularReader(Base):
             mode="files", recursive=True, max_results=max_results
         )
 
-    def to_read_streams(self, target_count=os.cpu_count(), variables=None):
+    def to_read_streams(self, target_count=os.cpu_count(), *, variables=None):
         from ..classes.ReadStream import ReadStream
 
         if self._is_read_stream:
@@ -468,6 +468,8 @@ class TabularReader(Base):
         max_parallelization: int = os.cpu_count(),
         geography_variable: Union[str, None, Literal[""]] = "",
     ) -> None:
+        if self._is_read_stream:
+            raise exceptions.ValueError("Cannot call to_sas() on a ReadStream.")
         check_is_ready(self)
         if not name:
             raise exceptions.ValueError(
@@ -554,6 +556,8 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count(),
     ) -> None:
+        if self._is_read_stream:
+            raise exceptions.ValueError("Cannot call to_stata() on a ReadStream.")
         # This will be set if there was an error during Stata initialization in a Redivis notebook
         if os.getenv("STATA_ERROR"):
             raise exceptions.RedivisError(
