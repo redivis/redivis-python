@@ -148,11 +148,22 @@ def _install_excepthook():
         if ipython is not None:
 
             def _ipython_custom_exc(shell, exc_type, exc_value, exc_tb, tb_offset=None):
-                print(
-                    _format_filtered_tb(exc_type, exc_value, exc_tb),
-                    file=sys.stderr,
-                    end="",
-                )
+                try:
+                    print(
+                        _format_filtered_tb(exc_type, exc_value, exc_tb),
+                        file=sys.stderr,
+                        end="",
+                    )
+                except Exception as e:
+                    print(
+                        "An error occurred while formatting the exception:",
+                        e,
+                        file=sys.stderr,
+                    )
+                    # Fallback to original IPython exception handler
+                    shell.showtraceback(
+                        (exc_type, exc_value, exc_tb), tb_offset=tb_offset
+                    )
 
             ipython.set_custom_exc((exceptions.RedivisError,), _ipython_custom_exc)
     except ImportError:
