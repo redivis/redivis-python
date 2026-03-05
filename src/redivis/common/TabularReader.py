@@ -175,6 +175,7 @@ class TabularReader(Base):
                 table=self if self._is_table else None,
                 query=self if self._is_query else None,
                 upload=self if self._is_upload else None,
+                selected_variables=variables,
                 properties=stream,
             )
             for stream in read_session["streams"]
@@ -217,13 +218,15 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
+            self, variables
+        )
 
         return list_rows(
             uri=self.uri,
             instance=self,
             max_results=max_results,
-            selected_variables=variables,
+            selected_variables=selected_variables,
             mapped_variables=mapped_variables,
             output_type="arrow_dataset",
             progress=progress,
@@ -242,13 +245,15 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
+            self, variables
+        )
 
         return list_rows(
             uri=self.uri,
             instance=self,
             max_results=max_results,
-            selected_variables=variables,
+            selected_variables=selected_variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
@@ -267,13 +272,15 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
+            self, variables
+        )
 
         return list_rows(
             uri=self.uri,
             instance=self,
             max_results=max_results,
-            selected_variables=variables,
+            selected_variables=selected_variables,
             mapped_variables=mapped_variables,
             output_type="polars_lazyframe",
             progress=progress,
@@ -292,13 +299,15 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
+            self, variables
+        )
 
         return list_rows(
             uri=self.uri,
             instance=self,
             max_results=max_results,
-            selected_variables=variables,
+            selected_variables=selected_variables,
             mapped_variables=mapped_variables,
             output_type="dask_dataframe",
             progress=progress,
@@ -319,13 +328,15 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: int = os.cpu_count() or 1,
     ) -> Any:
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
+            self, variables
+        )
 
         arrow_table = list_rows(
             uri=self.uri,
             instance=self,
             max_results=max_results,
-            selected_variables=variables,
+            selected_variables=selected_variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
@@ -352,13 +363,15 @@ class TabularReader(Base):
     ) -> Any:
         import geopandas
 
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
+            self, variables
+        )
 
         arrow_table = list_rows(
             uri=self.uri,
             instance=self,
             max_results=max_results,
-            selected_variables=variables,
+            selected_variables=selected_variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
@@ -401,13 +414,15 @@ class TabularReader(Base):
     ) -> Any:
         warnings.warn(get_warning("dataframe_deprecation"), FutureWarning, stacklevel=2)
 
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
+            self, variables
+        )
 
         arrow_table = list_rows(
             uri=self.uri,
             instance=self,
             max_results=max_results,
-            selected_variables=variables,
+            selected_variables=selected_variables,
             mapped_variables=mapped_variables,
             output_type="arrow_table",
             progress=progress,
@@ -444,13 +459,15 @@ class TabularReader(Base):
         variables: Optional[Iterable[str]] = None,
         progress: bool = True,
     ) -> Iterable[Any]:
-        mapped_variables, coerce_schema = get_mapped_variables(self, variables)
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
+            self, variables
+        )
 
         return list_rows(
             uri=self.uri,
             instance=self,
             max_results=max_results,
-            selected_variables=variables,
+            selected_variables=selected_variables,
             mapped_variables=mapped_variables,
             output_type="arrow_iterator",
             progress=progress,
@@ -660,7 +677,7 @@ def get_mapped_variables(
                 if self.table is not None
                 else self.upload if self.upload is not None else self.query
             ),
-            variables,
+            variables=self.selected_variables,
         )
 
     check_is_ready(self)
@@ -673,7 +690,7 @@ def get_mapped_variables(
     all_variables = make_paginated_request(path=f"{self.uri}/variables", page_size=1000)
 
     if variables is None:
-        return all_variables, coerce_schema
+        return all_variables, variables, coerce_schema
     else:
         lower_variable_names = [variable.lower() for variable in variables]
         variables_list = list(
@@ -685,7 +702,7 @@ def get_mapped_variables(
         variables_list.sort(
             key=lambda variable: lower_variable_names.index(variable["name"].lower())
         )
-        return variables_list, coerce_schema
+        return variables_list, variables, coerce_schema
 
 
 def arrow_table_to_pandas(

@@ -175,18 +175,16 @@ def list_rows(
                 payload=payload,
             )
 
-            if progress:
-                progressbar = tqdm(
-                    total=read_session["numRows"], leave=False, mininterval=0.1
-                )
+    if progress:
+        progressbar = tqdm(total=read_session["numRows"], leave=False, mininterval=0.1)
 
-            if output_type == "arrow_iterator":
-                return RedivisArrowIterator(
-                    streams=read_session["streams"],
-                    mapped_variables=mapped_variables,
-                    progressbar=progressbar,
-                    coerce_schema=coerce_schema,
-                )
+    if output_type == "arrow_iterator":
+        return RedivisArrowIterator(
+            streams=read_session["streams"],
+            mapped_variables=mapped_variables,
+            progressbar=progressbar,
+            coerce_schema=coerce_schema,
+        )
 
     folder = None
     folder_path = None

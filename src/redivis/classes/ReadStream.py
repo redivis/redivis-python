@@ -2,13 +2,16 @@ from ..common.TabularReader import TabularReader
 
 
 class ReadStream(TabularReader):
-    def __init__(self, id, *, table, query, upload, properties=None):
+    def __init__(
+        self, id, *, table, query, upload, selected_variables, properties=None
+    ):
         super().__init__(is_read_stream=True)
         self.id = id
         self.table = table
         self.query = query
         self.upload = upload
         self.uri = f"/readStreams/{id}"
+        self.selected_variables = selected_variables
         self.properties = properties if properties is not None else {}
 
     def __repr__(self):
