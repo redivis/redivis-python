@@ -176,7 +176,7 @@ def list_rows(
             )
 
     if progress:
-        progressbar = tqdm(total=read_session["numRows"], leave=False, mininterval=0.1)
+        progressbar = tqdm(total=read_session["numRows"], leave=False, mininterval=0.2)
 
     if output_type == "arrow_iterator":
         return RedivisArrowIterator(

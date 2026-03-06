@@ -170,9 +170,17 @@ class Notebook(Base):
                     import pandas
 
                     data = pandas.read_csv(data)
+                elif data.endswith(".dta"):
+                    import pandas
+
+                    data = pandas.read_stata(data)
+                elif data.endswith(".sas7bdat"):
+                    import pandas
+
+                    data = pandas.read_sas(data)
                 else:
                     raise exceptions.ValueError(
-                        "Only paths to parquet files (ending in .parquet) or CSV files (ending in .csv) are supported when a string argument is provided"
+                        "Unknown file extension. Supported extensions are .parquet, .csv, .dta, and .sas7bdat"
                     )
 
             if not isinstance(data, str):

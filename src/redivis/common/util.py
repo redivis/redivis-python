@@ -56,23 +56,49 @@ def convert_data_to_parquet(data):
     import pyarrow.parquet as pa_parquet
     from dask.dataframe import DataFrame as dask_df
 
+    # IMPORTANT: we need to coerce all timestamps to us precision, since BQ doesn't support ns, and will then just load the timestamp as int64
+
     if isinstance(data, geopandas.GeoDataFrame):
-        data.to_wkt().to_parquet(path=temp_file_path, index=False)
+        data.to_parquet(
+            path=temp_file_path,
+            coerce_timestamps="us",
+            allow_truncated_timestamps=True,
+            index=False,
+        )
     elif isinstance(data, pd.DataFrame):
-        data.to_parquet(path=temp_file_path, index=False)
+        data.to_parquet(
+            path=temp_file_path,
+            coerce_timestamps="us",
+            allow_truncated_timestamps=True,
+            index=False,
+        )
     elif isinstance(data, pa_dataset.Dataset):
         pa_dataset.write_dataset(
             data,
             temp_file_path,
             format="parquet",
             basename_template="part-{i}.parquet",
+            file_options=pa_dataset.ParquetFileFormat().make_write_options(
+                coerce_timestamps="us",
+                allow_truncated_timestamps=True,
+            ),
             max_partitions=1,
         )
         temp_file_path = f"{temp_file_path}/part-0.parquet"
     elif isinstance(data, pa.Table):
-        pa_parquet.write_table(data, temp_file_path)
+        pa_parquet.write_table(
+            data,
+            temp_file_path,
+            coerce_timestamps="us",
+            allow_truncated_timestamps=True,
+        )
     elif isinstance(data, dask_df):
-        data.to_parquet(temp_file_path, write_index=False)
+        data.to_parquet(
+            temp_file_path,
+            write_index=False,
+            coerce_timestamps="us",
+            allow_truncated_timestamps=True,
+        )
         temp_file_path = f"{temp_file_path}/part.0.parquet"
     else:
         # importing polars is causing an IllegalInstruction error on ARM + Docker. Import inline to avoid crashes elsewhwere
@@ -82,7 +108,14 @@ def convert_data_to_parquet(data):
         if isinstance(data, polars.LazyFrame):
             data.sink_parquet(temp_file_path)
         elif isinstance(data, polars.DataFrame):
-            data.write_parquet(temp_file_path)
+            data.write_parquet(
+                temp_file_path,
+                use_pyarrow=True,
+                pyarrow_options={
+                    "coerce_timestamps": "us",
+                    "allow_truncated_timestamps": True,
+                },
+            )
         else:
             raise exceptions.ValueError(
                 "Unknown datatype provided. Must be an instance of pandas.DataFrame, pyarrow.Dataset, pyarrow.Table, dask.DataFrame, polars.LazyFrame, or polars.DataFrame"
