@@ -78,6 +78,10 @@ def convert_data_to_parquet(data):
             temp_file_path,
             format="parquet",
             basename_template="part-{i}.parquet",
+            file_options=pa_dataset.ParquetFileFormat().make_write_options(
+                coerce_timestamps="us",
+                allow_truncated_timestamps=True,
+            ),
             max_partitions=1,
         )
         temp_file_path = f"{temp_file_path}/part-0.parquet"

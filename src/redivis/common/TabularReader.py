@@ -638,8 +638,6 @@ class TabularReader(Base):
                         path=f"{tmpdirname}/part-0.csv", format="csv", progress=progress
                     )
                 else:
-                    import pyarrow as pa
-
                     ds = self.to_arrow_dataset(
                         max_results=max_results,
                         variables=variables,
