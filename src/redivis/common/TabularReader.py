@@ -493,7 +493,7 @@ class TabularReader(Base):
                 'A SAS dataset name must be provided. E.g., table.to_sas("mydata")'
             )
         import pyarrow as pa
-        import saspy
+        import saspy  # make sure this gets imported here
         from IPython import get_ipython
 
         ip = get_ipython()
@@ -503,12 +503,18 @@ class TabularReader(Base):
             os.chmod(tmpdirname, 0o755)
 
             if geography_variable == "":
-                # TODO: if variables param is provided, should only search within those vars
+
                 geo_variables = make_paginated_request(
                     path=f"{self.uri}/variables",
                     query={"type": "geography"},
-                    max_results=2,
                 )
+                if variables is not None:
+                    lower_variable_names = [v.lower() for v in variables]
+                    geo_variables = [
+                        v
+                        for v in geo_variables
+                        if v["name"].lower() in lower_variable_names
+                    ]
                 if len(geo_variables) > 1:
                     raise exceptions.ValueError(
                         "Multiple geography variables found; please specify which to use"
@@ -526,11 +532,16 @@ class TabularReader(Base):
                         "type": "sas",
                         "filePath": f"{tmpdirname}/part-0.csv",
                         "sasDatasetName": name,
+                        "selectedVariables": variables,
                     },
                     parse_response=False,
                 ).text
 
-                if max_results is not None and should_use_export_api(self):
+                if (
+                    max_results is not None
+                    and variables is None
+                    and should_use_export_api(self)
+                ):
                     self.download(
                         path=f"{tmpdirname}/part-0.csv", format="csv", progress=progress
                     )
@@ -586,12 +597,17 @@ class TabularReader(Base):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             if geography_variable == "":
-                # TODO: if variables param is provided, should only search within those vars
                 geo_variables = make_paginated_request(
                     path=f"{self.uri}/variables",
                     query={"type": "geography"},
-                    max_results=2,
                 )
+                if variables is not None:
+                    lower_variable_names = [v.lower() for v in variables]
+                    geo_variables = [
+                        v
+                        for v in geo_variables
+                        if v["name"].lower() in lower_variable_names
+                    ]
                 if len(geo_variables) > 1:
                     raise exceptions.ValueError(
                         "Multiple geography variables found; please specify which to use"
@@ -605,15 +621,25 @@ class TabularReader(Base):
                 load_script_res = make_request(
                     method="GET",
                     path=f"{self.uri}/script",
-                    query={"type": "stata", "filePath": f"{tmpdirname}/part-0.csv"},
+                    query={
+                        "type": "stata",
+                        "filePath": f"{tmpdirname}/part-0.csv",
+                        "selectedVariables": variables,
+                    },
                     parse_response=False,
                 )
                 load_script = load_script_res.text
-                if max_results is not None and should_use_export_api(self):
+                if (
+                    max_results is not None
+                    and variables is None
+                    and should_use_export_api(self)
+                ):
                     self.download(
                         path=f"{tmpdirname}/part-0.csv", format="csv", progress=progress
                     )
                 else:
+                    import pyarrow as pa
+
                     ds = self.to_arrow_dataset(
                         max_results=max_results,
                         variables=variables,
@@ -621,8 +647,30 @@ class TabularReader(Base):
                         batch_preprocessor=batch_preprocessor,
                         max_parallelization=max_parallelization,
                     )
+
+                    # IMPORTANT: this reduces the resolution of temporal fields, since Stata doesn't support microsecond precision (which is what we get from BQ)
+
+                    columns = {}
+
+                    for field in ds.schema:
+                        t = field.type
+
+                        if pa.types.is_timestamp(t):
+                            columns[field.name] = pa.dataset.field(field.name).cast(
+                                pa.timestamp("ms", tz=t.tz)
+                            )
+                        elif pa.types.is_time64(t):
+                            # Arrow time32 supports seconds / milliseconds
+                            columns[field.name] = pa.dataset.field(field.name).cast(
+                                pa.time32("ms")
+                            )
+                        else:
+                            columns[field.name] = pa.dataset.field(field.name)
+
+                    scanner = ds.scanner(columns=columns)
+
                     pa.dataset.write_dataset(
-                        ds,
+                        scanner,
                         base_dir=tmpdirname,
                         existing_data_behavior="overwrite_or_ignore",
                         basename_template="part-{i}.csv",
