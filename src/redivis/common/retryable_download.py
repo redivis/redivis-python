@@ -614,7 +614,7 @@ async def _download_single_file(
                             "wb" if start_byte == 0 else "ab",
                         ) as f:
                             try:
-                                async for chunk in response.iter_content(
+                                async for chunk in await response.iter_content(
                                     chunk_size=256 * 1024
                                 ):
                                     if cancel_event and cancel_event.is_set():
