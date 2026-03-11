@@ -305,6 +305,10 @@ async def _parallel_download_worker(
         timeout=httpx.Timeout(60.0, read=None),
         http2=True,
         follow_redirects=True,
+        limits=httpx.Limits(
+            max_connections=max_concurrency,
+            max_keepalive_connections=max_concurrency,
+        ),
     ) as client:
         tasks = [
             asyncio.create_task(
@@ -514,13 +518,14 @@ async def _download_single_file(
 
                         pending_progress_bytes = 0
                         last_updated_progress = time.time()
+                        loop = asyncio.get_running_loop()
 
                         with open(
                             download_path, "wb" if start_byte == 0 else "ab"
                         ) as f:
                             try:
                                 async for chunk in response.aiter_bytes(
-                                    chunk_size=1024 * 1024
+                                    chunk_size=256 * 1024
                                 ):
                                     if cancel_event and cancel_event.is_set():
                                         try:
@@ -528,7 +533,10 @@ async def _download_single_file(
                                         except OSError:
                                             pass
                                         return
-                                    f.write(chunk)
+                                    # Offload the write to a thread so the GIL is
+                                    # released and other download coroutines can
+                                    # make progress while this chunk hits the disk.
+                                    await loop.run_in_executor(None, f.write, chunk)
                                     if on_progress:
                                         pending_progress_bytes += len(chunk)
                                         if time.time() - last_updated_progress >= 0.2:
