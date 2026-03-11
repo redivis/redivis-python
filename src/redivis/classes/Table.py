@@ -306,6 +306,8 @@ class Table(TabularReader):
         format="csv",
         overwrite=False,
         progress=True,
+        max_parallelization=None,
+        max_concurrency=None,
     ):
         res = make_request(
             method="POST",
@@ -317,6 +319,8 @@ class Table(TabularReader):
             path=path,
             overwrite=overwrite,
             progress=progress,
+            max_concurrency=max_concurrency,
+            max_parallelization=max_parallelization,
         )
 
     def update(self, *, name=None, description=None, upload_merge_strategy=None):

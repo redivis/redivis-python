@@ -37,6 +37,7 @@ REQUIRED = [
     # Base libraries. These are required for working with the API
     "requests >= 2.0.0",
     "tqdm >= 4.64.0",
+    "httpx[http2] >= 0.24.0",
     # Data processing libraries, required if pulling data off Redivis.
     # Pyarrow is always required when working with data, other libraries only needed if returning data of that type.
     "pyarrow >= 13.0.0",

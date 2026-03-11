@@ -1,16 +1,14 @@
 from .Base import Base
 import os
 import time
-import concurrent.futures
 import pathlib
 
 from ..common import exceptions
 from ..common.api_request import make_request
 from tqdm.auto import tqdm
 import re
-from threading import Event
 
-from ..common.retryable_download import perform_retryable_download
+from ..common.retryable_download import perform_parallel_download
 
 
 class Export(Base):
@@ -34,7 +32,13 @@ class Export(Base):
         return self
 
     def download_files(
-        self, *, path=None, overwrite=False, progress=True, max_parallelization=None
+        self,
+        *,
+        path=None,
+        overwrite=False,
+        progress=True,
+        max_parallelization=None,
+        max_concurrency=None,
     ):
         self.wait_for_finish()
         file_count = self.properties["fileCount"]
@@ -72,63 +76,31 @@ class Export(Base):
         else:
             pathlib.Path(path).parent.mkdir(exist_ok=True, parents=True)
 
-        pbar = None
-        if progress:
-            pbar = tqdm(
-                total=self.properties["size"],
-                leave=False,
-                unit="iB",
-                unit_scale=True,
-                mininterval=0.1,
+        uris = [
+            f"{self.uri}/download?filePart={file_number}"
+            for file_number in range(file_count)
+        ]
+        download_paths = [
+            str(
+                pathlib.Path(path)
+                / f"{escaped_table_name if file_count == 1 else str(file_number).zfill(6)}.{self.properties['format']}"
+                if is_dir
+                else path
             )
+            for file_number in range(file_count)
+        ]
 
-        cancel_event = Event()
+        perform_parallel_download(
+            uris=uris,
+            download_paths=download_paths,
+            overwrite=overwrite,
+            max_parallelization=max_parallelization,
+            max_concurrency=max_concurrency,
+            total_bytes=self.properties.get("size"),
+            progress=progress,
+        )
 
-        output_file_paths = []
-
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(
-                100, max_parallelization if max_parallelization is not None else 50
-            ),
-        ) as executor:
-            futures = [
-                executor.submit(
-                    perform_retryable_download,
-                    path=f"{self.uri}/download",
-                    pbar=pbar,
-                    cancel_event=cancel_event,
-                    query={"filePart": file_number},
-                    overwrite=overwrite,
-                    filename=(
-                        pathlib.Path(path)
-                        / f"{escaped_table_name if file_count == 1 else str(file_number).zfill(6)}.{self.properties['format']}"
-                        if is_dir
-                        else path
-                    ),
-                )
-                for file_number in range(file_count)
-            ]
-
-            not_done = futures
-
-            try:
-                while not_done and not cancel_event.is_set():
-                    # next line 'sleeps' this main thread, letting the thread pool run
-                    freshly_done, not_done = concurrent.futures.wait(
-                        not_done, timeout=0.2
-                    )
-                    for future in freshly_done:
-                        # Call result() on any finished threads to raise any exceptions encountered.
-                        output_file_paths.append(future.result())
-            finally:
-                cancel_event.set()
-                # Shutdown all background threads, now that they should know to exit early.
-                executor.shutdown(wait=True, cancel_futures=True)
-
-        if pbar:
-            pbar.close()
-
-        return output_file_paths
+        return download_paths
 
     def wait_for_finish(self, *, progress=True):
         iter_count = 0

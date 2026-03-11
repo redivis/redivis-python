@@ -95,21 +95,13 @@ def get_request_args(
     headers={},
 ):
     api_endpoint = __get_api_endpoint()
-    verify_ssl = (
-        False
-        if api_endpoint.find("https://localhost", 0) == 0
-        or os.getenv("REDIVIS_ENV") == "development"
-        or os.getenv("REDIVIS_ENV") == "test"
-        or os.getenv("REDIVIS_ENV") == "staging"
-        else True
-    )
     url = f"{api_endpoint}{path}"
 
     method = method.upper()
     headers = {
         **{
             "Authorization": f"Bearer {get_auth_token()}",
-            "User-Agent": f"redivis-python/{__version__} ({platform.platform()}; Python/{platform.python_version()})",
+            "User-Agent": __get_user_agent(),
         },
         **headers,
     }
@@ -123,7 +115,6 @@ def get_request_args(
         "url": url,
         "headers": headers,
         "params": query,
-        "verify": verify_ssl,
         "data": payload,
         "stream": stream,
         "files": files,
@@ -211,6 +202,10 @@ def process_request_response(
         return response_json
     else:
         return r
+
+
+def __get_user_agent():
+    return f"redivis-python/{__version__} ({platform.platform()}; Python/{platform.python_version()})"
 
 
 def __get_api_endpoint():
