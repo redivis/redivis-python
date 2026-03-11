@@ -357,6 +357,8 @@ async def _parallel_download_worker(
     else:
         sem = _SimpleSemaphore(max_concurrency)
 
+    created_dirs = set()
+
     async with httpx.AsyncClient(
         headers={
             "Authorization": f"Bearer {get_auth_token()}",
@@ -387,6 +389,7 @@ async def _parallel_download_worker(
                     overwrite=overwrite,
                     on_progress=on_progress,
                     cancel_event=cancel_event,
+                    created_dirs=created_dirs,
                 )
             )
             for i, uri in enumerate(uris)
@@ -435,6 +438,7 @@ async def _download_single_file(
     overwrite=False,
     on_progress=None,
     cancel_event=None,
+    created_dirs=None,
 ):
     MAX_RETRIES = 10
     retry_count = 0
@@ -443,6 +447,7 @@ async def _download_single_file(
     current_size = size
     current_md5 = md5_hash
     did_pre_check = False
+    loop = asyncio.get_running_loop()
 
     while True:
         # Pre-network check: skip the connection entirely when we already have
@@ -455,7 +460,15 @@ async def _download_single_file(
             and current_md5 is not None
         ):
             did_pre_check = True
-            if check_filename(download_path, overwrite, 0, current_size, current_md5):
+            if await loop.run_in_executor(
+                None,
+                check_filename,
+                download_path,
+                overwrite,
+                0,
+                current_size,
+                current_md5,
+            ):
                 if on_progress:
                     on_progress(current_size, 1)
                 return
@@ -564,7 +577,9 @@ async def _download_single_file(
                         # Post-network check: we now have hash/size from headers.
                         if not did_pre_check:
                             did_pre_check = True
-                            if check_filename(
+                            if await loop.run_in_executor(
+                                None,
+                                check_filename,
                                 download_path,
                                 overwrite,
                                 retry_count,
@@ -579,13 +594,14 @@ async def _download_single_file(
                         # that mid-stream errors get the same 10 fresh retries.
                         retry_count = 0
 
-                        pathlib.Path(download_path).parent.mkdir(
-                            exist_ok=True, parents=True
-                        )
+                        parent_dir = str(pathlib.Path(download_path).parent)
+                        if created_dirs is None or parent_dir not in created_dirs:
+                            pathlib.Path(parent_dir).mkdir(exist_ok=True, parents=True)
+                            if created_dirs is not None:
+                                created_dirs.add(parent_dir)
 
                         pending_progress_bytes = 0
                         last_updated_progress = time.time()
-                        loop = asyncio.get_running_loop()
 
                         with open(
                             download_path, "wb" if start_byte == 0 else "ab"
@@ -611,10 +627,11 @@ async def _download_single_file(
                                             pending_progress_bytes = 0
                                             last_updated_progress = time.time()
                             except Exception as e:
-                                try:
-                                    os.remove(download_path)
-                                except OSError:
-                                    pass
+                                if not supports_range_requests:
+                                    try:
+                                        os.remove(download_path)
+                                    except OSError:
+                                        pass
                                 raise
 
                         if on_progress:
@@ -659,7 +676,7 @@ def check_filename(filename, overwrite, retry_count, size, md5_hash):
 
             file_hash = hashlib.md5()
             with open(filename, "rb") as f:
-                for byte_block in iter(lambda: f.read(8192), b""):
+                for byte_block in iter(lambda: f.read(1024 * 1024), b""):
                     file_hash.update(byte_block)
 
             if file_hash.digest() == md5_hash:
