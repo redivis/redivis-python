@@ -192,8 +192,8 @@ def perform_parallel_download(
     n = len(uris)
     cpu_count = os.cpu_count() or 1
     effective_max_par = (
-        max_parallelization if max_parallelization is not None else 2
-    )  # higher numbers seem to be worse...
+        max_parallelization if max_parallelization is not None else cpu_count
+    )
     worker_count = max(1, min(8, math.ceil(n / 1000), cpu_count, effective_max_par))
 
     pbar = None
@@ -204,7 +204,7 @@ def perform_parallel_download(
             total=total_bytes,
             leave=False,
             desc=f"{file_count}/{len(uris)} files",
-            unit="iB",
+            unit="B",
             unit_scale=True,
             mininterval=0.2,
         )
@@ -391,7 +391,7 @@ async def _download_single_file(
             did_pre_check = True
             if check_filename(download_path, overwrite, 0, current_size, current_md5):
                 if on_progress:
-                    on_progress(current_size)
+                    on_progress(current_size, 1)
                 return
 
         if retry_count > 0:
@@ -505,7 +505,7 @@ async def _download_single_file(
                                 current_md5,
                             ):
                                 if on_progress:
-                                    on_progress(current_size)
+                                    on_progress(current_size, 1)
                                 return
 
                         # Reset retry counter after a successful connection so
