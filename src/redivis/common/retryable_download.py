@@ -15,13 +15,16 @@ from ..common.auth import get_auth_token
 from contextlib import closing
 from requests import RequestException
 from urllib3.exceptions import HTTPError
-import httpx
+import niquests
 
 
 md5_regexp = re.compile(r"(?:^|,)\s*md5\s*=\s*([^,\s]+)\s*(?=,|$)", re.IGNORECASE)
 
 _DEFAULT_MAX_CONCURRENCY = 48
 _TARGET_ACTIVE_BYTES = 1_000_000_000  # 1 GB
+_STREAM_THRESHOLD = (
+    4 * 1024 * 1024
+)  # 4 MB — below this, use aread() instead of streaming
 
 
 class _SimpleSemaphore:
@@ -130,7 +133,7 @@ def perform_retryable_download(
                 )
                 if exact_file_exists:
                     if on_progress:
-                        on_progress(size)
+                        on_progress(int(size))
                     return filename
 
             # Make sure output directory exists
@@ -344,7 +347,7 @@ async def _parallel_download_worker(
     if max_concurrency is None:
         max_concurrency = _DEFAULT_MAX_CONCURRENCY
 
-    max_concurrency = max(1, min(100, max_concurrency, len(uris)))
+    max_concurrency = max(1, min(500, max_concurrency, len(uris)))
 
     # Only use the byte-budget semaphore when it could actually constrain
     # concurrency. For small files max_concurrency * avg_file_size is well
@@ -359,18 +362,14 @@ async def _parallel_download_worker(
 
     created_dirs = set()
 
-    async with httpx.AsyncClient(
+    async with niquests.AsyncSession(
         headers={
             "Authorization": f"Bearer {get_auth_token()}",
             "User-Agent": __get_user_agent(),
         },
-        timeout=httpx.Timeout(60.0, read=None),
-        http2=True,
-        follow_redirects=True,
-        limits=httpx.Limits(
-            max_connections=max_concurrency,
-            max_keepalive_connections=max_concurrency,
-        ),
+        timeout=(60, None),
+        pool_connections=1,
+        pool_maxsize=max_concurrency,
     ) as client:
         tasks = [
             asyncio.create_task(
@@ -487,127 +486,135 @@ async def _download_single_file(
         completed = False
 
         await sem.acquire(estimated_size)
+        response = None
         try:
             try:
-                async with client.stream(
-                    "GET", url, headers=request_headers
-                ) as response:
-                    status = response.status_code
+                response = await client.get(url, stream=True, headers=request_headers)
+                status = response.status_code
 
-                    if status == 503:
-                        if retry_count < MAX_RETRIES:
-                            should_retry = True
-                        else:
-                            raise exceptions.NetworkError(
-                                message=(
-                                    f"HTTP 503. Download failed after"
-                                    f" {MAX_RETRIES} retries: {url}"
-                                )
-                            )
-
-                    elif status >= 400:
-                        body = (await response.aread()).decode(
-                            "utf-8", errors="replace"
-                        )
-                        raise exceptions.APIError(
-                            message=f"HTTP {status}",
-                            status_code=status,
-                            error_description=body,
-                        )
-
+                if status == 503:
+                    if retry_count < MAX_RETRIES:
+                        should_retry = True
                     else:
-                        # Determine whether the server supports byte-range requests
-                        # (needed to resume interrupted downloads).
-                        accept_ranges = response.headers.get("accept-ranges", "")
-                        if accept_ranges and accept_ranges.lower() != "none":
-                            supports_range_requests = True
+                        raise exceptions.NetworkError(
+                            message=(
+                                f"HTTP 503. Download failed after"
+                                f" {MAX_RETRIES} retries: {url}"
+                            )
+                        )
 
-                        # When resuming (start_byte > 0), ensure the server actually
-                        # honored the Range request. If not, fall back to a full
-                        # download starting at byte 0 to avoid corrupting the file.
-                        if start_byte > 0:
-                            if status == 206:
-                                content_range = response.headers.get("Content-Range")
-                                # Expect "bytes <start_byte>-..." at the beginning.
-                                if not content_range:
-                                    supports_range_requests = False
-                                    start_byte = 0
-                                else:
-                                    match = re.match(r"bytes\s+(\d+)-", content_range)
-                                    if not match or int(match.group(1)) != start_byte:
-                                        supports_range_requests = False
-                                        start_byte = 0
-                            elif status == 200:
-                                # Server ignored the Range header and is sending the
-                                # entire file. Treat this as a fresh download and
-                                # overwrite any existing partial file.
+                elif status >= 400:
+                    body = (await response.content).decode("utf-8", errors="replace")
+                    raise exceptions.APIError(
+                        message=f"HTTP {status}",
+                        status_code=status,
+                        error_description=body,
+                    )
+
+                else:
+                    # Determine whether the server supports byte-range requests
+                    # (needed to resume interrupted downloads).
+                    accept_ranges = response.headers.get("accept-ranges", "")
+                    if accept_ranges and accept_ranges.lower() != "none":
+                        supports_range_requests = True
+
+                    # When resuming (start_byte > 0), ensure the server actually
+                    # honored the Range request. If not, fall back to a full
+                    # download starting at byte 0 to avoid corrupting the file.
+                    if start_byte > 0:
+                        if status == 206:
+                            content_range = response.headers.get("Content-Range")
+                            # Expect "bytes <start_byte>-..." at the beginning.
+                            if not content_range:
                                 supports_range_requests = False
                                 start_byte = 0
+                            else:
+                                match = re.match(r"bytes\s+(\d+)-", content_range)
+                                if not match or int(match.group(1)) != start_byte:
+                                    supports_range_requests = False
+                                    start_byte = 0
+                        elif status == 200:
+                            # Server ignored the Range header and is sending the
+                            # entire file. Treat this as a fresh download and
+                            # overwrite any existing partial file.
+                            supports_range_requests = False
+                            start_byte = 0
 
-                        # Prefer total-size from Content-Range over Content-Length
-                        # so that current_size always reflects the complete file size.
-                        content_range = response.headers.get("content-range")
-                        if content_range:
-                            total_str = content_range.split("/")[-1]
-                            if total_str.isdigit():
-                                current_size = int(total_str)
-                        elif current_size is None:
-                            cl = response.headers.get("content-length")
-                            if cl and cl.isdigit():
-                                current_size = int(cl)
+                    # Prefer total-size from Content-Range over Content-Length
+                    # so that current_size always reflects the complete file size.
+                    content_range = response.headers.get("content-range")
+                    if content_range:
+                        total_str = content_range.split("/")[-1]
+                        if total_str.isdigit():
+                            current_size = int(total_str)
+                    elif current_size is None:
+                        cl = response.headers.get("content-length")
+                        if cl and cl.isdigit():
+                            current_size = int(cl)
 
-                        # Parse MD5 from Content-Digest (colons around value) or
-                        # x-goog-hash (no colons).
-                        content_digest = response.headers.get("content-digest")
-                        if content_digest:
-                            md5_match = md5_regexp.search(content_digest)
-                            current_md5 = (
-                                md5_match.group(1).strip().strip(":")
-                                if md5_match
-                                else None
-                            )
-                        else:
-                            md5_match = md5_regexp.search(
-                                response.headers.get("x-goog-hash", "")
-                            )
-                            current_md5 = (
-                                md5_match.group(1).strip() if md5_match else None
-                            )
+                    # Parse MD5 from Content-Digest (colons around value) or
+                    # x-goog-hash (no colons).
+                    content_digest = response.headers.get("content-digest")
+                    if content_digest:
+                        md5_match = md5_regexp.search(content_digest)
+                        current_md5 = (
+                            md5_match.group(1).strip().strip(":") if md5_match else None
+                        )
+                    else:
+                        md5_match = md5_regexp.search(
+                            response.headers.get("x-goog-hash", "")
+                        )
+                        current_md5 = md5_match.group(1).strip() if md5_match else None
 
-                        # Post-network check: we now have hash/size from headers.
-                        if not did_pre_check:
-                            did_pre_check = True
-                            if await loop.run_in_executor(
-                                None,
-                                check_filename,
-                                download_path,
-                                overwrite,
-                                retry_count,
-                                current_size,
-                                current_md5,
-                            ):
-                                if on_progress:
-                                    on_progress(current_size, 1)
-                                return
+                    # Post-network check: we now have hash/size from headers.
+                    if not did_pre_check:
+                        did_pre_check = True
+                        if await loop.run_in_executor(
+                            None,
+                            check_filename,
+                            download_path,
+                            overwrite,
+                            retry_count,
+                            current_size,
+                            current_md5,
+                        ):
+                            if on_progress:
+                                on_progress(current_size, 1)
+                            return
 
-                        # Reset retry counter after a successful connection so
-                        # that mid-stream errors get the same 10 fresh retries.
-                        retry_count = 0
+                    # Reset retry counter after a successful connection so
+                    # that mid-stream errors get the same 10 fresh retries.
+                    retry_count = 0
 
-                        parent_dir = str(pathlib.Path(download_path).parent)
-                        if created_dirs is None or parent_dir not in created_dirs:
-                            pathlib.Path(parent_dir).mkdir(exist_ok=True, parents=True)
-                            if created_dirs is not None:
-                                created_dirs.add(parent_dir)
+                    parent_dir = str(pathlib.Path(download_path).parent)
+                    if created_dirs is None or parent_dir not in created_dirs:
+                        pathlib.Path(parent_dir).mkdir(exist_ok=True, parents=True)
+                        if created_dirs is not None:
+                            created_dirs.add(parent_dir)
 
+                    if 0 < estimated_size <= _STREAM_THRESHOLD:
+                        # Small-file fast path: read the entire body in
+                        # one call and write to disk in a single write.
+                        body = await response.content
+                        if cancel_event and cancel_event.is_set():
+                            return
+                        with open(
+                            download_path,
+                            "wb" if start_byte == 0 else "ab",
+                        ) as f:
+                            f.write(body)
+                        if on_progress:
+                            on_progress(len(body), 1)
+                    else:
                         pending_progress_bytes = 0
                         last_updated_progress = time.time()
 
                         with open(
-                            download_path, "wb" if start_byte == 0 else "ab"
+                            download_path,
+                            "wb" if start_byte == 0 else "ab",
                         ) as f:
                             try:
-                                async for chunk in response.aiter_bytes(
+                                async for chunk in response.iter_content(
                                     chunk_size=256 * 1024
                                 ):
                                     if cancel_event and cancel_event.is_set():
@@ -616,9 +623,6 @@ async def _download_single_file(
                                         except OSError:
                                             pass
                                         return
-                                    # Offload the write to a thread so the GIL is
-                                    # released and other download coroutines can
-                                    # make progress while this chunk hits the disk.
                                     await loop.run_in_executor(None, f.write, chunk)
                                     if on_progress:
                                         pending_progress_bytes += len(chunk)
@@ -636,9 +640,9 @@ async def _download_single_file(
 
                         if on_progress:
                             on_progress(pending_progress_bytes, 1)
-                        completed = True
+                    completed = True
 
-            except (httpx.RequestError,) as e:
+            except (niquests.exceptions.RequestException,) as e:
                 if retry_count < MAX_RETRIES:
                     should_retry = True
                 else:
@@ -650,6 +654,8 @@ async def _download_single_file(
                         original_exception=e,
                     ) from e
         finally:
+            if response is not None:
+                response.close()
             await sem.release(estimated_size)
 
         if completed:
