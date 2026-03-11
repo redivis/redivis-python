@@ -41,9 +41,11 @@ def perform_retryable_download(
 ):
     if size is not None and md5_hash is not None:
         exact_file_exists = check_filename(
-            filename, overwrite, retry_count, size, md5_hash, on_progress
+            filename, overwrite, retry_count, size, md5_hash
         )
         if exact_file_exists:
+            if on_progress:
+                on_progress(size)
             return filename
 
     try:
@@ -75,20 +77,12 @@ def perform_retryable_download(
                 md5_hash = md5_match.group(1).strip() if md5_match else None
 
             if should_check_filename:
-
-                def on_progress_wrapper(byte_count, _):
-                    if on_progress:
-                        on_progress(byte_count)
-
                 exact_file_exists = check_filename(
-                    filename,
-                    overwrite,
-                    retry_count,
-                    size,
-                    md5_hash,
-                    on_progress=on_progress_wrapper,
+                    filename, overwrite, retry_count, size, md5_hash
                 )
                 if exact_file_exists:
+                    if on_progress:
+                        on_progress(size)
                     return filename
 
             # Make sure output directory exists
@@ -180,8 +174,7 @@ def perform_parallel_download(
         When ``False`` raise an error if a file already exists at the target
         path and does not match the expected hash.
     max_parallelization : int | None
-        Upper bound on the number of worker threads spawned.  Defaults to the
-        number of available CPU cores (capped at 8).
+        Upper bound on the number of worker threads spawned.
     total_bytes : int | None
         Aggregate byte count used to render the progress bar.
     max_concurrency : int | None
@@ -198,7 +191,9 @@ def perform_parallel_download(
 
     n = len(uris)
     cpu_count = os.cpu_count() or 1
-    effective_max_par = max_parallelization if max_parallelization is not None else 2
+    effective_max_par = (
+        max_parallelization if max_parallelization is not None else 2
+    )  # higher numbers seem to be worse...
     worker_count = max(1, min(8, math.ceil(n / 1000), cpu_count, effective_max_par))
 
     pbar = None
@@ -307,11 +302,12 @@ async def _parallel_download_worker(
             "Authorization": f"Bearer {get_auth_token()}",
             "User-Agent": __get_user_agent(),
         },
+        timeout=httpx.Timeout(60.0, read=None),
         http2=True,
         follow_redirects=True,
     ) as client:
-        gather_task = asyncio.gather(
-            *[
+        tasks = [
+            asyncio.create_task(
                 _download_single_file(
                     client=client,
                     sem=sem,
@@ -323,32 +319,39 @@ async def _parallel_download_worker(
                     on_progress=on_progress,
                     cancel_event=cancel_event,
                 )
-                for i, uri in enumerate(uris)
-            ]
-        )
+            )
+            for i, uri in enumerate(uris)
+        ]
 
         if cancel_event is not None:
-            # Poll the threading.Event every 50ms and cancel the gather task when
-            # it fires. asyncio.CancelledError interrupts mid-stream I/O immediately,
-            # unlike checking cancel_event between chunks.
+
             async def _cancel_watcher():
                 while not cancel_event.is_set():
                     await asyncio.sleep(0.05)
-                gather_task.cancel()
+                for t in tasks:
+                    t.cancel()
 
-            watcher = asyncio.ensure_future(_cancel_watcher())
-            try:
-                await gather_task
-            except asyncio.CancelledError:
-                pass
-            finally:
+            watcher = asyncio.create_task(_cancel_watcher())
+        else:
+            watcher = None
+
+        try:
+            # gather with return_exceptions=False raises the first exception
+            # immediately; the finally block then cancels all remaining tasks
+            # before the AsyncClient context exits.
+            await asyncio.gather(*tasks)
+        except (Exception, asyncio.CancelledError):
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        finally:
+            if watcher is not None:
                 watcher.cancel()
                 try:
                     await watcher
                 except asyncio.CancelledError:
                     pass
-        else:
-            await gather_task
 
 
 async def _download_single_file(
@@ -382,9 +385,9 @@ async def _download_single_file(
             and current_md5 is not None
         ):
             did_pre_check = True
-            if check_filename(
-                download_path, overwrite, 0, current_size, current_md5, on_progress
-            ):
+            if check_filename(download_path, overwrite, 0, current_size, current_md5):
+                if on_progress:
+                    on_progress(current_size)
                 return
 
         if retry_count > 0:
@@ -435,6 +438,28 @@ async def _download_single_file(
                         if accept_ranges and accept_ranges.lower() != "none":
                             supports_range_requests = True
 
+                        # When resuming (start_byte > 0), ensure the server actually
+                        # honored the Range request. If not, fall back to a full
+                        # download starting at byte 0 to avoid corrupting the file.
+                        if start_byte > 0:
+                            if status == 206:
+                                content_range = response.headers.get("Content-Range")
+                                # Expect "bytes <start_byte>-..." at the beginning.
+                                if not content_range:
+                                    supports_range_requests = False
+                                    start_byte = 0
+                                else:
+                                    match = re.match(r"bytes\s+(\d+)-", content_range)
+                                    if not match or int(match.group(1)) != start_byte:
+                                        supports_range_requests = False
+                                        start_byte = 0
+                            elif status == 200:
+                                # Server ignored the Range header and is sending the
+                                # entire file. Treat this as a fresh download and
+                                # overwrite any existing partial file.
+                                supports_range_requests = False
+                                start_byte = 0
+
                         # Prefer total-size from Content-Range over Content-Length
                         # so that current_size always reflects the complete file size.
                         content_range = response.headers.get("content-range")
@@ -474,8 +499,9 @@ async def _download_single_file(
                                 retry_count,
                                 current_size,
                                 current_md5,
-                                on_progress,
                             ):
+                                if on_progress:
+                                    on_progress(current_size)
                                 return
 
                         # Reset retry counter after a successful connection so
@@ -492,22 +518,29 @@ async def _download_single_file(
                         with open(
                             download_path, "wb" if start_byte == 0 else "ab"
                         ) as f:
-                            async for chunk in response.aiter_bytes(
-                                chunk_size=1024 * 1024
-                            ):
-                                if cancel_event and cancel_event.is_set():
-                                    try:
-                                        os.remove(download_path)
-                                    except OSError:
-                                        pass
-                                    return
-                                f.write(chunk)
-                                if on_progress:
-                                    pending_progress_bytes += len(chunk)
-                                    if time.time() - last_updated_progress >= 0.2:
-                                        on_progress(pending_progress_bytes)
-                                        pending_progress_bytes = 0
-                                        last_updated_progress = time.time()
+                            try:
+                                async for chunk in response.aiter_bytes(
+                                    chunk_size=1024 * 1024
+                                ):
+                                    if cancel_event and cancel_event.is_set():
+                                        try:
+                                            os.remove(download_path)
+                                        except OSError:
+                                            pass
+                                        return
+                                    f.write(chunk)
+                                    if on_progress:
+                                        pending_progress_bytes += len(chunk)
+                                        if time.time() - last_updated_progress >= 0.2:
+                                            on_progress(pending_progress_bytes)
+                                            pending_progress_bytes = 0
+                                            last_updated_progress = time.time()
+                            except Exception as e:
+                                try:
+                                    os.remove(download_path)
+                                except OSError:
+                                    pass
+                                raise
 
                         if on_progress:
                             on_progress(pending_progress_bytes, 1)
@@ -537,7 +570,7 @@ async def _download_single_file(
             )
 
 
-def check_filename(filename, overwrite, retry_count, size, md5_hash, on_progress):
+def check_filename(filename, overwrite, retry_count, size, md5_hash):
     if retry_count == 0 and os.path.exists(filename):
         if (
             size is not None
@@ -553,8 +586,6 @@ def check_filename(filename, overwrite, retry_count, size, md5_hash, on_progress
                     file_hash.update(byte_block)
 
             if file_hash.digest() == md5_hash:
-                if on_progress:
-                    on_progress(int(size), 1)
                 return filename
             elif not overwrite:
 

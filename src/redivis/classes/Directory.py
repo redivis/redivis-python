@@ -255,6 +255,7 @@ class Directory(Base):
 
         total_bytes = sum(s for s in sizes if s is not None) or None
 
+        # TODO: should include query params for table / query being downloaded from
         perform_parallel_download(
             uris=uris,
             download_paths=download_paths,
