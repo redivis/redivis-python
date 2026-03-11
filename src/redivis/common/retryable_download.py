@@ -21,6 +21,54 @@ import httpx
 md5_regexp = re.compile(r"(?:^|,)\s*md5\s*=\s*([^,\s]+)\s*(?=,|$)", re.IGNORECASE)
 
 _DEFAULT_MAX_CONCURRENCY = 48
+_TARGET_ACTIVE_BYTES = 1_000_000_000  # 1 GB
+
+
+class _SimpleSemaphore:
+    """Thin wrapper around asyncio.Semaphore with the same acquire/release
+    signature as _ByteBudgetSemaphore (accepting but ignoring estimated_size).
+    """
+
+    def __init__(self, max_concurrency):
+        self._sem = asyncio.Semaphore(max_concurrency)
+
+    async def acquire(self, estimated_size):
+        await self._sem.acquire()
+
+    async def release(self, estimated_size):
+        self._sem.release()
+
+
+class _ByteBudgetSemaphore:
+    """Semaphore that gates on both a concurrent-download count and a total
+    bytes-in-flight budget. A slot is available when active_count is below
+    max_concurrency AND active_bytes is below _TARGET_ACTIVE_BYTES, with the
+    guarantee that at least one download can always proceed.
+    """
+
+    def __init__(self, max_concurrency):
+        self._max_concurrency = max_concurrency
+        self._active_count = 0
+        self._active_bytes = 0
+        self._condition = asyncio.Condition()
+
+    def _can_proceed(self):
+        return self._active_count == 0 or (
+            self._active_count < self._max_concurrency
+            and self._active_bytes < _TARGET_ACTIVE_BYTES
+        )
+
+    async def acquire(self, estimated_size):
+        async with self._condition:
+            await self._condition.wait_for(self._can_proceed)
+            self._active_count += 1
+            self._active_bytes += estimated_size
+
+    async def release(self, estimated_size):
+        async with self._condition:
+            self._active_count -= 1
+            self._active_bytes -= estimated_size
+            self._condition.notify_all()
 
 
 def perform_retryable_download(
@@ -190,6 +238,7 @@ def perform_parallel_download(
         raise exceptions.ValueError("max_concurrency must be >= 1")
 
     n = len(uris)
+    avg_file_size = total_bytes / n if total_bytes else 0
     cpu_count = os.cpu_count() or 1
     effective_max_par = (
         max_parallelization if max_parallelization is not None else cpu_count
@@ -250,6 +299,7 @@ def perform_parallel_download(
                 overwrite=overwrite,
                 on_progress=on_progress,
                 max_concurrency=per_worker_concurrency,
+                avg_file_size=avg_file_size,
                 cancel_event=cancel_event,
             )
         )
@@ -284,6 +334,7 @@ async def _parallel_download_worker(
     md5_hashes=None,
     overwrite=False,
     max_concurrency=None,
+    avg_file_size=0,
     on_progress=None,
     cancel_event=None,
 ):
@@ -295,7 +346,16 @@ async def _parallel_download_worker(
 
     max_concurrency = max(1, min(100, max_concurrency, len(uris)))
 
-    sem = asyncio.Semaphore(max_concurrency)
+    # Only use the byte-budget semaphore when it could actually constrain
+    # concurrency. For small files max_concurrency * avg_file_size is well
+    # below _TARGET_ACTIVE_BYTES, so the budget check never fires — but the
+    # asyncio.Condition machinery still serializes every acquire/release and
+    # calls notify_all() on every completion, causing a thundering-herd of
+    # coroutine wakeups. Plain asyncio.Semaphore avoids all of that overhead.
+    if avg_file_size > 0 and avg_file_size * max_concurrency > _TARGET_ACTIVE_BYTES:
+        sem = _ByteBudgetSemaphore(max_concurrency)
+    else:
+        sem = _SimpleSemaphore(max_concurrency)
 
     async with httpx.AsyncClient(
         headers={
@@ -318,6 +378,11 @@ async def _parallel_download_worker(
                     url=f"{__get_api_endpoint()}{uri}",
                     download_path=download_paths[i],
                     size=sizes[i] if sizes is not None else None,
+                    estimated_size=(
+                        sizes[i]
+                        if sizes is not None and sizes[i] is not None
+                        else avg_file_size
+                    ),
                     md5_hash=md5_hashes[i] if md5_hashes is not None else None,
                     overwrite=overwrite,
                     on_progress=on_progress,
@@ -365,6 +430,7 @@ async def _download_single_file(
     download_path,
     *,
     size=None,
+    estimated_size=0,
     md5_hash=None,
     overwrite=False,
     on_progress=None,
@@ -407,7 +473,8 @@ async def _download_single_file(
         should_retry = False
         completed = False
 
-        async with sem:
+        await sem.acquire(estimated_size)
+        try:
             try:
                 async with client.stream(
                     "GET", url, headers=request_headers
@@ -565,6 +632,8 @@ async def _download_single_file(
                         ),
                         original_exception=e,
                     ) from e
+        finally:
+            await sem.release(estimated_size)
 
         if completed:
             return
