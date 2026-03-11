@@ -128,6 +128,8 @@ class TabularReader(Base):
         node = self.directory.get(path)
         if isinstance(node, Directory):
             raise exceptions.ValueError(f"{path} is a directory, not a file")
+        if node is None:
+            raise exceptions.NotFoundError(f"No file found at path '{path}'")
         return node
 
     def list_files(

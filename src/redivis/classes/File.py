@@ -80,10 +80,12 @@ class File(Base):
             is_dir = True
 
         query_params = {}
-        if self.table:
-            query_params["tableId"] = self.table.properties.get("id")
-        elif self.query:
-            query_params["queryId"] = self.query.properties.get("id")
+
+        # TODO: re-add this if needed in the future, but note we need to ensure we always have the TableId at this point (or accept a table URI?)
+        # if self.table:
+        #     query_params["tableId"] = self.table.properties.get("id")
+        # elif self.query:
+        #     query_params["queryId"] = self.query.properties.get("id")
 
         return perform_retryable_download(
             path=self.uri,

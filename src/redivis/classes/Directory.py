@@ -7,9 +7,7 @@ from .File import File
 import os
 from pathlib import Path
 from ..common import exceptions
-import concurrent.futures
-from tqdm.auto import tqdm
-from threading import Event
+from ..common.retryable_download import perform_parallel_download
 from typing import Literal, Optional, List, Union
 
 
@@ -218,6 +216,7 @@ class Directory(Base):
         *,
         max_results: Optional[int] = None,
         max_parallelization: Optional[int] = None,
+        max_concurrency: Optional[int] = None,
         overwrite: bool = False,
         progress: bool = True,
     ) -> None:
@@ -225,6 +224,8 @@ class Directory(Base):
             path = Path(path)
         if path is None:
             path = Path.cwd() / self.name
+        else:
+            path = path.expanduser()
 
         if path.exists():
             if path.is_file():
@@ -236,78 +237,36 @@ class Directory(Base):
                     )
 
         path.mkdir(parents=True, exist_ok=True)
-        cancel_event = Event()
 
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(
-                100, max_parallelization if max_parallelization is not None else 50
-            ),
-        ) as executor:
-            futures = []
-            files_to_download = self.list(
-                mode="files", recursive=True, max_results=max_results
-            )
+        files_to_download = self.list(
+            mode="files", recursive=True, max_results=max_results
+        )
 
-            file_count = 0
-            total_bytes = 0
-            for f in files_to_download:
-                total_bytes += f.size
+        uris = []
+        download_paths = []
+        sizes = []
+        md5_hashes = []
+        for f in files_to_download:
+            file_relative_path = (Path("/") / f.path).relative_to(self.path)
+            uris.append(f.uri)
+            download_paths.append(str(path / file_relative_path))
+            sizes.append(f.size)
+            md5_hashes.append(f.hash)
 
-            pbar = tqdm(
-                unit="B",
-                leave=False,
-                unit_scale=True,
-                mininterval=0.1,
-                total=total_bytes if progress else 0,
-                desc=f"{file_count}/{len(files_to_download)} files",
-                disable=not progress,
-            )
+        total_bytes = sum(s for s in sizes if s is not None) or None
 
-            def on_progress(chunk_bytes: int) -> None:
-                pbar.update(chunk_bytes)
-
-            # Create and submit download tasks with per-file progress callbacks
-            for file in files_to_download:
-                file_relative_path = (Path("/") / file.path).relative_to(self.path)
-                dest_path = os.path.join(path, str(file_relative_path))
-
-                futures.append(
-                    executor.submit(
-                        file.download,
-                        path=dest_path,
-                        overwrite=overwrite,
-                        progress=False,
-                        on_progress=on_progress if progress else None,
-                        cancel_event=cancel_event,
-                    )
-                )
-
-            not_done = futures
-            try:
-                while not_done and not cancel_event.is_set():
-                    # next line 'sleeps' this main thread, letting the thread pool run
-                    freshly_done, not_done = concurrent.futures.wait(
-                        not_done, timeout=0.5
-                    )
-                    for future in freshly_done:
-                        # Call result() on any finished threads to raise any exceptions encountered.
-                        future.result()
-                        file_count += 1
-                        pbar.set_description(
-                            f"{file_count}/{len(files_to_download)} files"
-                        )
-            except KeyboardInterrupt:
-                print("KeyboardInterrupt")
-            finally:
-                cancel_event.set()
-
-                for future in not_done:
-                    # Only cancels futures that were never started
-                    future.cancel()
-
-                # Shutdown all background threads, now that they should know to exit early.
-                executor.shutdown(wait=True, cancel_futures=True)
-                pbar.close()
+        # TODO: should include query params for table / query being downloaded from
+        perform_parallel_download(
+            uris=uris,
+            download_paths=download_paths,
+            sizes=sizes,
+            md5_hashes=md5_hashes,
+            overwrite=overwrite,
+            max_parallelization=max_parallelization,
+            total_bytes=total_bytes,
+            max_concurrency=max_concurrency,
+            progress=progress,
+        )
 
     def _add_file(self, file: File) -> None:
         relative_path_parts = (Path("/") / file.path).relative_to(self.path).parts
