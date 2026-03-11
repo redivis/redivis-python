@@ -198,7 +198,7 @@ def perform_parallel_download(
 
     n = len(uris)
     cpu_count = os.cpu_count() or 1
-    effective_max_par = max_parallelization if max_parallelization is not None else 8
+    effective_max_par = max_parallelization if max_parallelization is not None else 2
     worker_count = max(1, min(8, math.ceil(n / 1000), cpu_count, effective_max_par))
 
     pbar = None
@@ -233,60 +233,48 @@ def perform_parallel_download(
     cancel_event = threading.Event()
     executor = None
 
+    # Always run workers in dedicated threads so that asyncio.run() is never
+    # called on the calling thread. This matters when the caller is already
+    # inside a running event loop (e.g. Jupyter / IPython), where asyncio.run()
+    # would raise RuntimeError("This event loop is already running").
+    chunk_size = math.ceil(n / worker_count)
+    slices = [slice(i, i + chunk_size) for i in range(0, n, chunk_size)]
+    per_worker_concurrency = (
+        math.ceil(max_concurrency / len(slices))
+        if max_concurrency is not None
+        else None
+    )
+
+    def run_worker(s):
+        asyncio.run(
+            _parallel_download_worker(
+                uris=uris[s],
+                download_paths=download_paths[s],
+                sizes=sizes[s] if sizes is not None else None,
+                md5_hashes=md5_hashes[s] if md5_hashes is not None else None,
+                overwrite=overwrite,
+                on_progress=on_progress,
+                max_concurrency=per_worker_concurrency,
+                cancel_event=cancel_event,
+            )
+        )
+
     try:
-        if worker_count <= 1:
-            asyncio.run(
-                _parallel_download_worker(
-                    uris=uris,
-                    download_paths=download_paths,
-                    sizes=sizes,
-                    md5_hashes=md5_hashes,
-                    overwrite=overwrite,
-                    on_progress=on_progress,
-                    max_concurrency=max_concurrency,
-                    cancel_event=cancel_event,
-                )
-            )
-        else:
-            chunk_size = math.ceil(n / worker_count)
-            slices = [slice(i, i + chunk_size) for i in range(0, n, chunk_size)]
-            per_worker_concurrency = (
-                math.ceil(max_concurrency / len(slices))
-                if max_concurrency is not None
-                else None
-            )
-
-            def run_worker(s):
-                asyncio.run(
-                    _parallel_download_worker(
-                        uris=uris[s],
-                        download_paths=download_paths[s],
-                        sizes=sizes[s] if sizes is not None else None,
-                        md5_hashes=md5_hashes[s] if md5_hashes is not None else None,
-                        overwrite=overwrite,
-                        on_progress=on_progress,
-                        max_concurrency=per_worker_concurrency,
-                        cancel_event=cancel_event,
-                    )
-                )
-
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(slices))
-            futures = [executor.submit(run_worker, s) for s in slices]
-            not_done = list(futures)
-            try:
-                while not_done and not cancel_event.is_set():
-                    freshly_done, not_done = concurrent.futures.wait(
-                        not_done, timeout=0.2
-                    )
-                    for future in freshly_done:
-                        future.result()
-            except KeyboardInterrupt:
-                pass
-            finally:
-                cancel_event.set()
-                for future in not_done:
-                    future.cancel()
-                executor.shutdown(wait=True, cancel_futures=True)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(slices))
+        futures = [executor.submit(run_worker, s) for s in slices]
+        not_done = list(futures)
+        try:
+            while not_done and not cancel_event.is_set():
+                freshly_done, not_done = concurrent.futures.wait(not_done, timeout=0.2)
+                for future in freshly_done:
+                    future.result()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            cancel_event.set()
+            for future in not_done:
+                future.cancel()
+            executor.shutdown(wait=True, cancel_futures=True)
     finally:
         cancel_event.set()
         if pbar:
