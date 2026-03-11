@@ -12,7 +12,6 @@ import threading
 from ..common import exceptions
 from ..common.api_request import __get_api_endpoint, __get_user_agent, make_request
 from ..common.auth import get_auth_token
-from .._version import __version__
 from contextlib import closing
 from requests import RequestException
 from urllib3.exceptions import HTTPError
@@ -76,8 +75,18 @@ def perform_retryable_download(
                 md5_hash = md5_match.group(1).strip() if md5_match else None
 
             if should_check_filename:
+
+                def on_progress_wrapper(byte_count, _):
+                    if on_progress:
+                        on_progress(byte_count)
+
                 exact_file_exists = check_filename(
-                    filename, overwrite, retry_count, size, md5_hash, on_progress
+                    filename,
+                    overwrite,
+                    retry_count,
+                    size,
+                    md5_hash,
+                    on_progress=on_progress_wrapper,
                 )
                 if exact_file_exists:
                     return filename
