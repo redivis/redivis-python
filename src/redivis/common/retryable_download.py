@@ -258,7 +258,7 @@ def perform_parallel_download(
             desc=f"{file_count}/{len(uris)} files",
             unit="B",
             unit_scale=True,
-            mininterval=0.2,
+            mininterval=0.1,
         )
         pbar_lock = threading.Lock()
 
@@ -272,8 +272,8 @@ def perform_parallel_download(
                     nonlocal cached_file_count
                     nonlocal last_updated_description
                     cached_file_count += file_count
-                    # If more than 0.5s, update the description
-                    if time.time() - last_updated_description >= 0.5:
+                    # If more than 0.1s, update the description
+                    if time.time() - last_updated_description >= 0.1:
                         last_updated_description = time.time()
                         pbar.set_description(f"{cached_file_count}/{len(uris)} files")
 
@@ -655,7 +655,7 @@ async def _download_single_file(
                     ) from e
         finally:
             if response is not None:
-                response.close()
+                await response.close()
             await sem.release(estimated_size)
 
         if completed:
