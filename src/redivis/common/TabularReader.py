@@ -8,7 +8,7 @@ from ..classes.File import File
 from ..classes.Directory import Directory
 from pathlib import Path
 from contextlib import closing
-from ..common.list_rows import list_rows
+from .fetch_rows import make_rows_request
 from ..common.api_request import make_request, make_paginated_request
 from ..common.util import get_warning
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Literal
@@ -224,7 +224,7 @@ class TabularReader(Base):
             self, variables
         )
 
-        return list_rows(
+        return make_rows_request(
             uri=self.uri,
             instance=self,
             max_results=max_results,
@@ -251,7 +251,7 @@ class TabularReader(Base):
             self, variables
         )
 
-        return list_rows(
+        return make_rows_request(
             uri=self.uri,
             instance=self,
             max_results=max_results,
@@ -278,7 +278,7 @@ class TabularReader(Base):
             self, variables
         )
 
-        return list_rows(
+        return make_rows_request(
             uri=self.uri,
             instance=self,
             max_results=max_results,
@@ -305,7 +305,7 @@ class TabularReader(Base):
             self, variables
         )
 
-        return list_rows(
+        return make_rows_request(
             uri=self.uri,
             instance=self,
             max_results=max_results,
@@ -334,7 +334,7 @@ class TabularReader(Base):
             self, variables
         )
 
-        arrow_table = list_rows(
+        arrow_table = make_rows_request(
             uri=self.uri,
             instance=self,
             max_results=max_results,
@@ -369,7 +369,7 @@ class TabularReader(Base):
             self, variables
         )
 
-        arrow_table = list_rows(
+        arrow_table = make_rows_request(
             uri=self.uri,
             instance=self,
             max_results=max_results,
@@ -420,7 +420,7 @@ class TabularReader(Base):
             self, variables
         )
 
-        arrow_table = list_rows(
+        arrow_table = make_rows_request(
             uri=self.uri,
             instance=self,
             max_results=max_results,
@@ -465,7 +465,7 @@ class TabularReader(Base):
             self, variables
         )
 
-        return list_rows(
+        return make_rows_request(
             uri=self.uri,
             instance=self,
             max_results=max_results,

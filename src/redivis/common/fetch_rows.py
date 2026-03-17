@@ -7,7 +7,7 @@ from requests import RequestException
 from urllib3.exceptions import HTTPError
 from contextlib import closing, nullcontext
 
-from ..common import exceptions
+from . import exceptions
 from tqdm.auto import tqdm
 import shutil
 from .util import get_tempdir
@@ -52,11 +52,40 @@ class RedivisArrowIterator:
                         self.current_record_batch_reader.schema.names,
                     )
                 )
-                self.output_schema = pyarrow.schema(
+                self.stream_schema = pyarrow.schema(
                     map(variable_to_field, self.variables_in_stream)
                 )
             else:
-                self.output_schema = self.current_record_batch_reader.schema
+                self.stream_schema = self.current_record_batch_reader.schema
+
+            self.should_reorder_fields = False
+            self.fields_to_add = []
+
+            if self.mapped_variables is not None:
+                reader_names = self.current_record_batch_reader.schema.names
+
+                for i, field_name in enumerate(reader_names):
+                    mapped_index = next(
+                        (j for j, v in enumerate(self.mapped_variables) if v["name"] == field_name),
+                        None,
+                    )
+                    if mapped_index is not None and mapped_index != i:
+                        self.should_reorder_fields = True
+                        break
+
+                self.fields_to_add = [
+                    v for v in self.mapped_variables
+                    if v["name"] not in reader_names
+                ]
+
+                if self.fields_to_add:
+                    self.should_reorder_fields = True
+
+            self.output_schema = (
+                pyarrow.schema(map(variable_to_field, self.mapped_variables))
+                if self.should_reorder_fields
+                else self.stream_schema
+            )
         except (RequestException, HTTPError) as e:
             self.retry_count = self.retry_count + 1
             if self.retry_count > 10:
@@ -85,8 +114,23 @@ class RedivisArrowIterator:
                             self.variables_in_stream,
                         )
                     ),
-                    schema=self.output_schema,
+                    schema=self.stream_schema,
                 )
+
+            if self.fields_to_add:
+                null_arrays = [
+                    pyarrow.nulls(batch.num_rows, type=variable_to_field(v).type)
+                    for v in self.fields_to_add
+                ]
+                all_arrays = list(batch.columns) + null_arrays
+                all_names = list(batch.schema.names) + [v["name"] for v in self.fields_to_add]
+                name_to_array = dict(zip(all_names, all_arrays))
+                ordered_arrays = [name_to_array[v["name"]] for v in self.mapped_variables]
+                batch = pyarrow.RecordBatch.from_arrays(ordered_arrays, schema=self.output_schema)
+            elif self.should_reorder_fields:
+                name_to_array = dict(zip(batch.schema.names, batch.columns))
+                ordered_arrays = [name_to_array[v["name"]] for v in self.mapped_variables]
+                batch = pyarrow.RecordBatch.from_arrays(ordered_arrays, schema=self.output_schema)
 
             if self.progressbar is not None:
                 self.progressbar.update(batch.num_rows)
@@ -115,7 +159,7 @@ class RedivisArrowIterator:
             return self.__next__()
 
 
-def list_rows(
+def make_rows_request(
     *,
     uri,
     output_type="dataframe",
@@ -261,12 +305,13 @@ def list_rows(
             if progressbar:
                 progressbar.close()
 
+        schema = pyarrow.schema(map(variable_to_field, mapped_variables)) if batch_preprocessor is None and use_export_api == False else None
+
         if folder_path is None:
             if all_batches:
-                return pyarrow.Table.from_batches(all_batches)
+                return pyarrow.Table.from_batches(all_batches, schema=schema)
 
             # No batches were returned; construct an empty table with the expected schema
-            schema = pyarrow.schema(map(variable_to_field, mapped_variables))
             return pyarrow.Table.from_batches([], schema=schema)
         elif use_export_api:
             if output_type == "polars_lazyframe":
@@ -294,12 +339,10 @@ def list_rows(
             arrow_dataset = pyarrow_dataset.dataset(
                 folder_path,
                 format="feather",
-                schema=(
-                    pyarrow.schema(map(variable_to_field, mapped_variables))
-                    if batch_preprocessor is None
-                    else None
-                ),
+                schema=schema,
             )
+
+        
 
         if output_type == "arrow_dataset":
             return arrow_dataset
@@ -453,11 +496,41 @@ def process_stream(
                         )
                     )
 
-                    output_schema = pyarrow.schema(
+                    stream_schema = pyarrow.schema(
                         map(variable_to_field, variables_in_stream)
                     )
                 else:
-                    output_schema = reader.schema
+                    stream_schema = reader.schema
+
+                should_reorder_fields = False
+                fields_to_add = []
+
+                if mapped_variables is not None:
+                    reader_names_lower = [n.lower() for n in reader.schema.names]
+
+                    for i, field_name in enumerate(reader.schema.names):
+                        mapped_index = next(
+                            (j for j, v in enumerate(mapped_variables) if v["name"].lower() == field_name.lower()),
+                            None,
+                        )
+                        if mapped_index is not None and mapped_index != i:
+                            should_reorder_fields = True
+                            break
+
+                    fields_to_add = [
+                        v for v in mapped_variables
+                        if v["name"].lower() not in reader_names_lower
+                    ]
+
+                    if fields_to_add:
+                        should_reorder_fields = True
+
+                output_schema = (
+                    pyarrow.schema(map(variable_to_field, mapped_variables))
+                    if should_reorder_fields
+                    else stream_schema
+                )
+
                 writer = None
                 for batch in reader:
                     # exit out of thread
@@ -474,8 +547,23 @@ def process_stream(
                                     variables_in_stream,
                                 )
                             ),
-                            schema=output_schema,
+                            schema=stream_schema,
                         )
+
+                    if fields_to_add:
+                        null_arrays = [
+                            pyarrow.nulls(batch.num_rows, type=variable_to_field(v).type)
+                            for v in fields_to_add
+                        ]
+                        all_arrays = list(batch.columns) + null_arrays
+                        all_names = [n.lower() for n in batch.schema.names] + [v["name"].lower() for v in fields_to_add]
+                        name_to_array = dict(zip(all_names, all_arrays))
+                        ordered_arrays = [name_to_array[v["name"].lower()] for v in mapped_variables]
+                        batch = pyarrow.RecordBatch.from_arrays(ordered_arrays, schema=output_schema)
+                    elif should_reorder_fields:
+                        name_to_array = {n.lower(): a for n, a in zip(batch.schema.names, batch.columns)}
+                        ordered_arrays = [name_to_array[v["name"].lower()] for v in mapped_variables]
+                        batch = pyarrow.RecordBatch.from_arrays(ordered_arrays, schema=output_schema)
 
                     num_rows = batch.num_rows
                     offset += num_rows

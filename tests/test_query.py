@@ -7,7 +7,6 @@ def test_run_global_query():
     query = redivis.query(
         f"SELECT * EXCEPT(_upload_name) FROM `{util.get_user_name()}.{util.get_dataset_name()}:next.{util.get_table_name()}` LIMIT 100"
     )
-    print(query.list_rows(max_results=10))
     print(query.to_dataframe(max_results=10))
     assert True
 
@@ -17,19 +16,18 @@ def test_run_scoped_query():
         f"SELECT *  FROM `{util.get_table_name()}` LIMIT 100"
     )
 
-    print(query.list_rows(max_results=10))
     print(query.to_dataframe(max_results=10))
     assert True
 
 
-def test_query_list_rows():
+def test_query_make_rows_request():
     rows = redivis.query(
         """
             SELECT 1 + 1 AS some_number, 'foo' AS some_string
             UNION ALL 
             SELECT 4, 'bar'
         """
-    ).list_rows()
+    ).to_pandas_dataframe()
     print(rows)
 
 
@@ -51,7 +49,7 @@ def test_query_underscore_variable_name():
             SELECT 1 + 1 AS _val
         """
     )
-    print(query.list_rows())
+    print(query.to_pandas_dataframe())
 
 
 def test_check_type_parsing():
