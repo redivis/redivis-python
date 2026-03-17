@@ -499,7 +499,7 @@ class TabularReader(Base):
 
         ip = get_ipython()
 
-        mapped_variables, selected_variables = get_mapped_variables(
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
             self, variables
         )
 
@@ -601,7 +601,7 @@ class TabularReader(Base):
         import pyarrow as pa
         from pystata import stata
 
-        mapped_variables, selected_variables = get_mapped_variables(
+        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
             self, variables
         )
 
