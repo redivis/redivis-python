@@ -9,10 +9,10 @@ def test_list_variables():
     print(variables)
 
 
-def test_list_rows():
+def test_make_rows_request():
     util.populate_test_data()
     table = util.get_table()
-    print(table.list_rows(max_results=10))
+    print(table.to_pandas_dataframe(max_results=10))
 
 
 def test_to_dataframe():

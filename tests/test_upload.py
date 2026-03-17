@@ -163,8 +163,8 @@ def test_streaming_upload():
     variables = upload.list_variables()
     print(variables)
     print(variables[0].get_statistics())
-    print(table.list_rows())
-    print(upload.list_rows())
+    print(table.to_pandas_dataframe())
+    print(upload.to_pandas_dataframe())
 
 
 def test_redivis_upload():
@@ -207,8 +207,8 @@ def test_streaming_schema_upload():
     variables = upload.list_variables()
     print(variables)
     print(variables[0].get_statistics())
-    print(table.list_rows())
-    print(upload.list_rows())
+    print(table.to_pandas_dataframe())
+    print(upload.to_pandas_dataframe())
 
 
 def test_resumable_upload():
