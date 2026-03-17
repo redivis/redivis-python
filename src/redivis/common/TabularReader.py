@@ -489,16 +489,19 @@ class TabularReader(Base):
     ) -> None:
         if self._is_read_stream:
             raise exceptions.ValueError("Cannot call to_sas() on a ReadStream.")
-        check_is_ready(self)
         if not name:
             raise exceptions.ValueError(
                 'A SAS dataset name must be provided. E.g., table.to_sas("mydata")'
             )
         import pyarrow as pa
-        import saspy  # make sure this gets imported here
+        import saspy  # make sure this gets imported here, so that SAS initialization happens
         from IPython import get_ipython
 
         ip = get_ipython()
+
+        mapped_variables, selected_variables = get_mapped_variables(
+            self, variables
+        )
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             # IMPORTANT: SAS is running as a separate user, need to make sure the directory is readable
@@ -527,6 +530,12 @@ class TabularReader(Base):
                     geography_variable = None
 
             if geography_variable is None:
+                use_export_api = max_results is not None and variables is None and should_use_export_api(self)
+                
+                # IMPORTANT: always pass selectedVariables if not using the export API to ensure correct ordering
+                if not selected_variables and not use_export_api:
+                    selected_variables = [v["name"] for v in mapped_variables]
+
                 load_script = make_request(
                     method="GET",
                     path=f"{self.uri}/script",
@@ -534,16 +543,12 @@ class TabularReader(Base):
                         "type": "sas",
                         "filePath": f"{tmpdirname}/part-0.csv",
                         "sasDatasetName": name,
-                        "selectedVariables": variables,
+                        "selectedVariables": selected_variables,
                     },
                     parse_response=False,
                 ).text
 
-                if (
-                    max_results is not None
-                    and variables is None
-                    and should_use_export_api(self)
-                ):
+                if use_export_api:
                     self.download(
                         path=f"{tmpdirname}/part-0.csv", format="csv", progress=progress
                     )
@@ -593,9 +598,12 @@ class TabularReader(Base):
             raise exceptions.RedivisError(
                 f"""An error occurred during Stata initialization. Please make sure you have the correct license and edition specified.\n\nThe error message was:\n\n{os.getenv('STATA_ERROR')}."""
             )
-        check_is_ready(self)
         import pyarrow as pa
         from pystata import stata
+
+        mapped_variables, selected_variables = get_mapped_variables(
+            self, variables
+        )
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             if geography_variable == "":
@@ -620,22 +628,24 @@ class TabularReader(Base):
                     geography_variable = None
 
             if geography_variable is None:
+                use_export_api = max_results is not None and variables is None and should_use_export_api(self)
+                
+                # IMPORTANT: always pass selectedVariables if not using the export API to ensure correct ordering
+                if not selected_variables and not use_export_api:
+                    selected_variables = [v["name"] for v in mapped_variables]
+
                 load_script_res = make_request(
                     method="GET",
                     path=f"{self.uri}/script",
                     query={
                         "type": "stata",
                         "filePath": f"{tmpdirname}/part-0.csv",
-                        "selectedVariables": variables,
+                        "selectedVariables": selected_variables,
                     },
                     parse_response=False,
                 )
                 load_script = load_script_res.text
-                if (
-                    max_results is not None
-                    and variables is None
-                    and should_use_export_api(self)
-                ):
+                if use_export_api:
                     self.download(
                         path=f"{tmpdirname}/part-0.csv", format="csv", progress=progress
                     )
