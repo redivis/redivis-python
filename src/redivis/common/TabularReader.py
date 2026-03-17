@@ -533,7 +533,7 @@ class TabularReader(Base):
                 use_export_api = max_results is not None and variables is None and should_use_export_api(self)
                 
                 # IMPORTANT: always pass selectedVariables if not using the export API to ensure correct ordering
-                if not selected_variables and not use_export_api:
+                if selected_variables is None and not use_export_api:
                     selected_variables = [v["name"] for v in mapped_variables]
 
                 load_script = make_request(
@@ -631,7 +631,7 @@ class TabularReader(Base):
                 use_export_api = max_results is not None and variables is None and should_use_export_api(self)
                 
                 # IMPORTANT: always pass selectedVariables if not using the export API to ensure correct ordering
-                if not selected_variables and not use_export_api:
+                if selected_variables is None and not use_export_api:
                     selected_variables = [v["name"] for v in mapped_variables]
 
                 load_script_res = make_request(
