@@ -63,11 +63,13 @@ class Transform(Base):
             properties=self.properties["sourceTable"],
         )
 
-    def update(self, *, name=None, source_table=None):
+    def update(self, *, name=None, source_table=None, query=None):
         payload = {}
 
         if name is not None:
             payload["name"] = name
+        if query is not None:
+            payload["query"] = query
         if source_table is not None:
             if isinstance(source_table, Table):
                 payload["sourceTable"] = source_table.qualified_reference
