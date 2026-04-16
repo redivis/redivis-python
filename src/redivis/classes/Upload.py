@@ -62,11 +62,11 @@ class Upload(TabularReader):
         )
         self.uri = self.properties["uri"]
 
-    def insert_rows(self, rows, *, update_schema=False):
+    def insert_rows(self, rows):
         response = make_request(
             method="POST",
             path=f"{self.uri}/rows",
-            payload={"rows": rows, "updateSchema": update_schema},
+            payload={"rows": rows},
         )
         return response
 
