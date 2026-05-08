@@ -530,23 +530,15 @@ class TabularReader(Base):
                     geography_variable = None
 
             if geography_variable is None:
-                use_export_api = max_results is not None and variables is None and should_use_export_api(self)
-                
+                use_export_api = (
+                    max_results is not None
+                    and variables is None
+                    and should_use_export_api(self)
+                )
+
                 # IMPORTANT: always pass selectedVariables if not using the export API to ensure correct ordering
                 if selected_variables is None and not use_export_api:
                     selected_variables = [v["name"] for v in mapped_variables]
-
-                load_script = make_request(
-                    method="GET",
-                    path=f"{self.uri}/script",
-                    query={
-                        "type": "sas",
-                        "filePath": f"{tmpdirname}/part-0.csv",
-                        "sasDatasetName": name,
-                        "selectedVariables": selected_variables,
-                    },
-                    parse_response=False,
-                ).text
 
                 if use_export_api:
                     self.download(
@@ -567,6 +559,67 @@ class TabularReader(Base):
                         basename_template="part-{i}.csv",
                         format="csv",
                     )
+
+                import csv
+
+                temp_file_path = f"{tmpdirname}/cleaned.csv"
+
+                # This allows SAS to handle line breaks in cells
+                with open(
+                    f"{tmpdirname}/part-0.csv", "r", newline="", encoding="utf-8"
+                ) as fin, open(
+                    temp_file_path, "w", newline="", encoding="utf-8"
+                ) as fout:
+                    reader = csv.reader(fin)
+                    writer = csv.writer(fout, lineterminator="\r\n")
+
+                    # Determine which column indices are string variables
+                    active_variables = [
+                        v for v in mapped_variables
+                        if selected_variables is None or v["name"] in selected_variables
+                    ]
+                    string_col_indices = [
+                        i for i, v in enumerate(active_variables)
+                        if v.get("type") == "string"
+                    ]
+                    string_col_names = [active_variables[i]["name"] for i in string_col_indices]
+                    max_string_lengths = {name: 0 for name in string_col_names}
+
+                    is_header = True
+                    for row in reader:
+                        if is_header:
+                            is_header = False
+                            writer.writerow(row)
+                            continue
+                        for idx, col_name in zip(string_col_indices, string_col_names):
+                            if idx < len(row):
+                                max_string_lengths[col_name] = max(
+                                    max_string_lengths[col_name], len(row[idx])
+                                )
+                        writer.writerow(row)
+
+                os.remove(f"{tmpdirname}/part-0.csv")
+
+                string_variable_lengths = ",".join(
+                    f"{col_name}:{length}"
+                    for col_name, length in max_string_lengths.items()
+                    if length > 0
+                ) or None
+
+                load_script = make_request(
+                    method="GET",
+                    path=f"{self.uri}/script",
+                    query={
+                        "type": "sas",
+                        "filePath": temp_file_path,
+                        "sasDatasetName": name,
+                        "selectedVariables": selected_variables,
+                        "termstr": "crlf",
+                        "stringVariableLengths": string_variable_lengths,
+                    },
+                    parse_response=False,
+                ).text
+
             else:
                 geopandas_df = self.to_geopandas_dataframe(
                     max_results=max_results,
@@ -576,10 +629,12 @@ class TabularReader(Base):
                     batch_preprocessor=batch_preprocessor,
                     max_parallelization=max_parallelization,
                 )
-                geopandas_df.to_file(f"{tmpdirname}/out.shp")
+                temp_file_path = f"{tmpdirname}/out.shp"
+                geopandas_df.to_file(temp_file_path)
                 load_script = f"""proc mapimport datafile="{tmpdirname}/out.shp" out={name};\nrun;"""
 
             ip.run_cell_magic("SAS", "", load_script)
+            os.remove(temp_file_path)
 
     def to_stata(
         self,
@@ -628,8 +683,12 @@ class TabularReader(Base):
                     geography_variable = None
 
             if geography_variable is None:
-                use_export_api = max_results is not None and variables is None and should_use_export_api(self)
-                
+                use_export_api = (
+                    max_results is not None
+                    and variables is None
+                    and should_use_export_api(self)
+                )
+
                 # IMPORTANT: always pass selectedVariables if not using the export API to ensure correct ordering
                 if selected_variables is None and not use_export_api:
                     selected_variables = [v["name"] for v in mapped_variables]
