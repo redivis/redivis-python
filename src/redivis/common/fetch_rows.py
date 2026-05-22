@@ -637,7 +637,10 @@ def process_stream(
                 os.remove(os_file)
     except (RequestException, HTTPError) as e:
         if writer is not None:
-            writer.close()
+            try:
+                writer.close()
+            except Exception:
+                pass
 
         if retry_count >= 10:
             raise exceptions.NetworkError(
