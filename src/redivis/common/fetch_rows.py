@@ -636,15 +636,15 @@ def process_stream(
             elif not has_content:
                 os.remove(os_file)
     except (RequestException, HTTPError) as e:
+        if writer is not None:
+            writer.close()
+
         if retry_count >= 10:
             raise exceptions.NetworkError(
                 message=f"A network error occurred. Stream rows connection failed after {retry_count} retries.",
                 original_exception=e,
             ) from e
-        
-        if writer is not None:
-            writer.close()
-            
+
         time.sleep(retry_count + 1)
         return process_stream(
             stream,
