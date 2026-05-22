@@ -472,6 +472,7 @@ def process_stream(
     offset=0,
     retry_count=0,
 ):
+    writer = None
     try:
         import pyarrow
 
@@ -554,7 +555,6 @@ def process_stream(
                     else stream_schema
                 )
 
-                writer = None
                 for batch in reader:
                     # exit out of thread
                     if cancel_event.is_set():
@@ -641,6 +641,10 @@ def process_stream(
                 message=f"A network error occurred. Stream rows connection failed after {retry_count} retries.",
                 original_exception=e,
             ) from e
+        
+        if writer is not None:
+            writer.close()
+            
         time.sleep(retry_count + 1)
         return process_stream(
             stream,
