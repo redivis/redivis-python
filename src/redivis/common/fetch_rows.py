@@ -66,7 +66,11 @@ class RedivisArrowIterator:
 
                 for i, field_name in enumerate(reader_names):
                     mapped_index = next(
-                        (j for j, v in enumerate(self.mapped_variables) if v["name"] == field_name),
+                        (
+                            j
+                            for j, v in enumerate(self.mapped_variables)
+                            if v["name"] == field_name
+                        ),
                         None,
                     )
                     if mapped_index is not None and mapped_index != i:
@@ -74,8 +78,7 @@ class RedivisArrowIterator:
                         break
 
                 self.fields_to_add = [
-                    v for v in self.mapped_variables
-                    if v["name"] not in reader_names
+                    v for v in self.mapped_variables if v["name"] not in reader_names
                 ]
 
                 if self.fields_to_add:
@@ -123,14 +126,24 @@ class RedivisArrowIterator:
                     for v in self.fields_to_add
                 ]
                 all_arrays = list(batch.columns) + null_arrays
-                all_names = list(batch.schema.names) + [v["name"] for v in self.fields_to_add]
+                all_names = list(batch.schema.names) + [
+                    v["name"] for v in self.fields_to_add
+                ]
                 name_to_array = dict(zip(all_names, all_arrays))
-                ordered_arrays = [name_to_array[v["name"]] for v in self.mapped_variables]
-                batch = pyarrow.RecordBatch.from_arrays(ordered_arrays, schema=self.output_schema)
+                ordered_arrays = [
+                    name_to_array[v["name"]] for v in self.mapped_variables
+                ]
+                batch = pyarrow.RecordBatch.from_arrays(
+                    ordered_arrays, schema=self.output_schema
+                )
             elif self.should_reorder_fields:
                 name_to_array = dict(zip(batch.schema.names, batch.columns))
-                ordered_arrays = [name_to_array[v["name"]] for v in self.mapped_variables]
-                batch = pyarrow.RecordBatch.from_arrays(ordered_arrays, schema=self.output_schema)
+                ordered_arrays = [
+                    name_to_array[v["name"]] for v in self.mapped_variables
+                ]
+                batch = pyarrow.RecordBatch.from_arrays(
+                    ordered_arrays, schema=self.output_schema
+                )
 
             if self.progressbar is not None:
                 self.progressbar.update(batch.num_rows)
@@ -305,7 +318,11 @@ def make_rows_request(
             if progressbar:
                 progressbar.close()
 
-        schema = pyarrow.schema(map(variable_to_field, mapped_variables)) if batch_preprocessor is None and use_export_api == False else None
+        schema = (
+            pyarrow.schema(map(variable_to_field, mapped_variables))
+            if batch_preprocessor is None and use_export_api == False
+            else None
+        )
 
         if folder_path is None:
             if all_batches:
@@ -341,8 +358,6 @@ def make_rows_request(
                 format="feather",
                 schema=schema,
             )
-
-        
 
         if output_type == "arrow_dataset":
             return arrow_dataset
@@ -457,6 +472,7 @@ def process_stream(
     offset=0,
     retry_count=0,
 ):
+    writer = None
     try:
         import pyarrow
 
@@ -470,9 +486,12 @@ def process_stream(
         ) as arrow_response:
             record_batches = [] if folder_path is None else None
             has_content = False
+            retry_suffix = f"-retry_offset-{offset}" if offset > 0 else ""
             # create the os_file path
             os_file = (
-                pathlib.Path(folder_path).joinpath(f"{stream['id']}.feather").absolute()
+                pathlib.Path(folder_path)
+                .joinpath(f"{stream['id']}{retry_suffix}.feather")
+                .absolute()
                 if folder_path is not None
                 else None
             )
@@ -510,7 +529,11 @@ def process_stream(
 
                     for i, field_name in enumerate(reader.schema.names):
                         mapped_index = next(
-                            (j for j, v in enumerate(mapped_variables) if v["name"].lower() == field_name.lower()),
+                            (
+                                j
+                                for j, v in enumerate(mapped_variables)
+                                if v["name"].lower() == field_name.lower()
+                            ),
                             None,
                         )
                         if mapped_index is not None and mapped_index != i:
@@ -518,7 +541,8 @@ def process_stream(
                             break
 
                     fields_to_add = [
-                        v for v in mapped_variables
+                        v
+                        for v in mapped_variables
                         if v["name"].lower() not in reader_names_lower
                     ]
 
@@ -531,7 +555,6 @@ def process_stream(
                     else stream_schema
                 )
 
-                writer = None
                 for batch in reader:
                     # exit out of thread
                     if cancel_event.is_set():
@@ -552,18 +575,33 @@ def process_stream(
 
                     if fields_to_add:
                         null_arrays = [
-                            pyarrow.nulls(batch.num_rows, type=variable_to_field(v).type)
+                            pyarrow.nulls(
+                                batch.num_rows, type=variable_to_field(v).type
+                            )
                             for v in fields_to_add
                         ]
                         all_arrays = list(batch.columns) + null_arrays
-                        all_names = [n.lower() for n in batch.schema.names] + [v["name"].lower() for v in fields_to_add]
+                        all_names = [n.lower() for n in batch.schema.names] + [
+                            v["name"].lower() for v in fields_to_add
+                        ]
                         name_to_array = dict(zip(all_names, all_arrays))
-                        ordered_arrays = [name_to_array[v["name"].lower()] for v in mapped_variables]
-                        batch = pyarrow.RecordBatch.from_arrays(ordered_arrays, schema=output_schema)
+                        ordered_arrays = [
+                            name_to_array[v["name"].lower()] for v in mapped_variables
+                        ]
+                        batch = pyarrow.RecordBatch.from_arrays(
+                            ordered_arrays, schema=output_schema
+                        )
                     elif should_reorder_fields:
-                        name_to_array = {n.lower(): a for n, a in zip(batch.schema.names, batch.columns)}
-                        ordered_arrays = [name_to_array[v["name"].lower()] for v in mapped_variables]
-                        batch = pyarrow.RecordBatch.from_arrays(ordered_arrays, schema=output_schema)
+                        name_to_array = {
+                            n.lower(): a
+                            for n, a in zip(batch.schema.names, batch.columns)
+                        }
+                        ordered_arrays = [
+                            name_to_array[v["name"].lower()] for v in mapped_variables
+                        ]
+                        batch = pyarrow.RecordBatch.from_arrays(
+                            ordered_arrays, schema=output_schema
+                        )
 
                     num_rows = batch.num_rows
                     offset += num_rows
@@ -598,11 +636,18 @@ def process_stream(
             elif not has_content:
                 os.remove(os_file)
     except (RequestException, HTTPError) as e:
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
         if retry_count >= 10:
             raise exceptions.NetworkError(
                 message=f"A network error occurred. Stream rows connection failed after {retry_count} retries.",
                 original_exception=e,
             ) from e
+
         time.sleep(retry_count + 1)
         return process_stream(
             stream,
