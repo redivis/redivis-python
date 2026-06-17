@@ -44,26 +44,93 @@ def get_tempdir():
 
     return created_temp_dir
 
+def get_parquet_rows_per_group(data):
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.dataset as pa_dataset
+    from dask.dataframe import DataFrame as dask_df
+    import polars
+
+    TARGET_GROUP_BYTES = 128 * 1024**2   # ~128MB per row group
+    MAX_RPG = 1_000_000
+    MIN_RPG = 1
+    SAMPLE_N = 10_000
+
+    bytes_per_row = None
+
+    # --- Arrow Dataset: metadata-only, sum file sizes / row count ---
+    if isinstance(data, pa_dataset.Dataset):
+        total_bytes = 0
+        for f in data.files:
+            try:
+                total_bytes += os.path.getsize(f)
+            except OSError:
+                pass
+        n_rows = data.count_rows()          # metadata-only for parquet
+        if n_rows > 0 and total_bytes > 0:
+            bytes_per_row = total_bytes / n_rows
+
+    # --- Arrow Table / RecordBatch: zero-copy slice, measure that ---
+    elif isinstance(data, (pa.Table, pa.RecordBatch)):
+        n_rows = data.num_rows
+        if n_rows > 0:
+            s = data.slice(0, min(SAMPLE_N, n_rows))
+            bytes_per_row = s.nbytes / s.num_rows
+
+    # --- Dask DataFrame: measure one partition, scale by row count ---
+    elif isinstance(data, dask_df):
+        head = data.head(SAMPLE_N, compute=True)
+        if len(head) > 0:
+            bytes_per_row = head.memory_usage(deep=True).sum() / len(head)
+
+    # --- pandas / polars eager DataFrame ---
+    elif isinstance(data, pd.DataFrame):
+        n_rows = len(data)
+        if n_rows > 0:
+            head = data.head(SAMPLE_N)
+            bytes_per_row = head.memory_usage(deep=True).sum() / len(head)
+    elif isinstance(data, polars.DataFrame):
+        n_rows = data.height
+        if n_rows > 0:
+            tbl = data.head(SAMPLE_N).to_arrow()
+            bytes_per_row = tbl.nbytes / tbl.num_rows
+        # --- Polars LazyFrame: fetch a small slice, measure as Arrow ---
+    elif isinstance(data, polars.LazyFrame):
+        sample = data.head(SAMPLE_N).collect()
+        if sample.height > 0:
+            tbl = sample.to_arrow()
+            bytes_per_row = tbl.nbytes / tbl.num_rows
+
+    if bytes_per_row is None or bytes_per_row <= 0:
+        return 100_000
+
+    rpg = int(TARGET_GROUP_BYTES / bytes_per_row)
+    return max(MIN_RPG, min(MAX_RPG, rpg))
 
 def convert_data_to_parquet(data):
     temp_file_path = f"{get_tempdir()}/parquet/{uuid.uuid4()}"
     pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
 
     import geopandas
+    import polars
     import pandas as pd
     import pyarrow as pa
     import pyarrow.dataset as pa_dataset
     import pyarrow.parquet as pa_parquet
     from dask.dataframe import DataFrame as dask_df
 
-    # IMPORTANT: we need to coerce all timestamps to us precision, since BQ doesn't support ns, and will then just load the timestamp as int64
+    rows_per_group = get_parquet_rows_per_group(data)
 
+    # IMPORTANT: we need to coerce all timestamps to us precision, since BQ doesn't support ns, and will then just load the timestamp as int64
     if isinstance(data, geopandas.GeoDataFrame):
         data.to_parquet(
             path=temp_file_path,
             coerce_timestamps="us",
             allow_truncated_timestamps=True,
             index=False,
+            row_group_size=rows_per_group,
+            write_statistics=False,
+            engine="pyarrow"
         )
     elif isinstance(data, pd.DataFrame):
         data.to_parquet(
@@ -71,6 +138,9 @@ def convert_data_to_parquet(data):
             coerce_timestamps="us",
             allow_truncated_timestamps=True,
             index=False,
+            row_group_size=rows_per_group,
+            write_statistics=False,
+            engine="pyarrow"
         )
     elif isinstance(data, pa_dataset.Dataset):
         pa_dataset.write_dataset(
@@ -81,16 +151,21 @@ def convert_data_to_parquet(data):
             file_options=pa_dataset.ParquetFileFormat().make_write_options(
                 coerce_timestamps="us",
                 allow_truncated_timestamps=True,
+                write_statistics=False
             ),
+            min_rows_per_group=rows_per_group,
+            max_rows_per_group=rows_per_group,
             max_partitions=1,
         )
         temp_file_path = f"{temp_file_path}/part-0.parquet"
-    elif isinstance(data, pa.Table):
+    elif isinstance(data, (pa.Table, pa.RecordBatch)):
         pa_parquet.write_table(
             data,
             temp_file_path,
             coerce_timestamps="us",
             allow_truncated_timestamps=True,
+            row_group_size=rows_per_group,
+            write_statistics=False
         )
     elif isinstance(data, dask_df):
         data.to_parquet(
@@ -98,28 +173,32 @@ def convert_data_to_parquet(data):
             write_index=False,
             coerce_timestamps="us",
             allow_truncated_timestamps=True,
+            row_group_size=rows_per_group,
+            write_statistics=False,
+            engine="pyarrow"
         )
         temp_file_path = f"{temp_file_path}/part.0.parquet"
+    elif isinstance(data, polars.LazyFrame):
+        data.sink_parquet(
+            temp_file_path, 
+            row_group_size=rows_per_group,
+            statistics=False # Note that this arg looks different than write_statistics elsewhere
+        )
+    elif isinstance(data, polars.DataFrame):
+        data.write_parquet(
+            temp_file_path,
+            use_pyarrow=True,
+            pyarrow_options={
+                "row_group_size": rows_per_group,
+                "write_statistics": False,
+                "coerce_timestamps": "us",
+                "allow_truncated_timestamps": True,
+            },
+        )
     else:
-        # importing polars is causing an IllegalInstruction error on ARM + Docker. Import inline to avoid crashes elsewhwere
-        # TODO: revert once fixed upstream
-        import polars
-
-        if isinstance(data, polars.LazyFrame):
-            data.sink_parquet(temp_file_path)
-        elif isinstance(data, polars.DataFrame):
-            data.write_parquet(
-                temp_file_path,
-                use_pyarrow=True,
-                pyarrow_options={
-                    "coerce_timestamps": "us",
-                    "allow_truncated_timestamps": True,
-                },
-            )
-        else:
-            raise exceptions.ValueError(
-                "Unknown datatype provided. Must be an instance of pandas.DataFrame, pyarrow.Dataset, pyarrow.Table, dask.DataFrame, polars.LazyFrame, or polars.DataFrame"
-            )
+        raise exceptions.ValueError(
+            "Unknown datatype provided. Must be an instance of pandas.DataFrame, pyarrow.Dataset, pyarrow.Table, dask.DataFrame, polars.LazyFrame, or polars.DataFrame"
+        )
 
     return temp_file_path
 
