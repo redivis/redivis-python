@@ -45,11 +45,9 @@ def get_tempdir():
     return created_temp_dir
 
 def get_parquet_rows_per_group(data):
-    import geopandas
     import pandas as pd
     import pyarrow as pa
     import pyarrow.dataset as pa_dataset
-    import pyarrow.parquet as pa_parquet
     from dask.dataframe import DataFrame as dask_df
     import polars
 
@@ -81,9 +79,8 @@ def get_parquet_rows_per_group(data):
 
     # --- Dask DataFrame: measure one partition, scale by row count ---
     elif isinstance(data, dask_df):
-        part = data.partitions[0].compute()
-        if len(part) > 0:
-            head = part.head(SAMPLE_N)
+        head = data.head(SAMPLE_N, compute=True)
+        if len(head) > 0:
             bytes_per_row = head.memory_usage(deep=True).sum() / len(head)
 
     # --- pandas / polars eager DataFrame ---
