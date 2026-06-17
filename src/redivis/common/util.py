@@ -159,6 +159,8 @@ def convert_data_to_parquet(data):
         )
         temp_file_path = f"{temp_file_path}/part-0.parquet"
     elif isinstance(data, (pa.Table, pa.RecordBatch)):
+        if isinstance(data, pa.RecordBatch):
+             data = pa.Table.from_batches([data])
         pa_parquet.write_table(
             data,
             temp_file_path,
@@ -168,6 +170,7 @@ def convert_data_to_parquet(data):
             write_statistics=False
         )
     elif isinstance(data, dask_df):
+        # TODO: this can be multiple files, we'll want to refactor once we have the new import API
         data.to_parquet(
             temp_file_path,
             write_index=False,
