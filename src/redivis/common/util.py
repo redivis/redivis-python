@@ -154,11 +154,11 @@ def convert_data_to_parquet(data):
             file_options=pa_dataset.ParquetFileFormat().make_write_options(
                 coerce_timestamps="us",
                 allow_truncated_timestamps=True,
+                write_statistics=False
             ),
             min_rows_per_group=rows_per_group,
             max_rows_per_group=rows_per_group,
             max_partitions=1,
-            write_statistics=False
         )
         temp_file_path = f"{temp_file_path}/part-0.parquet"
     elif isinstance(data, (pa.Table, pa.RecordBatch)):
