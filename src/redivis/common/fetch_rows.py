@@ -33,10 +33,15 @@ class RedivisArrowIterator:
 
         try:
             self.current_offset = offset
+            # Tracks whether the current stream delivered the end-of-stream
+            # sentinel (a final, empty batch). Until we see it, an exhausted
+            # reader means the connection was interrupted, not that the stream
+            # completed.
+            self.current_stream_finished = False
             # TODO: this won't get closed properly if the iterator is not fully consumed
             arrow_response = make_request(
                 method="get",
-                path=f'/readStreams/{self.streams[self.current_stream_index]["id"]}?offset={offset}',
+                path=f'/readStreams/{self.streams[self.current_stream_index]["id"]}?offset={offset}&eosSentinel=true',
                 stream=True,
                 parse_response=False,
             )
@@ -108,6 +113,14 @@ class RedivisArrowIterator:
 
         try:
             batch = self.current_record_batch_reader.read_next_batch()
+
+            # An empty batch is the end-of-stream sentinel emitted by the server
+            # (eosSentinel=true). It confirms the stream completed cleanly, so
+            # advance to the next stream rather than yielding an empty batch.
+            if batch.num_rows == 0:
+                self.current_stream_finished = True
+                raise StopIteration
+
             if self.coerce_schema:
                 batch = pyarrow.RecordBatch.from_arrays(
                     list(
@@ -152,6 +165,20 @@ class RedivisArrowIterator:
             self.retry_count = 0
             return batch
         except StopIteration:
+            # The reader was exhausted without the end-of-stream sentinel, which
+            # means the connection was interrupted at a record batch boundary.
+            # Resume the same stream from the current offset instead of treating
+            # it as complete.
+            if not self.current_stream_finished:
+                self.retry_count += 1
+                if self.retry_count > 10:
+                    raise exceptions.NetworkError(
+                        message=f"Download connection failed after {self.retry_count} retries.",
+                    )
+                time.sleep(self.retry_count)
+                self.__get_next_reader__(self.current_offset)
+                return self.__next__()
+
             if self.current_stream_index == len(self.streams) - 1:
                 if self.progressbar:
                     self.progressbar.close()
@@ -473,19 +500,25 @@ def process_stream(
     retry_count=0,
 ):
     writer = None
+    # Initialized here (not inside the try) so the network-retry handler can
+    # concatenate batches read before a mid-stream failure, even if the failure
+    # happens in make_request before the reader loop begins.
+    record_batches = [] if folder_path is None else None
     try:
         import pyarrow
 
         with closing(
             make_request(
                 method="get",
-                path=f'/readStreams/{stream["id"]}?offset={offset}',
+                path=f'/readStreams/{stream["id"]}?offset={offset}&eosSentinel=true',
                 stream=True,
                 parse_response=False,
             )
         ) as arrow_response:
-            record_batches = [] if folder_path is None else None
             has_content = False
+            # Set once the server's end-of-stream sentinel (an empty batch) is
+            # received, confirming the stream completed rather than being cut off.
+            stream_finished = False
             retry_suffix = f"-retry_offset-{offset}" if offset > 0 else ""
             # create the os_file path
             os_file = (
@@ -561,6 +594,12 @@ def process_stream(
                         has_content = False
                         break
 
+                    # The empty end-of-stream sentinel confirms the stream
+                    # completed cleanly; it carries no data to write.
+                    if batch.num_rows == 0:
+                        stream_finished = True
+                        break
+
                     if coerce_schema:
                         batch = pyarrow.RecordBatch.from_arrays(
                             list(
@@ -631,10 +670,37 @@ def process_stream(
                 if writer is not None:
                     writer.close()
 
+        if folder_path is not None and not has_content:
+            os.remove(os_file)
+
+        # The reader ended without the end-of-stream sentinel and we weren't
+        # cancelled: the connection dropped at a record batch boundary. Resume
+        # from the current offset rather than treating the stream as complete.
+        # Data read so far is preserved — on disk as a "-retry_offset-" file, or
+        # in memory by concatenating with the retry's batches below.
+        if not stream_finished and not cancel_event.is_set():
+            if retry_count >= 10:
+                raise exceptions.NetworkError(
+                    message=f"A network error occurred. Stream rows connection failed after {retry_count} retries.",
+                )
+            time.sleep(retry_count + 1)
+            retry_result = process_stream(
+                stream,
+                folder_path,
+                mapped_variables,
+                coerce_schema,
+                progressbar,
+                batch_preprocessor,
+                cancel_event,
+                offset=offset,
+                retry_count=retry_count + 1,
+            )
             if folder_path is None:
-                return record_batches
-            elif not has_content:
-                os.remove(os_file)
+                return record_batches + (retry_result or [])
+            return retry_result
+
+        if folder_path is None:
+            return record_batches
     except (RequestException, HTTPError) as e:
         if writer is not None:
             try:
@@ -649,7 +715,7 @@ def process_stream(
             ) from e
 
         time.sleep(retry_count + 1)
-        return process_stream(
+        retry_result = process_stream(
             stream,
             folder_path,
             mapped_variables,
@@ -660,3 +726,8 @@ def process_stream(
             offset=offset,
             retry_count=retry_count + 1,
         )
+        # Preserve batches read before the failure. For the on-disk path they are
+        # already flushed to a feather file; for the in-memory path we concatenate.
+        if folder_path is None:
+            return record_batches + (retry_result or [])
+        return retry_result
