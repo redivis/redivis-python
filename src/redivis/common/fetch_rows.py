@@ -26,10 +26,37 @@ class RedivisArrowIterator:
         self.current_stream_index = 0
         self.current_offset = 0
         self.retry_count = 0
+        self.current_record_batch_reader = None
+        self.current_arrow_response = None
         self.__get_next_reader__()
+
+    def __close_current_reader__(self):
+        # Release the prior stream's HTTP connection before opening a new one.
+        # pyarrow reads from response.raw; with stream=True the socket is not
+        # returned to the connection pool until the Response is closed, so an
+        # abandoned (e.g. mid-stream interrupted) reader would otherwise leak
+        # sockets/file descriptors — multiplied by every retry.
+        reader = self.current_record_batch_reader
+        if reader is not None:
+            try:
+                reader.close()
+            except Exception:
+                pass
+            self.current_record_batch_reader = None
+
+        response = self.current_arrow_response
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+            self.current_arrow_response = None
 
     def __get_next_reader__(self, offset=0):
         import pyarrow
+
+        # Close whatever stream is currently open before replacing it.
+        self.__close_current_reader__()
 
         try:
             self.current_offset = offset
@@ -38,13 +65,16 @@ class RedivisArrowIterator:
             # reader means the connection was interrupted, not that the stream
             # completed.
             self.current_stream_finished = False
-            # TODO: this won't get closed properly if the iterator is not fully consumed
             arrow_response = make_request(
                 method="get",
                 path=f'/readStreams/{self.streams[self.current_stream_index]["id"]}?offset={offset}&eosSentinel=true',
                 stream=True,
                 parse_response=False,
             )
+            # Track the Response on self so it is always closed on the next
+            # __get_next_reader__ / close(), even if reader construction below
+            # raises and triggers a retry.
+            self.current_arrow_response = arrow_response
             self.current_record_batch_reader = pyarrow.ipc.RecordBatchStreamReader(
                 arrow_response.raw
             )
@@ -180,6 +210,7 @@ class RedivisArrowIterator:
                 return self.__next__()
 
             if self.current_stream_index == len(self.streams) - 1:
+                self.__close_current_reader__()
                 if self.progressbar:
                     self.progressbar.close()
                 raise StopIteration
@@ -197,6 +228,27 @@ class RedivisArrowIterator:
             time.sleep(self.retry_count)
             self.__get_next_reader__(self.current_offset)
             return self.__next__()
+
+    def close(self):
+        # Release the underlying HTTP connection. Safe to call multiple times,
+        # and important when the iterator is not fully consumed (e.g. the caller
+        # breaks out of the loop), since consuming to completion is otherwise the
+        # only thing that closes the final stream.
+        self.__close_current_reader__()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __del__(self):
+        # Last-resort cleanup if the caller neither fully consumed the iterator
+        # nor closed it explicitly.
+        try:
+            self.__close_current_reader__()
+        except Exception:
+            pass
 
 
 def make_rows_request(
