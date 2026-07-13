@@ -567,6 +567,8 @@ def process_stream(
                 parse_response=False,
             )
         ) as arrow_response:
+            import io
+            buffered = io.BufferedReader(arrow_response.raw, buffer_size=1024 * 1024)
             has_content = False
             # Set once the server's end-of-stream sentinel (an empty batch) is
             # received, confirming the stream completed rather than being cut off.
@@ -586,7 +588,7 @@ def process_stream(
                 else nullcontext()
             )
             with file_context as f, pyarrow.ipc.RecordBatchStreamReader(
-                arrow_response.raw
+                buffered
             ) as reader:
                 if coerce_schema:
                     variables_in_stream = list(
