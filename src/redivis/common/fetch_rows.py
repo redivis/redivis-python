@@ -13,6 +13,7 @@ import shutil
 from .util import get_tempdir
 from .api_request import make_request
 from threading import Event
+import io
 
 MAX_PARALLELIZATION = 8
 
@@ -75,8 +76,10 @@ class RedivisArrowIterator:
             # __get_next_reader__ / close(), even if reader construction below
             # raises and triggers a retry.
             self.current_arrow_response = arrow_response
+            # IMPORTANT: we need to wrap this in a buffered reader, otherwise we get partial read errors
+            #            with chunked transfers over http 1.1 (happens w/ notebooks in-cluster)
             self.current_record_batch_reader = pyarrow.ipc.RecordBatchStreamReader(
-                arrow_response.raw
+                io.BufferedReader(arrow_response.raw, buffer_size=1024 * 1024)
             )
             if self.coerce_schema:
                 self.variables_in_stream = list(
@@ -311,7 +314,7 @@ def make_rows_request(
                 payload=payload,
             )
 
-    if progress:
+    if progress and not use_export_api:
         progressbar = tqdm(total=read_session["numRows"], leave=False, mininterval=0.2)
 
     if output_type == "arrow_iterator":
@@ -585,8 +588,10 @@ def process_stream(
                 if folder_path is not None
                 else nullcontext()
             )
+            # IMPORTANT: we need to wrap this in a buffered reader, otherwise we get partial read errors
+            #            with chunked transfers over http 1.1 (happens w/ notebooks in-cluster)
             with file_context as f, pyarrow.ipc.RecordBatchStreamReader(
-                arrow_response.raw
+                io.BufferedReader(arrow_response.raw, buffer_size=1024 * 1024)
             ) as reader:
                 if coerce_schema:
                     variables_in_stream = list(
