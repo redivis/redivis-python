@@ -1,6 +1,7 @@
 from ..common import exceptions
 from ..classes.Base import Base
 
+import io
 import warnings
 import os
 import tempfile
@@ -97,7 +98,7 @@ class TabularReader(Base):
             )
 
             for file_spec in (
-                pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
+                pyarrow.ipc.RecordBatchStreamReader(io.BufferedReader(res.raw, buffer_size=1024 * 1024)).read_all().to_pylist()
             ):
                 directory._add_file(
                     File(
