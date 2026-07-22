@@ -76,6 +76,13 @@ class RedivisArrowIterator:
             # __get_next_reader__ / close(), even if reader construction below
             # raises and triggers a retry.
             self.current_arrow_response = arrow_response
+            # urllib3 closes the underlying socket the instant the body is fully
+            # consumed. pyarrow (via the BufferedReader below) issues one more
+            # read() after the last batch to detect EOF, which would then hit the
+            # already-closed socket and raise "ValueError: read of closed file"
+            # instead of returning b''. Disabling auto_close makes that final read
+            # return cleanly.
+            arrow_response.raw.auto_close = False
             # IMPORTANT: we need to wrap this in a buffered reader, otherwise we get partial read errors
             #            with chunked transfers over http 1.1 (happens w/ notebooks in-cluster)
             self.current_record_batch_reader = pyarrow.ipc.RecordBatchStreamReader(
@@ -570,6 +577,14 @@ def process_stream(
                 parse_response=False,
             )
         ) as arrow_response:
+            # urllib3 closes the underlying socket the instant the body is fully
+            # consumed. pyarrow (via the BufferedReader below) issues one more
+            # read() after the last batch to detect EOF, which would then hit the
+            # already-closed socket and raise "ValueError: read of closed file"
+            # instead of returning b''. Disabling auto_close makes that final read
+            # return cleanly. (A single raw.read() is unaffected because it reaches
+            # EOF within one call; only the chunked read does the extra read.)
+            arrow_response.raw.auto_close = False
             has_content = False
             # Set once the server's end-of-stream sentinel (an empty batch) is
             # received, confirming the stream completed rather than being cut off.
