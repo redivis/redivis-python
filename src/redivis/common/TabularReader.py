@@ -1,6 +1,7 @@
 from ..common import exceptions
 from ..classes.Base import Base
 
+import io
 import warnings
 import os
 import tempfile
@@ -96,8 +97,19 @@ class TabularReader(Base):
                 table=self if self._is_table else None,
             )
 
+            # urllib3 closes the underlying socket the instant the body is fully
+            # consumed. pyarrow (via the BufferedReader below) issues one more
+            # read() after the last batch to detect EOF, which would then hit the
+            # already-closed socket and raise "ValueError: read of closed file"
+            # instead of returning b''. Disabling auto_close makes that final read
+            # return cleanly. (A single raw.read() is unaffected because it reaches
+            # EOF within one call; only the chunked read does the extra read.)
+            res.raw.auto_close = False
+
             for file_spec in (
-                pyarrow.ipc.RecordBatchStreamReader(res.raw).read_all().to_pylist()
+                # IMPORTANT: we need to wrap this in a buffered reader, otherwise we get partial read errors
+                #            with chunked transfers over http 1.1 (happens w/ notebooks in-cluster)
+                pyarrow.ipc.RecordBatchStreamReader(io.BufferedReader(res.raw, buffer_size=1024 * 1024)).read_all().to_pylist()
             ):
                 directory._add_file(
                     File(
