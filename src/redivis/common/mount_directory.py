@@ -2,6 +2,7 @@ import os
 import stat
 import errno
 import threading
+import time
 
 from ..common import exceptions
 from mfusepy import FUSE, FuseOSError, Operations
@@ -13,6 +14,7 @@ class RedivisFS(Operations):
         self._file_handles = {}
         self._next_fh = 1
         self._fh_lock = threading.Lock()
+        self._mounted_at = int(time.time())
 
     def _get_node(self, path):
         """Get the file or directory node for the given path"""
@@ -39,9 +41,9 @@ class RedivisFS(Operations):
         attrs = {
             "st_uid": os.getuid(),
             "st_gid": os.getgid(),
-            "st_atime": 0,
-            "st_mtime": 0,
-            "st_ctime": 0,
+            "st_atime": self._mounted_at,
+            "st_mtime": self._mounted_at,
+            "st_ctime": self._mounted_at,
         }
 
         if hasattr(node, "children"):  # Directory
@@ -53,7 +55,9 @@ class RedivisFS(Operations):
             attrs["st_nlink"] = 1
             attrs["st_size"] = node.size or 0
             if hasattr(node, "added_at") and node.added_at:
+                # The omission of ctime is intentional – this should always reflect when the directory was mounted
                 attrs["st_mtime"] = int(node.added_at.timestamp())
+                attrs["st_atime"] = int(node.added_at.timestamp())
 
         return attrs
 

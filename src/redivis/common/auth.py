@@ -28,6 +28,27 @@ base_url = re.match(
 ).group(1)
 
 
+def has_credentials():
+    """Whether an auth token can be obtained without an interactive login.
+
+    Used to decide whether a request should be attempted anonymously; publicly
+    accessible resources can be read without any credentials at all.
+    """
+    global cached_credentials
+
+    if os.getenv("REDIVIS_API_TOKEN"):
+        return True
+
+    if cached_credentials is None and credentials_file.is_file():
+        try:
+            with open(credentials_file, "r") as f:
+                cached_credentials = json.load(f)
+        except Exception as e:
+            """ignore"""
+
+    return cached_credentials is not None
+
+
 def get_auth_token(scope=None):
     global cached_credentials
 
@@ -61,7 +82,9 @@ This environment variable should only ever be set in a non-interactive environme
         and "access_token" in cached_credentials
         and len(missing_scope) == 0
     ):
-        if cached_credentials["expires_at"] < (time.time() - 5 * 60):
+        # Refresh a token that expires in the next 5 minutes, rather than
+        # sending one the server is about to reject
+        if cached_credentials["expires_at"] < (time.time() + 5 * 60):
             return refresh_credentials()
         else:
             return cached_credentials["access_token"]
@@ -86,6 +109,11 @@ def clear_cached_credentials():
 def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
     global cached_credentials
     import webbrowser
+
+    # Always request the default scope alongside whatever else was asked for. A
+    # token without it (e.g. from a login prompted by one resource's required
+    # scope) would make get_auth_token() prompt again on the very next request.
+    scope = list(dict.fromkeys([*default_scope, *(scope or [])]))
 
     challenge, verifier = get_pkce()
 
@@ -152,11 +180,22 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
             raise_api_error(response_json=res.json(), response=res)
 
     cached_credentials = res.json()
-
-    with open(credentials_file, "w") as f:
-        json.dump(cached_credentials, f, indent=2)
+    write_cached_credentials()
 
     return cached_credentials
+
+
+def write_cached_credentials():
+    # get_auth_token() normally creates this, but a login prompted by an
+    # anonymous request's 401 never went through it.
+    redivis_dir.mkdir(parents=True, exist_ok=True)
+    # The file holds a refresh token, so keep it private to this user. Creating
+    # it with these permissions means it's never readable by others, even
+    # briefly; the chmod covers a file that already existed.
+    fd = os.open(credentials_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(cached_credentials, f, indent=2)
+    os.chmod(credentials_file, 0o600)
 
 
 def refresh_credentials(scope=None, amr_values=None):
@@ -168,6 +207,10 @@ def refresh_credentials(scope=None, amr_values=None):
             amr_values=amr_values,
             upgrade_credentials=True,
         )
+    elif cached_credentials is None:
+        # The request was made anonymously because no credentials were available.
+        # The resource isn't public, so we need to authenticate now.
+        perform_oauth_login(scope=default_scope)
     elif "refresh_token" in cached_credentials:
         res = requests.post(
             f"{base_url}/oauth/token",
@@ -185,9 +228,7 @@ def refresh_credentials(scope=None, amr_values=None):
             cached_credentials["access_token"] = refresh_response["access_token"]
             cached_credentials["expires_at"] = refresh_response["expires_at"]
             cached_credentials["expires_in"] = refresh_response["expires_in"]
-
-            with open(credentials_file, "w") as f:
-                json.dump(cached_credentials, f, indent=2)
+            write_cached_credentials()
     else:
         clear_cached_credentials()
 
@@ -198,11 +239,12 @@ def get_current_credential_scope():
     try:
         if cached_credentials is not None:
             base64_payload = cached_credentials["access_token"].split(".")[1]
-            # IMPORTANT: b64decode requires that the string length be a multiple of 4, with "=" at the end for padding
-            padded_base64_payload = f"{base64_payload}{'=' * (len(base64_payload) % 4)}"
-            return json.loads(base64.b64decode(padded_base64_payload))["scope"].split(
-                " "
-            )
+            # JWT segments are unpadded base64url; restore the padding the
+            # decoder requires
+            padded_base64_payload = base64_payload + "=" * (-len(base64_payload) % 4)
+            return json.loads(base64.urlsafe_b64decode(padded_base64_payload))[
+                "scope"
+            ].split(" ")
     except Exception as e:
         """ignore"""
 

@@ -147,13 +147,6 @@ class Directory(Base):
     def mount(
         self, path: Optional[Union[str, Path]] = None, *, foreground: bool = False
     ) -> None:
-        if (
-            os.getenv("REDIVIS_NOTEBOOK_ID") is not None
-            and os.getenv("REDIVIS_NOTEBOOK_ENABLE_FUSE") != "TRUE"
-        ):
-            raise RuntimeError(
-                "Mounting directories is not supported within the default Redivis Notebooks. You must configure a custom machine to call directory.mount()"
-            )
         from ..common.mount_directory import mount_directory
 
         if path is None:
