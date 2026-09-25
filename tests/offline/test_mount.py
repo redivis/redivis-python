@@ -150,6 +150,24 @@ def test_random_reads_fetch_only_the_blocks_they_need(api, fs):
     ]
 
 
+def test_server_ignoring_the_range_is_read_from_the_right_place(api, fs):
+    api["ignore_raw_file_range"] = True
+
+    assert read(fs, 4 * BLOCK - 10, 20) == DATA[4 * BLOCK - 10 : 4 * BLOCK + 10]
+    assert read_all(fs) == DATA
+
+
+def test_stream_reads_ahead_of_the_reader_then_pauses(api, fs):
+    fh = fs.open("/data.bin", os.O_RDONLY)
+    read(fs, 0, READ, fh)
+    cached_file = fs._file_handles[fh]
+    with cached_file.changed:
+        cached_file.changed.wait_for(lambda: cached_file.has_block(2), timeout=5)
+
+    assert [cached_file.has_block(b) for b in range(5)] == [1, 1, 1, 0, 0]
+    fs.release("/data.bin", fh)
+
+
 def test_read_continuing_from_cached_data_streams_the_rest(api, fs):
     read(fs, 2 * BLOCK, READ)
     api["raw_file_ranges"].clear()

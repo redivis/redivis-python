@@ -72,6 +72,8 @@ def reset():
             "raw_file_ranges": [],
             # The next rawFiles response drops the connection after this many bytes
             "drop_raw_file_after": 0,
+            # rawFiles responses ignore the Range header, sending the whole file
+            "ignore_raw_file_range": False,
             # Everything received, as (method, path, query, had_authorization)
             "requests": [],
             "post_body_lengths": [],
@@ -170,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
         range_header = self.headers.get("Range")
         STATE["raw_file_ranges"].append(range_header)
 
+        if STATE["ignore_raw_file_range"]:
+            range_header = None
         start, end = 0, len(data) - 1
         if range_header:
             match = re.fullmatch(r"bytes=(\d+)-(\d*)", range_header)

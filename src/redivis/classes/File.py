@@ -206,6 +206,15 @@ class Stream(io.BufferedIOBase):
             self._total_bytes = self._file.size
             self.retry_count = 0
             self.response = r
+            if start_byte and r.status_code == 200:
+                # The whole file, rather than the range asked for (as storage sends for some encoded
+                # files), so skip ahead to where this is reading from
+                remaining = start_byte
+                while remaining > 0:
+                    skipped = r.raw.read(min(remaining, self._iter_chunk_size))
+                    if not skipped:
+                        break
+                    remaining -= len(skipped)
             return r
         except (RequestException, HTTPError) as e:
             if self.retry_count >= 10:

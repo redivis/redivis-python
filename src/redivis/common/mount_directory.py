@@ -21,6 +21,10 @@ BLOCK_SIZE = 4 * 1024 * 1024
 # absorbs the kernel's readahead requests arriving slightly out of order.
 MAX_STREAM_SKIP_BLOCKS = 4
 
+# A stream downloads up to this many blocks past the furthest one a reader has asked for, then
+# pauses until reads catch up, so that a file that's only partly read isn't downloaded in full.
+STREAM_READAHEAD_BLOCKS = 2
+
 # Blocks are read from a stream in chunks of this size. If the connection drops, the stream resumes
 # from the end of the last complete chunk, so this bounds how much is downloaded twice.
 STREAM_CHUNK_SIZE = 1024 * 1024
@@ -30,8 +34,8 @@ STREAM_CHUNK_SIZE = 1024 * 1024
 MAX_STREAMS_PER_FILE = 4
 
 # Files too large for the cache are read through a buffer of this many recent blocks instead.
-# It must hold every block a single read touches, including those read forward from a stream.
-MEMORY_BUFFER_BLOCKS = MAX_STREAM_SKIP_BLOCKS + 4
+# It holds the blocks a stream reads ahead, as well as the one being read.
+MEMORY_BUFFER_BLOCKS = MAX_STREAM_SKIP_BLOCKS + STREAM_READAHEAD_BLOCKS + 2
 
 # Once the cache exceeds its maximum size, files are evicted until it is back under this fraction
 # of it, so that eviction runs occasionally rather than on every block downloaded.
@@ -39,26 +43,64 @@ EVICTION_TARGET = 0.9
 
 
 class _BlockStream:
-    """A single open-ended request for a file, consumed one block at a time as reads reach it.
+    """A single open-ended request for a file, read on a thread of its own that caches each block as
+    it arrives. It stays up to STREAM_READAHEAD_BLOCKS ahead of the furthest block a reader has asked
+    of it, then pauses until reads catch up.
 
     The underlying File stream transparently resumes, via a Range request from where it left off,
-    if the connection drops or the server times out while it sits idle between reads.
+    if the connection drops or the server times out while it's paused.
     """
 
-    def __init__(self, node, block):
+    def __init__(self, cached_file, block):
+        # The block being received, and the furthest block a reader has asked for
         self.next_block = block
-        self._stream = node.open(mode="rb", start_byte=block * BLOCK_SIZE)
+        self.want_block = block
+        # Set once the thread has finished, with the error that stopped it, if any
+        self.done = False
+        self.error = None
+        # Set (under the file's lock) to stop the stream; it then stores nothing more
+        self.abandoned = False
+        self._cached_file = cached_file
+        threading.Thread(target=self._run, daemon=True).start()
 
-    def read_block(self, length):
-        data = _read_exactly(self._stream, length)
-        self.next_block += 1
-        return data
-
-    def close(self):
+    def _run(self):
+        f = self._cached_file
+        stream = None
         try:
-            self._stream.close()
-        except Exception:
-            pass
+            stream = f.node.open(mode="rb", start_byte=self.next_block * BLOCK_SIZE)
+            while True:
+                with f.changed:
+                    while (
+                        not self.abandoned
+                        and self.next_block < f.n_blocks
+                        and self.next_block > self.want_block + STREAM_READAHEAD_BLOCKS
+                    ):
+                        f.changed.wait()
+                    if self.abandoned or self.next_block >= f.n_blocks:
+                        return
+                    block = self.next_block
+                    length = f.block_length(block)
+
+                data = _read_exactly(stream, length, lambda: self.abandoned)
+
+                with f.changed:
+                    if self.abandoned:
+                        return
+                    if not f.has_block(block):
+                        f.store_block(block, data)
+                    self.next_block += 1
+                    f.changed.notify_all()
+        except Exception as e:
+            self.error = e
+        finally:
+            with f.changed:
+                self.done = True
+                f.changed.notify_all()
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
 
 class _Cache:
@@ -139,26 +181,29 @@ class _CachedFile:
         self.blocks_path = os.path.join(cache.cache_dir, f"{key}.blocks")
         self.size_on_disk = 0
         self.last_used = time.time()
-        # Serializes downloads into this file, and opening, closing, and evicting it
+        # Guards the state below, and is waited on (via changed) for blocks to arrive
         self.lock = threading.Lock()
+        self.changed = threading.Condition(self.lock)
         # Serializes positioned I/O on platforms without os.pread / os.pwrite (i.e. Windows)
         self._io_lock = threading.Lock()
-        self._node = None
+        self.node = None
+        self.n_blocks = 0
         self._size = 0
-        self._n_blocks = 0
         self._blocks = None
         self._buffer = None
         self._fd = None
         self._open_count = 0
         self._streams = []
+        # Blocks being fetched by bounded requests, outside the lock
+        self._fetching = set()
 
     def open(self, node):
         with self.lock:
             if self._open_count == 0:
                 # Any file with this content will do, since the cache is keyed on content
-                self._node = node
+                self.node = node
                 self._size = node.size or 0
-                self._n_blocks = -(-self._size // BLOCK_SIZE)
+                self.n_blocks = -(-self._size // BLOCK_SIZE)
                 if self._size > self.cache.max_size:
                     self._buffer = OrderedDict()
                 else:
@@ -177,6 +222,7 @@ class _CachedFile:
             self._open_count -= 1
             if self._open_count > 0:
                 return
+            # Streams store nothing once abandoned, so they needn't have finished yet
             self._close_streams()
             self._buffer = None
             fd, self._fd = self._fd, None
@@ -213,34 +259,32 @@ class _CachedFile:
         last_block = (offset + length - 1) // BLOCK_SIZE
         self.last_used = time.time()
 
-        if self._buffer is not None:
+        if self._buffer is None:
             with self.lock:
                 self._download(first_block, last_block)
-                return self._read_buffer(length, offset)
+            return self._pread(length, offset)
 
-        # Blocks are only ever marked cached once fully written, so this check needs no lock
-        if not all(self._blocks[b] for b in range(first_block, last_block + 1)):
-            added = 0
-            try:
-                with self.lock:
-                    size_before = self.size_on_disk
-                    try:
-                        self._download(first_block, last_block)
-                    finally:
-                        self._save_blocks()
-                        added = self.size_on_disk - size_before
-            finally:
-                # Outside this file's lock, since it may evict other files
-                self.cache.add_size(added)
+        # In memory, a block at a time, since the buffer needn't hold every block of a read at once
+        chunks = []
+        end = offset + length
+        with self.lock:
+            while offset < end:
+                block = offset // BLOCK_SIZE
+                start = offset - block * BLOCK_SIZE
+                # Returns with the block buffered, and the lock still held, so it's still there to copy
+                self._download(block, block)
+                chunk = self._buffer[block][start : start + end - offset]
+                chunks.append(chunk)
+                offset += len(chunk)
+        return b"".join(chunks)
 
-        return self._pread(length, offset)
-
-    def _has_block(self, block):
+    def has_block(self, block):
         if self._buffer is not None:
             return block in self._buffer
         return self._blocks[block]
 
-    def _store_block(self, block, data):
+    def store_block(self, block, data):
+        """Caches a downloaded block, with the lock held"""
         if self._buffer is not None:
             self._buffer[block] = data
             self._buffer.move_to_end(block)
@@ -250,47 +294,89 @@ class _CachedFile:
             self._pwrite(data, block * BLOCK_SIZE)
             self._blocks[block] = 1
             self.size_on_disk += len(data)
-
-    def _read_buffer(self, length, offset):
-        chunks = []
-        end = offset + length
-        while offset < end:
-            block = offset // BLOCK_SIZE
-            start = offset - block * BLOCK_SIZE
-            chunk = self._buffer[block][start : start + end - offset]
-            chunks.append(chunk)
-            offset += len(chunk)
-        return b"".join(chunks)
+            self._save_blocks()
+            # Before waking readers, so that any eviction has happened by the time they see the block.
+            # Safe with the lock held, since eviction never waits on another file's lock.
+            self.cache.add_size(len(data))
+        self.changed.notify_all()
 
     def _download(self, first_block, last_block):
+        """Downloads whichever of the blocks aren't cached, with the lock held (though released while
+        waiting on the network)"""
+        # Let streams reading ahead of this read carry on, so they stay ahead of it
+        for s in self._streams:
+            if (
+                first_block < s.next_block <= last_block + STREAM_READAHEAD_BLOCKS + 1
+                and s.want_block < last_block
+            ):
+                s.want_block = last_block
+                self.changed.notify_all()
+
         block = first_block
         while block <= last_block:
-            if self._has_block(block):
+            if self.has_block(block):
                 block += 1
                 continue
+            if block in self._fetching:
+                self.changed.wait()
+                continue
+
+            failed = next(
+                (
+                    s
+                    for s in self._streams
+                    if s.error
+                    and s.next_block <= block <= s.next_block + MAX_STREAM_SKIP_BLOCKS
+                ),
+                None,
+            )
+            if failed:
+                raise failed.error
+            self._streams = [s for s in self._streams if not s.done]
 
             stream = self._find_stream(block)
-            if stream is None and (block == 0 or self._has_block(block - 1)):
+            if stream is None and (block == 0 or self.has_block(block - 1)):
                 # A read continuing on from cached data (or from the start of the file) looks
                 # sequential, so request the rest of the file in one go rather than block by block
                 stream = self._open_stream(block)
-
             if stream is not None:
-                self._read_stream_to(stream, block)
-                block += 1
-            else:
-                # Random access: fetch just the missing blocks this read needs, in one bounded request
-                end_block = block
-                while end_block < last_block and not self._has_block(end_block + 1):
-                    end_block += 1
-                self._fetch_range(block, end_block)
-                block = end_block + 1
+                if block > stream.want_block:
+                    stream.want_block = block
+                    self.changed.notify_all()
+                # The stream may be stopped by another reader while this waits, so rather than wait
+                # on it specifically, look again from the top once anything changes
+                self.changed.wait()
+                continue
+
+            # Random access: fetch just the missing blocks this read needs, in one bounded request
+            end_block = block
+            while (
+                end_block < last_block
+                and not self.has_block(end_block + 1)
+                and end_block + 1 not in self._fetching
+            ):
+                end_block += 1
+            blocks = range(block, end_block + 1)
+            self._fetching.update(blocks)
+            try:
+                self.lock.release()
+                try:
+                    data = self._fetch_range(block, end_block)
+                finally:
+                    self.lock.acquire()
+                for b in blocks:
+                    self.store_block(b, data[b - block])
+            finally:
+                self._fetching.difference_update(blocks)
+                self.changed.notify_all()
+            block = end_block + 1
 
     def _find_stream(self, block):
         reachable = [
             s
             for s in self._streams
-            if s.next_block <= block <= s.next_block + MAX_STREAM_SKIP_BLOCKS
+            if not s.done
+            and s.next_block <= block <= s.next_block + MAX_STREAM_SKIP_BLOCKS
         ]
         if not reachable:
             return None
@@ -302,46 +388,32 @@ class _CachedFile:
 
     def _open_stream(self, block):
         if len(self._streams) >= MAX_STREAMS_PER_FILE:
-            self._streams.pop(0).close()
-        stream = _BlockStream(self._node, block)
+            self._streams.pop(0).abandoned = True
+            self.changed.notify_all()
+        stream = _BlockStream(self, block)
         self._streams.append(stream)
         return stream
-
-    def _read_stream_to(self, stream, block):
-        try:
-            while stream.next_block <= block:
-                current = stream.next_block
-                data = stream.read_block(self._block_length(current))
-                if not self._has_block(current):
-                    self._store_block(current, data)
-        except BaseException:
-            self._streams.remove(stream)
-            stream.close()
-            raise
-
-        if stream.next_block >= self._n_blocks:
-            self._streams.remove(stream)
-            stream.close()
 
     def _fetch_range(self, first_block, last_block):
         start_byte = first_block * BLOCK_SIZE
         end_byte = min((last_block + 1) * BLOCK_SIZE, self._size) - 1
-        stream = self._node.open(mode="rb", start_byte=start_byte, end_byte=end_byte)
+        stream = self.node.open(mode="rb", start_byte=start_byte, end_byte=end_byte)
         try:
-            for block in range(first_block, last_block + 1):
-                self._store_block(
-                    block, _read_exactly(stream, self._block_length(block))
-                )
+            return [
+                _read_exactly(stream, self.block_length(block))
+                for block in range(first_block, last_block + 1)
+            ]
         finally:
             stream.close()
 
-    def _block_length(self, block):
+    def block_length(self, block):
         return min(BLOCK_SIZE, self._size - block * BLOCK_SIZE)
 
     def _close_streams(self):
         for stream in self._streams:
-            stream.close()
+            stream.abandoned = True
         self._streams = []
+        self.changed.notify_all()
 
     def _load_blocks(self):
         try:
@@ -349,15 +421,15 @@ class _CachedFile:
                 blocks = bytearray(f.read())
             data_size = os.path.getsize(self.data_path)
         except OSError:
-            return bytearray(self._n_blocks)
+            return bytearray(self.n_blocks)
 
         cached = [b for b, is_cached in enumerate(blocks) if is_cached]
-        if len(blocks) != self._n_blocks or (
+        if len(blocks) != self.n_blocks or (
             cached
-            and data_size < (cached[-1] * BLOCK_SIZE) + self._block_length(cached[-1])
+            and data_size < (cached[-1] * BLOCK_SIZE) + self.block_length(cached[-1])
         ):
             # Left over from an interrupted write, or otherwise inconsistent; start over
-            return bytearray(self._n_blocks)
+            return bytearray(self.n_blocks)
         return blocks
 
     def _save_blocks(self):
@@ -389,14 +461,17 @@ class _CachedFile:
                 view = view[os.write(self._fd, view) :]
 
 
-def _read_exactly(stream, length):
+def _read_exactly(stream, length, should_stop=None):
     chunks = []
     remaining = length
     while remaining > 0:
+        if should_stop and should_stop():
+            return None
         chunk = stream.read(min(remaining, STREAM_CHUNK_SIZE))
         if not chunk:
             raise OSError(
-                errno.EIO, f"File stream ended {remaining} bytes before expected"
+                errno.EIO,
+                f"The file's contents ended {remaining} bytes short of its listed size",
             )
         chunks.append(chunk)
         remaining -= len(chunk)
