@@ -1,19 +1,429 @@
+import atexit
 import os
+import re
+import shutil
 import stat
 import errno
+import tempfile
 import threading
 import time
+from collections import OrderedDict
 
 from ..common import exceptions
 from mfusepy import FUSE, FuseOSError, Operations
 
+# Files are downloaded into the local cache in blocks of this size, and a read is served
+# once every block it touches has been cached. Keep in step with redivis-r's fuse_mount.c.
+BLOCK_SIZE = 4 * 1024 * 1024
+
+# A read up to this many blocks past where an open sequential stream has reached is served by
+# reading the stream forward to it, rather than abandoning the stream for a new request. This
+# absorbs the kernel's readahead requests arriving slightly out of order.
+MAX_STREAM_SKIP_BLOCKS = 4
+
+# Blocks are read from a stream in chunks of this size. If the connection drops, the stream resumes
+# from the end of the last complete chunk, so this bounds how much is downloaded twice.
+STREAM_CHUNK_SIZE = 1024 * 1024
+
+# Open sequential streams kept per file, so that a few interleaved sequential readers (e.g.
+# parallel column chunk reads of a parquet file) each keep their own request.
+MAX_STREAMS_PER_FILE = 4
+
+# Files too large for the cache are read through a buffer of this many recent blocks instead.
+# It must hold every block a single read touches, including those read forward from a stream.
+MEMORY_BUFFER_BLOCKS = MAX_STREAM_SKIP_BLOCKS + 4
+
+# Once the cache exceeds its maximum size, files are evicted until it is back under this fraction
+# of it, so that eviction runs occasionally rather than on every block downloaded.
+EVICTION_TARGET = 0.9
+
+
+class _BlockStream:
+    """A single open-ended request for a file, consumed one block at a time as reads reach it.
+
+    The underlying File stream transparently resumes, via a Range request from where it left off,
+    if the connection drops or the server times out while it sits idle between reads.
+    """
+
+    def __init__(self, node, block):
+        self.next_block = block
+        self._stream = node.open(mode="rb", start_byte=block * BLOCK_SIZE)
+
+    def read_block(self, length):
+        data = _read_exactly(self._stream, length)
+        self.next_block += 1
+        return data
+
+    def close(self):
+        try:
+            self._stream.close()
+        except Exception:
+            pass
+
+
+class _Cache:
+    """The files cached in cache_dir, evicting the least recently used once they exceed max_size.
+
+    Only closed files are evicted, so the cache can run over max_size while large files are open.
+    """
+
+    def __init__(self, cache_dir, max_size):
+        self.cache_dir = cache_dir
+        self.size = 0
+        self._files = {}
+        self._lock = threading.Lock()
+        self._evicting = False
+
+        # Account for anything left by an earlier mount of the same cache_dir. Only files with both
+        # parts of a cached copy are considered, so nothing else in cache_dir is ever evicted.
+        with os.scandir(cache_dir) as entries:
+            names = {entry.name: entry for entry in entries if entry.is_file()}
+        for name, entry in names.items():
+            key = name[: -len(".data")]
+            if not name.endswith(".data") or f"{key}.blocks" not in names:
+                continue
+            cached_file = _CachedFile(self, key)
+            cached_file.size_on_disk = _size_on_disk(entry.stat())
+            cached_file.last_used = entry.stat().st_mtime
+            self._files[key] = cached_file
+            self.size += cached_file.size_on_disk
+
+        if max_size is None:
+            # Default to half the space available to the cache, leaving room for everything else
+            max_size = (shutil.disk_usage(cache_dir).free + self.size) // 2
+        self.max_size = max_size
+        self.add_size(0)
+
+    def get(self, key):
+        with self._lock:
+            cached_file = self._files.get(key)
+            if cached_file is None:
+                cached_file = _CachedFile(self, key)
+                self._files[key] = cached_file
+            return cached_file
+
+    def add_size(self, size):
+        with self._lock:
+            self.size += size
+            if self.size <= self.max_size or self._evicting:
+                return
+            # Only one thread evicts at a time; others carry on without waiting for it
+            self._evicting = True
+            files = sorted(self._files.values(), key=lambda f: f.last_used)
+
+        try:
+            for cached_file in files:
+                with self._lock:
+                    if self.size <= self.max_size * EVICTION_TARGET:
+                        break
+                freed = cached_file.evict()
+                with self._lock:
+                    self.size -= freed
+        finally:
+            with self._lock:
+                self._evicting = False
+
+
+class _CachedFile:
+    """The local cache for one file's contents: a sparse copy of it, filled in block by block as it's read.
+
+    Its contents are in "<key>.data", and which blocks have been downloaded is tracked alongside
+    them in "<key>.blocks" (one byte per block), so a cache_dir that outlives the mount can be
+    reused by later mounts. A file too large for the cache altogether is instead read through a
+    small in-memory buffer of recent blocks.
+    """
+
+    def __init__(self, cache, key):
+        self.cache = cache
+        self.data_path = os.path.join(cache.cache_dir, f"{key}.data")
+        self.blocks_path = os.path.join(cache.cache_dir, f"{key}.blocks")
+        self.size_on_disk = 0
+        self.last_used = time.time()
+        # Serializes downloads into this file, and opening, closing, and evicting it
+        self.lock = threading.Lock()
+        # Serializes positioned I/O on platforms without os.pread / os.pwrite (i.e. Windows)
+        self._io_lock = threading.Lock()
+        self._node = None
+        self._size = 0
+        self._n_blocks = 0
+        self._blocks = None
+        self._buffer = None
+        self._fd = None
+        self._open_count = 0
+        self._streams = []
+
+    def open(self, node):
+        with self.lock:
+            if self._open_count == 0:
+                # Any file with this content will do, since the cache is keyed on content
+                self._node = node
+                self._size = node.size or 0
+                self._n_blocks = -(-self._size // BLOCK_SIZE)
+                if self._size > self.cache.max_size:
+                    self._buffer = OrderedDict()
+                else:
+                    self._fd = os.open(
+                        self.data_path,
+                        os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0),
+                        0o600,
+                    )
+                    if self._blocks is None:
+                        self._blocks = self._load_blocks()
+            self._open_count += 1
+            self.last_used = time.time()
+
+    def release(self):
+        with self.lock:
+            self._open_count -= 1
+            if self._open_count > 0:
+                return
+            self._close_streams()
+            self._buffer = None
+            fd, self._fd = self._fd, None
+        if fd is not None:
+            os.close(fd)
+
+    def evict(self):
+        """Delete this file from the cache, unless it's in use, returning the space freed"""
+        if not self.lock.acquire(blocking=False):
+            return 0
+        try:
+            if self._open_count > 0:
+                return 0
+            for path in (self.data_path, self.blocks_path):
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+            self._blocks = None
+            freed, self.size_on_disk = self.size_on_disk, 0
+            return freed
+        except OSError:
+            return 0
+        finally:
+            self.lock.release()
+
+    def read(self, length, offset):
+        if offset >= self._size or length <= 0:
+            return b""
+        length = min(length, self._size - offset)
+        first_block = offset // BLOCK_SIZE
+        last_block = (offset + length - 1) // BLOCK_SIZE
+        self.last_used = time.time()
+
+        if self._buffer is not None:
+            with self.lock:
+                self._download(first_block, last_block)
+                return self._read_buffer(length, offset)
+
+        # Blocks are only ever marked cached once fully written, so this check needs no lock
+        if not all(self._blocks[b] for b in range(first_block, last_block + 1)):
+            added = 0
+            try:
+                with self.lock:
+                    size_before = self.size_on_disk
+                    try:
+                        self._download(first_block, last_block)
+                    finally:
+                        self._save_blocks()
+                        added = self.size_on_disk - size_before
+            finally:
+                # Outside this file's lock, since it may evict other files
+                self.cache.add_size(added)
+
+        return self._pread(length, offset)
+
+    def _has_block(self, block):
+        if self._buffer is not None:
+            return block in self._buffer
+        return self._blocks[block]
+
+    def _store_block(self, block, data):
+        if self._buffer is not None:
+            self._buffer[block] = data
+            self._buffer.move_to_end(block)
+            while len(self._buffer) > MEMORY_BUFFER_BLOCKS:
+                self._buffer.popitem(last=False)
+        else:
+            self._pwrite(data, block * BLOCK_SIZE)
+            self._blocks[block] = 1
+            self.size_on_disk += len(data)
+
+    def _read_buffer(self, length, offset):
+        chunks = []
+        end = offset + length
+        while offset < end:
+            block = offset // BLOCK_SIZE
+            start = offset - block * BLOCK_SIZE
+            chunk = self._buffer[block][start : start + end - offset]
+            chunks.append(chunk)
+            offset += len(chunk)
+        return b"".join(chunks)
+
+    def _download(self, first_block, last_block):
+        block = first_block
+        while block <= last_block:
+            if self._has_block(block):
+                block += 1
+                continue
+
+            stream = self._find_stream(block)
+            if stream is None and (block == 0 or self._has_block(block - 1)):
+                # A read continuing on from cached data (or from the start of the file) looks
+                # sequential, so request the rest of the file in one go rather than block by block
+                stream = self._open_stream(block)
+
+            if stream is not None:
+                self._read_stream_to(stream, block)
+                block += 1
+            else:
+                # Random access: fetch just the missing blocks this read needs, in one bounded request
+                end_block = block
+                while end_block < last_block and not self._has_block(end_block + 1):
+                    end_block += 1
+                self._fetch_range(block, end_block)
+                block = end_block + 1
+
+    def _find_stream(self, block):
+        reachable = [
+            s
+            for s in self._streams
+            if s.next_block <= block <= s.next_block + MAX_STREAM_SKIP_BLOCKS
+        ]
+        if not reachable:
+            return None
+        stream = max(reachable, key=lambda s: s.next_block)
+        # Keep the list in least-recently-used order
+        self._streams.remove(stream)
+        self._streams.append(stream)
+        return stream
+
+    def _open_stream(self, block):
+        if len(self._streams) >= MAX_STREAMS_PER_FILE:
+            self._streams.pop(0).close()
+        stream = _BlockStream(self._node, block)
+        self._streams.append(stream)
+        return stream
+
+    def _read_stream_to(self, stream, block):
+        try:
+            while stream.next_block <= block:
+                current = stream.next_block
+                data = stream.read_block(self._block_length(current))
+                if not self._has_block(current):
+                    self._store_block(current, data)
+        except BaseException:
+            self._streams.remove(stream)
+            stream.close()
+            raise
+
+        if stream.next_block >= self._n_blocks:
+            self._streams.remove(stream)
+            stream.close()
+
+    def _fetch_range(self, first_block, last_block):
+        start_byte = first_block * BLOCK_SIZE
+        end_byte = min((last_block + 1) * BLOCK_SIZE, self._size) - 1
+        stream = self._node.open(mode="rb", start_byte=start_byte, end_byte=end_byte)
+        try:
+            for block in range(first_block, last_block + 1):
+                self._store_block(
+                    block, _read_exactly(stream, self._block_length(block))
+                )
+        finally:
+            stream.close()
+
+    def _block_length(self, block):
+        return min(BLOCK_SIZE, self._size - block * BLOCK_SIZE)
+
+    def _close_streams(self):
+        for stream in self._streams:
+            stream.close()
+        self._streams = []
+
+    def _load_blocks(self):
+        try:
+            with open(self.blocks_path, "rb") as f:
+                blocks = bytearray(f.read())
+            data_size = os.path.getsize(self.data_path)
+        except OSError:
+            return bytearray(self._n_blocks)
+
+        cached = [b for b, is_cached in enumerate(blocks) if is_cached]
+        if len(blocks) != self._n_blocks or (
+            cached
+            and data_size < (cached[-1] * BLOCK_SIZE) + self._block_length(cached[-1])
+        ):
+            # Left over from an interrupted write, or otherwise inconsistent; start over
+            return bytearray(self._n_blocks)
+        return blocks
+
+    def _save_blocks(self):
+        try:
+            with open(self.blocks_path, "wb") as f:
+                f.write(self._blocks)
+        except OSError:
+            # Only needed to reuse the cache in a later mount
+            pass
+
+    def _pread(self, length, offset):
+        if hasattr(os, "pread"):
+            return os.pread(self._fd, length, offset)
+        with self._io_lock:
+            os.lseek(self._fd, offset, os.SEEK_SET)
+            return os.read(self._fd, length)
+
+    def _pwrite(self, data, offset):
+        view = memoryview(data)
+        if hasattr(os, "pwrite"):
+            while view:
+                written = os.pwrite(self._fd, view, offset)
+                view = view[written:]
+                offset += written
+            return
+        with self._io_lock:
+            os.lseek(self._fd, offset, os.SEEK_SET)
+            while view:
+                view = view[os.write(self._fd, view) :]
+
+
+def _read_exactly(stream, length):
+    chunks = []
+    remaining = length
+    while remaining > 0:
+        chunk = stream.read(min(remaining, STREAM_CHUNK_SIZE))
+        if not chunk:
+            raise OSError(
+                errno.EIO, f"File stream ended {remaining} bytes before expected"
+            )
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _cache_key(node):
+    # A file's hash uniquely identifies its contents, so files with the same contents share one
+    # cached copy, and a file that changes on Redivis is never served from a stale one
+    if node.hash:
+        return node.hash.hex()
+    return f"{re.sub(r'[^A-Za-z0-9._-]', '_', str(node.id))}-{node.size}"
+
+
+def _size_on_disk(stat_result):
+    # Cached files are sparse, so count the blocks actually allocated where the platform reports them
+    if hasattr(stat_result, "st_blocks"):
+        return stat_result.st_blocks * 512
+    return stat_result.st_size
+
 
 class RedivisFS(Operations):
-    def __init__(self, directory):
+    def __init__(self, directory, cache_dir, max_cache_size=None):
         self.directory = directory
+        self.cache_dir = str(cache_dir)
+        self._cache = _Cache(self.cache_dir, max_cache_size)
         self._file_handles = {}
         self._next_fh = 1
-        self._fh_lock = threading.Lock()
+        self._lock = threading.Lock()
         self._mounted_at = int(time.time())
 
     def _get_node(self, path):
@@ -55,7 +465,7 @@ class RedivisFS(Operations):
             attrs["st_nlink"] = 1
             attrs["st_size"] = node.size or 0
             if hasattr(node, "added_at") and node.added_at:
-                # The omission of ctime is intentional – this should always reflect when the directory was mounted
+                # The omission of ctime is intentional – this should always reflect when the directory was mounted
                 attrs["st_mtime"] = int(node.added_at.timestamp())
                 attrs["st_atime"] = int(node.added_at.timestamp())
 
@@ -86,102 +496,50 @@ class RedivisFS(Operations):
         if (flags & os.O_WRONLY) or (flags & os.O_RDWR):
             raise FuseOSError(errno.EACCES)
 
-        with self._fh_lock:
+        # All handles on files with the same contents share one cached copy
+        cached_file = self._cache.get(_cache_key(node))
+        try:
+            cached_file.open(node)
+        except OSError as e:
+            raise FuseOSError(e.errno or errno.EIO)
+
+        with self._lock:
             fh = self._next_fh
             self._next_fh += 1
-            # Add a per-handle lock so that operations on the same handle
-            # remain serialized without blocking other handles.
-            self._file_handles[fh] = {
-                "node": node,
-                "stream": None,
-                "position": 0,
-                "lock": threading.Lock(),
-            }
+            self._file_handles[fh] = cached_file
 
         return fh
 
     def read(self, path, length, offset, fh):
         """Read from a file"""
-        # First, look up the handle and its per-handle lock under the
-        # global file-handle lock, then release it before doing I/O.
-        with self._fh_lock:
-            handle = self._file_handles.get(fh)
-            if handle is None:
-                raise FuseOSError(errno.EBADF)
-            handle_lock = handle.get("lock")
+        with self._lock:
+            cached_file = self._file_handles.get(fh)
+        if cached_file is None:
+            raise FuseOSError(errno.EBADF)
 
-        # Fallback in case an older handle dict is missing "lock"
-        if handle_lock is None:
-            handle_lock = threading.Lock()
-            with self._fh_lock:
-                current = self._file_handles.get(fh)
-                if current is None:
-                    raise FuseOSError(errno.EBADF)
-                if "lock" not in current:
-                    current["lock"] = handle_lock
-                else:
-                    handle_lock = current["lock"]
-
-        with handle_lock:
-            # Snapshot the current handle state under the global lock,
-            # then perform I/O without holding _fh_lock.
-            with self._fh_lock:
-                handle = self._file_handles.get(fh)
-                if handle is None:
-                    raise FuseOSError(errno.EBADF)
-                node = handle["node"]
-                stream = handle["stream"]
-                position = handle["position"]
-
-            try:
-                # Create or reuse stream
-                if not stream or position != offset:
-                    if stream:
-                        stream.close()
-                    stream = node.open(mode="rb", start_byte=offset)
-                    position = offset
-
-                data = stream.read(length)
-                position += len(data)
-
-            except Exception:
-                # Map any I/O error to a generic EIO for FUSE
-                raise FuseOSError(errno.EIO)
-
-            # Update shared handle state under the global lock, ensuring the
-            # handle still exists.
-            with self._fh_lock:
-                current = self._file_handles.get(fh)
-                if current is None:
-                    # Handle was released while we were reading; close the
-                    # local stream and report EBADF.
-                    if stream:
-                        try:
-                            stream.close()
-                        except Exception:
-                            pass
-                    raise FuseOSError(errno.EBADF)
-                current["stream"] = stream
-                current["position"] = position
-
-            return data
+        try:
+            return cached_file.read(length, offset)
+        except Exception:
+            # Map any I/O error to a generic EIO for FUSE
+            raise FuseOSError(errno.EIO)
 
     def release(self, path, fh):
         """Close a file"""
-        # Remove the handle from the table under the global lock, but perform
-        # any potentially slow close operations without holding _fh_lock.
-        stream_to_close = None
-        with self._fh_lock:
-            handle = self._file_handles.pop(fh, None)
-            if handle is not None:
-                stream_to_close = handle.get("stream")
-
-        if stream_to_close:
+        with self._lock:
+            cached_file = self._file_handles.pop(fh, None)
+        if cached_file is not None:
             try:
-                stream_to_close.close()
+                cached_file.release()
             except Exception:
                 pass
         return 0
+
+    def close(self):
+        """Release every open file, e.g. once the filesystem has been unmounted"""
+        with self._lock:
+            handles = list(self._file_handles)
+        for fh in handles:
+            self.release(None, fh)
 
     def statfs(self, path):
         """Get filesystem statistics"""
@@ -193,8 +551,8 @@ class RedivisFS(Operations):
         }
 
 
-def _run_fuse_and_cleanup(fs, mount_path):
-    """Run the FUSE event loop and remove the mount directory when it exits."""
+def _run_fuse_and_cleanup(fs, mount_path, remove_cache_dir):
+    """Run the FUSE event loop, then remove the mount directory (and a temporary cache) when it exits."""
     try:
         FUSE(
             fs,
@@ -207,30 +565,47 @@ def _run_fuse_and_cleanup(fs, mount_path):
         print(e)
         pass
     finally:
+        fs.close()
         try:
             mount_path.rmdir()
         except OSError:
             pass
+        if remove_cache_dir:
+            shutil.rmtree(fs.cache_dir, ignore_errors=True)
 
 
-def mount_directory(directory, path, foreground):
+def mount_directory(directory, path, foreground, cache_dir=None, max_cache_size=None):
 
     mount_path = path.expanduser()
 
     if mount_path.exists():
         raise exceptions.ValueError(f"Mount path {mount_path} already exists")
 
+    if max_cache_size is not None and max_cache_size < 0:
+        raise exceptions.ValueError("max_cache_size must not be negative")
+
+    # Without an explicit cache_dir, files are cached in a private temporary directory that is
+    # removed on unmount. An explicit cache_dir is kept, so later mounts can reuse it.
+    remove_cache_dir = cache_dir is None
+    if remove_cache_dir:
+        cache_dir = tempfile.mkdtemp(prefix="redivis_mount_cache_")
+        # In case the process exits while still mounted, and the FUSE thread never cleans up
+        atexit.register(shutil.rmtree, cache_dir, ignore_errors=True)
+    else:
+        cache_dir = os.path.expanduser(str(cache_dir))
+        os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+
     mount_path.mkdir(parents=True)
 
     # Create and start FUSE filesystem
-    fs = RedivisFS(directory)
+    fs = RedivisFS(directory, cache_dir, max_cache_size)
     print(f"Mounted directory at {mount_path}")
     if foreground:
-        _run_fuse_and_cleanup(fs, mount_path)
+        _run_fuse_and_cleanup(fs, mount_path, remove_cache_dir)
     else:
         mount_thread = threading.Thread(
             target=_run_fuse_and_cleanup,
-            args=(fs, mount_path),
+            args=(fs, mount_path, remove_cache_dir),
             daemon=True,
         )
         mount_thread.start()

@@ -1,7 +1,7 @@
 """A minimal in-process stand-in for the Redivis API.
 
 It implements just enough of the endpoints to exercise the client's read paths
-(listRows, read sessions, exports) and its retry / authentication handling,
+(listRows, read sessions, exports, raw files) and its retry / authentication handling,
 with knobs in STATE for injecting failures. Tests get a fresh STATE per test via
 the `api` fixture in conftest.py.
 """
@@ -9,6 +9,7 @@ the `api` fixture in conftest.py.
 import base64
 import io
 import json
+import re
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -65,6 +66,12 @@ def reset():
             "truncate_rows_once": 0,
             # The next listRows request drops the connection without responding
             "fail_rows_once": False,
+            # Raw file contents, by file id
+            "raw_files": {},
+            # The Range header of each rawFiles request (None if absent)
+            "raw_file_ranges": [],
+            # The next rawFiles response drops the connection after this many bytes
+            "drop_raw_file_after": 0,
             # Everything received, as (method, path, query, had_authorization)
             "requests": [],
             "post_body_lengths": [],
@@ -157,6 +164,35 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_arrow(self, body):
         self._send(body, content_type="application/vnd.apache.arrow.stream")
+
+    def _send_raw_file(self, file_id):
+        data = STATE["raw_files"][file_id]
+        range_header = self.headers.get("Range")
+        STATE["raw_file_ranges"].append(range_header)
+
+        start, end = 0, len(data) - 1
+        if range_header:
+            match = re.fullmatch(r"bytes=(\d+)-(\d*)", range_header)
+            start = int(match[1])
+            end = min(int(match[2]), end) if match[2] else end
+        body = data[start : end + 1]
+
+        self.send_response(206 if range_header else 200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        if range_header:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+        self.end_headers()
+
+        if STATE["drop_raw_file_after"]:
+            body = body[: STATE["drop_raw_file_after"]]
+            STATE["drop_raw_file_after"] = 0
+            self.close_connection = True
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # The client stopped reading partway, as streamed reads do when abandoned
+            self.close_connection = True
 
     def _intercepted(self, method, path, query):
         """Apply any injected failures, returning True if a response was sent."""
@@ -253,6 +289,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.endswith("/variables"):
             return self._send({"results": VARIABLES, "nextPageToken": None})
+
+        if path.startswith("/api/v1/rawFiles/"):
+            return self._send_raw_file(urllib.parse.unquote(path.rsplit("/", 1)[1]))
 
         if path.endswith("/rows"):
             if STATE["fail_rows_once"]:

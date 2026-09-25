@@ -145,7 +145,12 @@ class Directory(Base):
         return node
 
     def mount(
-        self, path: Optional[Union[str, Path]] = None, *, foreground: bool = False
+        self,
+        path: Optional[Union[str, Path]] = None,
+        *,
+        foreground: bool = False,
+        cache_dir: Optional[Union[str, Path]] = None,
+        max_cache_size: Optional[int] = None,
     ) -> None:
         from ..common.mount_directory import mount_directory
 
@@ -162,7 +167,13 @@ class Directory(Base):
             path = Path(path)
 
         mount_path = path.expanduser()
-        mount_directory(self, mount_path, foreground=foreground)
+        mount_directory(
+            self,
+            mount_path,
+            foreground=foreground,
+            cache_dir=cache_dir,
+            max_cache_size=max_cache_size,
+        )
         self._mount_path = mount_path
         return mount_path
 
