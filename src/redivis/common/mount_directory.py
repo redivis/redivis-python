@@ -182,6 +182,8 @@ class _CachedFile:
             fd, self._fd = self._fd, None
         if fd is not None:
             os.close(fd)
+        # Now evictable, so if the cache ran over while it was open, it may be what brings it back under
+        self.cache.add_size(0)
 
     def evict(self):
         """Delete this file from the cache, unless it's in use, returning the space freed"""

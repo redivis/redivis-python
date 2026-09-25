@@ -255,6 +255,21 @@ def test_open_files_are_not_evicted(api, table, tmp_path):
     fs.release("/a.bin", fh)
 
 
+def test_file_closed_while_the_cache_is_over_its_max_size_is_evicted(
+    api, table, tmp_path
+):
+    files = {"a.bin": A, "b.bin": B}
+    fs = make_fs(api, table, tmp_path / "cache", files, max_cache_size=1.5 * len(DATA))
+    handles = {name: fs.open(f"/{name}", os.O_RDONLY) for name in files}
+    for name, data in files.items():
+        assert read(fs, 0, len(data), handles[name], path=f"/{name}") == data
+
+    fs.release("/a.bin", handles["a.bin"])
+
+    assert cached_names(tmp_path / "cache") == [f"{key(B)}.blocks", f"{key(B)}.data"]
+    fs.release("/b.bin", handles["b.bin"])
+
+
 def test_cache_left_by_an_earlier_mount_is_trimmed_to_the_max_size(
     api, table, tmp_path
 ):
