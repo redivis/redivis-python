@@ -279,6 +279,18 @@ def test_temporary_cache_dir_is_removed_if_mounting_fails(table, tmp_path, temp_
 # --- mount path ----------------------------------------------------------------
 
 
+def test_new_mount_dir_is_removed_if_mounting_fails(table, tmp_path, monkeypatch):
+    def fail(*args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(mount_directory, "RedivisFS", fail)
+    mount_path = tmp_path / "mnt"
+    with pytest.raises(RuntimeError, match="boom"):
+        mount_in_foreground(table, mount_path, monkeypatch, tmp_path)
+    assert not mount_path.exists()
+
+
+
 def mount_in_foreground(table, mount_path, monkeypatch, tmp_path):
     """Mounts an empty directory with FUSE stubbed out, returning whether the mount path was a
     directory while "mounted"."""

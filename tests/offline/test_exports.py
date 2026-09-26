@@ -5,6 +5,7 @@ import re
 
 import pytest
 import redivis
+from redivis.classes.ReadStream import ReadStream
 from redivis.classes.Upload import Upload
 from redivis.common import exceptions
 
@@ -54,3 +55,13 @@ def test_incomplete_upload_cannot_be_read(api, table):
 
     with pytest.raises(exceptions.ValueError, match="status: running"):
         Upload("u1", table=table).to_arrow_table(progress=False)
+
+
+def test_read_stream_cannot_be_downloaded(api, table, tmp_path):
+    stream = ReadStream(
+        "s1", table=table, query=None, upload=None, selected_variables=None
+    )
+
+    with pytest.raises(exceptions.ValueError, match="read streams"):
+        stream.download(f"{tmp_path}/", progress=False)
+    assert not paths("/exports")

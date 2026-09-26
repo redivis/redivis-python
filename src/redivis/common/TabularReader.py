@@ -43,6 +43,10 @@ class TabularReader(Base):
             max_parallelization=None,
             max_concurrency=None,
         ):
+            if self._is_read_stream:
+                raise exceptions.ValueError(
+                    "Downloading read streams is not supported"
+                )
             check_is_ready(self)
             res = make_request(
                 method="POST",

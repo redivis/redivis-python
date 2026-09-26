@@ -833,6 +833,11 @@ def mount_directory(directory, path, foreground, cache_dir=None, max_cache_size=
         # Create and start FUSE filesystem
         fs = RedivisFS(directory, cache_dir, max_cache_size)
     except BaseException:
+        if remove_mount_dir:
+            try:
+                mount_path.rmdir()
+            except OSError:
+                pass
         if temporary_cache_dir is not None:
             temporary_cache_dir.remove()
         raise

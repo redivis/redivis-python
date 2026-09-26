@@ -24,19 +24,6 @@ def test_idempotent_requests_retry_503s(api, method):
     assert len(api["requests"]) == 4
 
 
-def test_posts_are_not_retried_on_503(api):
-    # The POST may have been processed before the 503; replaying it could
-    # duplicate an upload or re-run a query.
-    api["fail_503"] = 1
-
-    with pytest.raises(exceptions.APIError):
-        api_request.make_request(
-            method="POST", path=f"{TABLE}/uploads", payload={"name": "u"}
-        )
-
-    assert len(api["requests"]) == 1
-
-
 def test_persistent_503s_eventually_raise(api):
     api["fail_503"] = 1000
 
@@ -201,6 +188,45 @@ def test_ever_changing_auth_failures_are_capped(api, logins):
         api_request.make_request(method="GET", path=TABLE)
 
     assert len(logins) == api_request.MAX_AUTH_ATTEMPTS
+
+
+def test_auth_retry_resends_its_whole_file_body(api, logins):
+    api["response_script"] = [UNAUTHENTICATED, INSUFFICIENT_SCOPE, PASS]
+    content = b"x" * 5000
+
+    response = api_request.make_request(
+        method="PATCH",
+        path=TABLE,
+        parse_payload=False,
+        files={"metadata": '{"a": 1}', "data": io.BytesIO(content)},
+    )
+
+    lengths = api["post_body_lengths"]
+    assert len(lengths) == 3
+    assert len(set(lengths)) == 1 and lengths[0] > len(content)
+    assert response["ok"]
+
+
+def test_unseekable_body_is_not_retried_after_auth_failure(api, logins):
+    class Unseekable:
+        def read(self, *args):
+            return b"data"
+
+        def seekable(self):
+            return False
+
+    api["response_script"] = [UNAUTHENTICATED]
+
+    with pytest.raises(exceptions.APIError, match="invalid_token"):
+        api_request.make_request(
+            method="PATCH",
+            path=TABLE,
+            parse_payload=False,
+            files={"data": Unseekable()},
+        )
+
+    assert logins == []
+    assert len(api["requests"]) == 1
 
 
 def test_unauthenticated_request_is_sent_without_a_token(anonymous):

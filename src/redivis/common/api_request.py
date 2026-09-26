@@ -209,6 +209,7 @@ def process_request_response(
         and os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None
         and auth_failure not in original_parameters["auth_failures"]
         and len(original_parameters["auth_failures"]) < MAX_AUTH_ATTEMPTS
+        and __rewind_request_body(original_parameters)
     ):
         warnings.warn(
             f"{response_json.get('error')}: {response_json.get('error_description', 'Authentication is required to access this resource.')}"
