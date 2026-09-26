@@ -7,7 +7,6 @@ from tqdm.auto import tqdm
 
 
 from .Upload import Upload
-from .Export import Export
 from .Variable import Variable
 from ..common import exceptions
 from ..common.TabularReader import TabularReader
@@ -299,29 +298,6 @@ class Table(TabularReader):
 
             raise e
 
-    def download(
-        self,
-        path=None,
-        *,
-        format="csv",
-        overwrite=False,
-        progress=True,
-        max_parallelization=None,
-        max_concurrency=None,
-    ):
-        res = make_request(
-            method="POST",
-            path=f"{self.uri}/exports",
-            payload={"format": format},
-        )
-        export_job = Export(res["id"], table=self, properties=res)
-        return export_job.download_files(
-            path=path,
-            overwrite=overwrite,
-            progress=progress,
-            max_concurrency=max_concurrency,
-            max_parallelization=max_parallelization,
-        )
 
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
         payload = {}

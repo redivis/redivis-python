@@ -2,6 +2,7 @@ from .Base import Base
 import os
 import time
 import pathlib
+from datetime import datetime
 
 from ..common import exceptions
 from ..common.api_request import make_request
@@ -17,10 +18,14 @@ class Export(Base):
         id,
         *,
         table=None,
+        query=None,
+        upload=None,
         properties=None,
     ):
         self.id = id
         self.table = table
+        self.query = query
+        self.upload = upload
         self.properties = properties
         self.uri = (self.properties or {}).get("uri") or f"/exports/{id}"
 
@@ -40,11 +45,21 @@ class Export(Base):
         max_parallelization=None,
         max_concurrency=None,
     ):
-        self.wait_for_finish()
+        self.wait_for_finish(progress=progress)
         file_count = self.properties["fileCount"]
-        escaped_table_name = re.sub(
-            r"\W+", "_", self.properties.get("table", {}).get("name", "table")
-        ).lower()
+        escaped_name = 'export'
+        if self.table is not None:
+            escaped_name = re.sub(
+                r"\W+", "_", self.table.properties.get("name", "table")
+            ).lower()
+        elif self.query is not None:
+            finished_at = self.query.properties.get("finishedAt", 0)
+            escaped_name = f"query_{datetime.fromtimestamp(finished_at / 1000).isoformat().replace('.', '_').replace(':', '_')}"
+        elif self.upload is not None:
+            escaped_name = re.sub(
+                r"\W+", "_", self.upload.properties.get("name", "upload")
+            ).lower()
+        
         is_dir = False
         if path:
             path = os.path.expanduser(path)
@@ -53,7 +68,7 @@ class Export(Base):
             if path is None:
                 path = os.getcwd()
             if file_count > 1:
-                path = os.path.join(path, escaped_table_name)
+                path = os.path.join(path, escaped_name)
         elif path.endswith(os.sep) or (not os.path.exists(path) and "." not in path):
             is_dir = True
         elif file_count > 1:
@@ -83,7 +98,7 @@ class Export(Base):
         download_paths = [
             str(
                 pathlib.Path(path)
-                / f"{escaped_table_name if file_count == 1 else str(file_number).zfill(6)}.{self.properties['format']}"
+                / f"{escaped_name if file_count == 1 else str(file_number).zfill(6)}.{self.properties['format']}"
                 if is_dir
                 else path
             )

@@ -10,6 +10,9 @@ from ..common import exceptions
 from ..common.retryable_download import perform_parallel_download
 from typing import Literal, Optional, List, Union
 
+# How long unmount() waits for the FUSE thread to clean up after itself. It normally takes moments.
+UNMOUNT_CLEANUP_TIMEOUT_SECONDS = 10
+
 
 class Directory(Base):
     def __init__(
@@ -32,6 +35,8 @@ class Directory(Base):
         self.parent = parent
         self.children = {}
         self._mount_path = None
+        self._mount_thread = None
+        self._remove_mount_dir = False
         self._last_cached_at = None
 
     def __repr__(self) -> str:
@@ -145,15 +150,13 @@ class Directory(Base):
         return node
 
     def mount(
-        self, path: Optional[Union[str, Path]] = None, *, foreground: bool = False
+        self,
+        path: Optional[Union[str, Path]] = None,
+        *,
+        foreground: bool = False,
+        cache_dir: Optional[Union[str, Path]] = None,
+        max_cache_size: Optional[int] = None,
     ) -> None:
-        if (
-            os.getenv("REDIVIS_NOTEBOOK_ID") is not None
-            and os.getenv("REDIVIS_NOTEBOOK_ENABLE_FUSE") != "TRUE"
-        ):
-            raise RuntimeError(
-                "Mounting directories is not supported within the default Redivis Notebooks. You must configure a custom machine to call directory.mount()"
-            )
         from ..common.mount_directory import mount_directory
 
         if path is None:
@@ -169,7 +172,15 @@ class Directory(Base):
             path = Path(path)
 
         mount_path = path.expanduser()
-        mount_directory(self, mount_path, foreground=foreground)
+        # As in mount_directory: only a directory that mounting creates is removed on unmount
+        self._remove_mount_dir = not mount_path.exists()
+        self._mount_thread = mount_directory(
+            self,
+            mount_path,
+            foreground=foreground,
+            cache_dir=cache_dir,
+            max_cache_size=max_cache_size,
+        )
         self._mount_path = mount_path
         return mount_path
 
@@ -201,12 +212,18 @@ class Directory(Base):
 
         self._mount_path = None
 
-        # The FUSE background thread also removes the directory on exit,
-        # but attempt removal here as well in case that hasn't run yet.
-        try:
-            Path(mount_path).rmdir()
-        except OSError:
-            pass
+        # Once unmounted, the FUSE thread exits, removing the mount directory (if mount() created it)
+        # and a temporary cache. Wait for it, so that they're gone by the time this returns.
+        if self._mount_thread is not None:
+            self._mount_thread.join(timeout=UNMOUNT_CLEANUP_TIMEOUT_SECONDS)
+            self._mount_thread = None
+
+        # In case the FUSE thread hasn't finished yet
+        if self._remove_mount_dir:
+            try:
+                Path(mount_path).rmdir()
+            except OSError:
+                pass
 
         print(f"Unmounted directory at {mount_path}")
 

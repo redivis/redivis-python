@@ -17,10 +17,125 @@ import io
 
 MAX_PARALLELIZATION = 8
 
+# Tables at or below this size are read via table.listRows, rather than by
+# creating a read session. See should_use_list_rows()
+LIST_ROWS_MAX_BYTES = 1e8
+
+
+class ArrowStreamSource:
+    """A single arrow IPC stream that can be read from the API.
+
+    There are two flavors:
+      - A readStream belonging to a read session. These can be resumed from a
+        row offset, and terminate with an empty end-of-stream sentinel batch,
+        so an interrupted read picks up where it left off.
+      - A table.listRows request. This supports neither, so an interrupted read
+        must restart from the beginning, and completion is verified by comparing
+        the number of rows read against the number of rows we expect.
+    """
+
+    def __init__(self, *, name, path, query=None, resumable=True, expected_rows=None):
+        self.name = name
+        self.path = path
+        self.query = query or {}
+        self.resumable = resumable
+        self.expected_rows = expected_rows
+
+    def open(self, offset=0):
+        query = {**self.query}
+        if self.resumable:
+            query["offset"] = offset
+            query["eosSentinel"] = "true"
+
+        return make_request(
+            method="get",
+            path=self.path,
+            query=query,
+            stream=True,
+            parse_response=False,
+        )
+
+    def is_finished(self, *, received_sentinel, rows_read):
+        """Whether the stream completed, as opposed to being cut off mid-read."""
+        if self.resumable:
+            return received_sentinel
+
+        # listRows has no end-of-stream sentinel; the expected row count is the
+        # only signal that everything arrived.
+        return self.expected_rows is None or rows_read >= self.expected_rows
+
+
+def read_stream_source(stream_id):
+    return ArrowStreamSource(name=stream_id, path=f"/readStreams/{stream_id}")
+
+
+def list_rows_source(*, uri, selected_variables, max_results, expected_rows):
+    query = {"format": "arrow"}
+
+    if selected_variables is not None:
+        query["selectedVariables"] = ",".join(selected_variables)
+
+    if max_results is not None:
+        query["maxResults"] = max_results
+
+    return ArrowStreamSource(
+        name="rows",
+        path=f"{uri}/rows",
+        query=query,
+        resumable=False,
+        expected_rows=expected_rows,
+    )
+
+
+def should_use_list_rows(instance, max_results=None):
+    """Whether to read this instance's rows via table.listRows.
+
+    listRows returns all rows in a single request, avoiding the read session
+    round trip. Small reads don't meaningfully benefit from the parallelization
+    that read sessions provide, and listRows can additionally be read without
+    any credentials when the table is publicly accessible.
+
+    What matters is the size of the read, not of the table, so a capped read of
+    a large table is sized by the fraction of its rows that were requested —
+    the same approximation the server makes.
+    """
+    from ..classes.Table import Table
+
+    if not isinstance(instance, Table):
+        return False
+
+    if not instance.properties or "numBytes" not in instance.properties:
+        instance.get()
+
+    num_bytes = instance.properties.get("numBytes")
+
+    if num_bytes is None:
+        return False
+
+    num_bytes = int(num_bytes)
+    num_rows = instance.properties.get("numRows")
+
+    if max_results is not None and num_rows:
+        num_rows = int(num_rows)
+        num_bytes = num_bytes * min(max_results, num_rows) / num_rows
+
+    return num_bytes < LIST_ROWS_MAX_BYTES
+
+
+def get_expected_list_rows(instance, max_results):
+    num_rows = instance.properties.get("numRows")
+
+    if num_rows is None:
+        return None
+
+    num_rows = int(num_rows)
+
+    return num_rows if max_results is None else min(num_rows, max_results)
+
 
 class RedivisArrowIterator:
-    def __init__(self, streams, mapped_variables, progressbar, coerce_schema):
-        self.streams = streams
+    def __init__(self, sources, mapped_variables, progressbar, coerce_schema):
+        self.sources = sources
         self.mapped_variables = mapped_variables
         self.progressbar = progressbar
         self.coerce_schema = coerce_schema
@@ -64,14 +179,10 @@ class RedivisArrowIterator:
             # Tracks whether the current stream delivered the end-of-stream
             # sentinel (a final, empty batch). Until we see it, an exhausted
             # reader means the connection was interrupted, not that the stream
-            # completed.
-            self.current_stream_finished = False
-            arrow_response = make_request(
-                method="get",
-                path=f'/readStreams/{self.streams[self.current_stream_index]["id"]}?offset={offset}&eosSentinel=true',
-                stream=True,
-                parse_response=False,
-            )
+            # completed. Sources without a sentinel verify completion by row
+            # count instead; see ArrowStreamSource.is_finished()
+            self.received_sentinel = False
+            arrow_response = self.sources[self.current_stream_index].open(offset)
             # Track the Response on self so it is always closed on the next
             # __get_next_reader__ / close(), even if reader construction below
             # raises and triggers a retry.
@@ -143,7 +254,27 @@ class RedivisArrowIterator:
                 ) from e
 
             time.sleep(self.retry_count)
-            return self.__get_next_reader__(self.current_offset)
+            return self.__get_next_reader__(self.__prepare_retry__())
+
+    def __prepare_retry__(self):
+        """Return the offset to retry the current stream at.
+
+        Sources that can't be resumed have to be re-read from the beginning,
+        which is only safe before any batch has been handed to the caller: the
+        rows aren't guaranteed to come back in the same order, so re-reading
+        after that could duplicate some rows and drop others. The buffered
+        (non-iterator) reads don't have this problem, since they discard
+        everything read so far and keep only the complete retried result.
+        """
+        if self.sources[self.current_stream_index].resumable:
+            return self.current_offset
+
+        if self.current_offset:
+            raise exceptions.NetworkError(
+                message="The connection was interrupted partway through reading rows, and this read cannot be resumed. Please try again.",
+            )
+
+        return 0
 
     def __iter__(self):
         return self
@@ -158,7 +289,7 @@ class RedivisArrowIterator:
             # (eosSentinel=true). It confirms the stream completed cleanly, so
             # advance to the next stream rather than yielding an empty batch.
             if batch.num_rows == 0:
-                self.current_stream_finished = True
+                self.received_sentinel = True
                 raise StopIteration
 
             if self.coerce_schema:
@@ -205,21 +336,24 @@ class RedivisArrowIterator:
             self.retry_count = 0
             return batch
         except StopIteration:
-            # The reader was exhausted without the end-of-stream sentinel, which
+            # The reader was exhausted without the stream having completed, which
             # means the connection was interrupted at a record batch boundary.
-            # Resume the same stream from the current offset instead of treating
-            # it as complete.
-            if not self.current_stream_finished:
+            # Resume the same stream from the current offset (or, if it can't be
+            # resumed, re-read it) instead of treating it as complete.
+            if not self.sources[self.current_stream_index].is_finished(
+                received_sentinel=self.received_sentinel,
+                rows_read=self.current_offset,
+            ):
                 self.retry_count += 1
                 if self.retry_count > 10:
                     raise exceptions.NetworkError(
                         message=f"Download connection failed after {self.retry_count} retries.",
                     )
                 time.sleep(self.retry_count)
-                self.__get_next_reader__(self.current_offset)
+                self.__get_next_reader__(self.__prepare_retry__())
                 return self.__next__()
 
-            if self.current_stream_index == len(self.streams) - 1:
+            if self.current_stream_index == len(self.sources) - 1:
                 self.__close_current_reader__()
                 if self.progressbar:
                     self.progressbar.close()
@@ -236,7 +370,7 @@ class RedivisArrowIterator:
                     original_exception=e,
                 ) from e
             time.sleep(self.retry_count)
-            self.__get_next_reader__(self.current_offset)
+            self.__get_next_reader__(self.__prepare_retry__())
             return self.__next__()
 
     def close(self):
@@ -282,11 +416,12 @@ def make_rows_request(
 
     progressbar = None
 
+    sources = []
+    num_rows = 0
+
     if isinstance(instance, ReadStream):
-        read_session = {
-            "streams": [{"id": instance.id}],
-            "numRows": instance.properties.get("estimatedRows", 0),
-        }
+        sources = [read_stream_source(instance.id)]
+        num_rows = instance.properties.get("estimatedRows", 0)
         max_parallelization = 1
     else:
         if max_parallelization < 1:
@@ -297,36 +432,50 @@ def make_rows_request(
 
         use_export_api = (
             use_export_api
-            and isinstance(instance, Table)
             and output_type != "arrow_iterator"
             and selected_variables is None
             and batch_preprocessor is None
             and max_results is None
         )
-        payload = {
-            "requestedStreamCount": min(MAX_PARALLELIZATION, max_parallelization)
-        }
 
-        if max_results is not None:
-            payload["maxResults"] = max_results
+        if not use_export_api and should_use_list_rows(instance, max_results):
+            num_rows = get_expected_list_rows(instance, max_results)
+            sources = [
+                list_rows_source(
+                    uri=uri,
+                    selected_variables=selected_variables,
+                    max_results=max_results,
+                    expected_rows=num_rows,
+                )
+            ]
+        elif not use_export_api:
+            payload = {
+                "requestedStreamCount": min(MAX_PARALLELIZATION, max_parallelization)
+            }
 
-        if selected_variables is not None:
-            payload["selectedVariables"] = selected_variables
+            if max_results is not None:
+                payload["maxResults"] = max_results
 
-        if not use_export_api:
+            if selected_variables is not None:
+                payload["selectedVariables"] = selected_variables
+
             read_session = make_request(
                 method="post",
                 path=f"{uri}/readSessions",
                 parse_response=True,
                 payload=payload,
             )
+            sources = [
+                read_stream_source(stream["id"]) for stream in read_session["streams"]
+            ]
+            num_rows = read_session["numRows"]
 
     if progress and not use_export_api:
-        progressbar = tqdm(total=read_session["numRows"], leave=False, mininterval=0.2)
+        progressbar = tqdm(total=num_rows, leave=False, mininterval=0.2)
 
     if output_type == "arrow_iterator":
         return RedivisArrowIterator(
-            streams=read_session["streams"],
+            sources=sources,
             mapped_variables=mapped_variables,
             progressbar=progressbar,
             coerce_schema=coerce_schema,
@@ -340,7 +489,7 @@ def make_rows_request(
     if (
         use_export_api
         or output_type in ["arrow_dataset", "dask_dataframe", "polars_lazyframe"]
-        or (len(read_session["streams"]) > 1 and max_parallelization > 1)
+        or (len(sources) > 1 and max_parallelization > 1)
     ):
         folder = pathlib.Path().joinpath(
             get_tempdir(),
@@ -368,14 +517,14 @@ def make_rows_request(
 
             # See https://github.com/googleapis/python-bigquery/blob/main/google/cloud/bigquery/_pandas_helpers.py#L920
             futures = []
-            if len(read_session["streams"]):
+            if len(sources):
                 with concurrent.futures.ThreadPoolExecutor(
-                    max_workers=min(max_parallelization, len(read_session["streams"]))
+                    max_workers=min(max_parallelization, len(sources))
                 ) as executor:
                     futures = [
                         executor.submit(
                             process_stream,
-                            stream,
+                            source,
                             folder_path,
                             mapped_variables,
                             coerce_schema,
@@ -383,7 +532,7 @@ def make_rows_request(
                             batch_preprocessor,
                             cancel_event,
                         )
-                        for stream in read_session["streams"]
+                        for source in sources
                     ]
 
                     not_done = futures
@@ -551,7 +700,7 @@ def coerce_arrow_array(pyarrow_array, variable):
 
 
 def process_stream(
-    stream,
+    source,
     folder_path,
     mapped_variables,
     coerce_schema,
@@ -564,19 +713,43 @@ def process_stream(
     writer = None
     # Initialized here (not inside the try) so the network-retry handler can
     # concatenate batches read before a mid-stream failure, even if the failure
-    # happens in make_request before the reader loop begins.
+    # happens in the request before the reader loop begins.
     record_batches = [] if folder_path is None else None
+
+    def retry_stream(next_retry_count):
+        """Continue reading the source after an interruption.
+
+        Resumable sources pick up at the current offset, keeping the batches
+        already read; other sources re-read from the beginning and discard them.
+        On the on-disk path, a resumed read lands in its own "-retry_offset-"
+        file, while a restarted read overwrites the partial file.
+        """
+        if not source.resumable and progressbar is not None and offset:
+            # The rows read so far are about to be read again; don't double count.
+            progressbar.update(-offset)
+
+        time.sleep(next_retry_count)
+        retry_result = process_stream(
+            source,
+            folder_path,
+            mapped_variables,
+            coerce_schema,
+            progressbar,
+            batch_preprocessor,
+            cancel_event,
+            offset=offset if source.resumable else 0,
+            retry_count=next_retry_count,
+        )
+
+        if folder_path is None:
+            return (record_batches if source.resumable else []) + (retry_result or [])
+
+        return retry_result
+
     try:
         import pyarrow
 
-        with closing(
-            make_request(
-                method="get",
-                path=f'/readStreams/{stream["id"]}?offset={offset}&eosSentinel=true',
-                stream=True,
-                parse_response=False,
-            )
-        ) as arrow_response:
+        with closing(source.open(offset)) as arrow_response:
             # urllib3 closes the underlying socket the instant the body is fully
             # consumed. pyarrow (via the BufferedReader below) issues one more
             # read() after the last batch to detect EOF, which would then hit the
@@ -588,12 +761,14 @@ def process_stream(
             has_content = False
             # Set once the server's end-of-stream sentinel (an empty batch) is
             # received, confirming the stream completed rather than being cut off.
-            stream_finished = False
+            # Sources that don't emit a sentinel verify the row count instead;
+            # see ArrowStreamSource.is_finished()
+            received_sentinel = False
             retry_suffix = f"-retry_offset-{offset}" if offset > 0 else ""
             # create the os_file path
             os_file = (
                 pathlib.Path(folder_path)
-                .joinpath(f"{stream['id']}{retry_suffix}.feather")
+                .joinpath(f"{source.name}{retry_suffix}.feather")
                 .absolute()
                 if folder_path is not None
                 else None
@@ -669,7 +844,7 @@ def process_stream(
                     # The empty end-of-stream sentinel confirms the stream
                     # completed cleanly; it carries no data to write.
                     if batch.num_rows == 0:
-                        stream_finished = True
+                        received_sentinel = True
                         break
 
                     if coerce_schema:
@@ -745,31 +920,20 @@ def process_stream(
         if folder_path is not None and not has_content:
             os.remove(os_file)
 
-        # The reader ended without the end-of-stream sentinel and we weren't
-        # cancelled: the connection dropped at a record batch boundary. Resume
-        # from the current offset rather than treating the stream as complete.
-        # Data read so far is preserved — on disk as a "-retry_offset-" file, or
-        # in memory by concatenating with the retry's batches below.
-        if not stream_finished and not cancel_event.is_set():
+        # The reader ended before the stream completed and we weren't cancelled:
+        # the connection dropped at a record batch boundary. Read on rather than
+        # treating the stream as complete.
+        if (
+            not source.is_finished(
+                received_sentinel=received_sentinel, rows_read=offset
+            )
+            and not cancel_event.is_set()
+        ):
             if retry_count >= 10:
                 raise exceptions.NetworkError(
                     message=f"A network error occurred. Stream rows connection failed after {retry_count} retries.",
                 )
-            time.sleep(retry_count + 1)
-            retry_result = process_stream(
-                stream,
-                folder_path,
-                mapped_variables,
-                coerce_schema,
-                progressbar,
-                batch_preprocessor,
-                cancel_event,
-                offset=offset,
-                retry_count=retry_count + 1,
-            )
-            if folder_path is None:
-                return record_batches + (retry_result or [])
-            return retry_result
+            return retry_stream(retry_count + 1)
 
         if folder_path is None:
             return record_batches
@@ -786,20 +950,4 @@ def process_stream(
                 original_exception=e,
             ) from e
 
-        time.sleep(retry_count + 1)
-        retry_result = process_stream(
-            stream,
-            folder_path,
-            mapped_variables,
-            coerce_schema,
-            progressbar,
-            batch_preprocessor,
-            cancel_event,
-            offset=offset,
-            retry_count=retry_count + 1,
-        )
-        # Preserve batches read before the failure. For the on-disk path they are
-        # already flushed to a feather file; for the in-memory path we concatenate.
-        if folder_path is None:
-            return record_batches + (retry_result or [])
-        return retry_result
+        return retry_stream(retry_count + 1)

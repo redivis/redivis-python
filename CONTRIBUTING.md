@@ -14,6 +14,12 @@ You can then run the tests, e.g.:
 REDIVIS_API_ENDPOINT=https://localhost:8443/api/v1 pytest -s --disable-warnings [-k test_prefix]
 ```
 
+The tests in `tests/offline` run against an in-process mock of the API, so they need no server or credentials. To run them against the working tree rather than the installed package:
+
+```
+PYTHONPATH=src pytest tests/offline
+```
+
 #### To upload to PyPi:
 
 First, update the version in setup.py.

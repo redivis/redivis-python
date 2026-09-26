@@ -1,5 +1,6 @@
 from ..common import exceptions
 from ..classes.Base import Base
+from ..classes.Export import Export
 
 import io
 import warnings
@@ -31,6 +32,41 @@ class TabularReader(Base):
         self._is_read_stream = is_read_stream
         self.directory = None
         self.properties = {}
+
+    def download(
+            self,
+            path=None,
+            *,
+            format="csv",
+            overwrite=False,
+            progress=True,
+            max_parallelization=None,
+            max_concurrency=None,
+        ):
+            if self._is_read_stream:
+                raise exceptions.ValueError(
+                    "Downloading read streams is not supported"
+                )
+            check_is_ready(self)
+            res = make_request(
+                method="POST",
+                path=f"{self.uri}/exports",
+                payload={"format": format},
+            )
+            export_job = Export(
+                res["id"], 
+                table=self if self._is_table else None, 
+                query=self if self._is_query else None, 
+                upload=self if self._is_upload else None, 
+                properties=res
+            )
+            return export_job.download_files(
+                path=path,
+                overwrite=overwrite,
+                progress=progress,
+                max_concurrency=max_concurrency,
+                max_parallelization=max_parallelization,
+            )
 
     # TODO: prefix? pattern? Don't cache if these are present
     def to_directory(
@@ -109,7 +145,11 @@ class TabularReader(Base):
             for file_spec in (
                 # IMPORTANT: we need to wrap this in a buffered reader, otherwise we get partial read errors
                 #            with chunked transfers over http 1.1 (happens w/ notebooks in-cluster)
-                pyarrow.ipc.RecordBatchStreamReader(io.BufferedReader(res.raw, buffer_size=1024 * 1024)).read_all().to_pylist()
+                pyarrow.ipc.RecordBatchStreamReader(
+                    io.BufferedReader(res.raw, buffer_size=1024 * 1024)
+                )
+                .read_all()
+                .to_pylist()
             ):
                 directory._add_file(
                     File(
@@ -543,7 +583,7 @@ class TabularReader(Base):
 
             if geography_variable is None:
                 use_export_api = (
-                    max_results is not None
+                    max_results is None
                     and variables is None
                     and should_use_export_api(self)
                 )
@@ -587,14 +627,18 @@ class TabularReader(Base):
 
                     # Determine which column indices are string variables
                     active_variables = [
-                        v for v in mapped_variables
+                        v
+                        for v in mapped_variables
                         if selected_variables is None or v["name"] in selected_variables
                     ]
                     string_col_indices = [
-                        i for i, v in enumerate(active_variables)
+                        i
+                        for i, v in enumerate(active_variables)
                         if v.get("type") == "string"
                     ]
-                    string_col_names = [active_variables[i]["name"] for i in string_col_indices]
+                    string_col_names = [
+                        active_variables[i]["name"] for i in string_col_indices
+                    ]
                     max_string_lengths = {name: 0 for name in string_col_names}
 
                     is_header = True
@@ -612,11 +656,14 @@ class TabularReader(Base):
 
                 os.remove(f"{tmpdirname}/part-0.csv")
 
-                string_variable_lengths = ",".join(
-                    f"{col_name}:{length}"
-                    for col_name, length in max_string_lengths.items()
-                    if length > 0
-                ) or None
+                string_variable_lengths = (
+                    ",".join(
+                        f"{col_name}:{length}"
+                        for col_name, length in max_string_lengths.items()
+                        if length > 0
+                    )
+                    or None
+                )
 
                 load_script = make_request(
                     method="GET",
@@ -696,7 +743,7 @@ class TabularReader(Base):
 
             if geography_variable is None:
                 use_export_api = (
-                    max_results is not None
+                    max_results is None
                     and variables is None
                     and should_use_export_api(self)
                 )
@@ -794,10 +841,17 @@ def check_is_ready(self: TabularReader) -> None:
     elif self._is_table:
         if not self.properties or "container" not in self.properties:
             self.get()
+    elif self._is_upload:
+        if not self.properties or "status" not in self.properties or self.properties['status'] != "completed":
+            self.get()
+        if self.properties['status'] != "completed":
+            raise exceptions.ValueError(
+                f"Cannot read data from an upload with status: {self.properties['status']}"
+            )
 
 
 def get_mapped_variables(
-    self: TabularReader, variables: Optional[Iterable[str]]
+    self: TabularReader, variables: Optional[Iterable[str]], *, refresh: bool = True
 ) -> Tuple[List[Dict[str, Any]], bool]:
     if self._is_read_stream:
         return get_mapped_variables(
@@ -807,9 +861,21 @@ def get_mapped_variables(
                 else self.upload if self.upload is not None else self.query
             ),
             variables=self.selected_variables,
+            # The parent was fetched when the read session was created, and
+            # refetching it for every stream would multiply requests by the
+            # stream count.
+            refresh=False,
         )
 
-    check_is_ready(self)
+    if self._is_table and refresh:
+        # Refetch rather than trusting properties cached on this object by an
+        # earlier call, since the read depends on them being current: e.g. a
+        # listRows read verifies completion against numRows, which changes when
+        # the table is written to. For a newly constructed table, this is the
+        # same fetch check_is_ready() would have made, so it costs nothing extra.
+        self.get()
+    else:
+        check_is_ready(self)
 
     coerce_schema = False  # queries and uploads will always have the correct types
 
@@ -888,10 +954,19 @@ def get_geography_variable(
 
 
 def should_use_export_api(self: TabularReader) -> bool:
-    if not self._is_table:
+    # A read stream is already one slice of a read session, and has no size or
+    # export endpoint of its own.
+    if self._is_read_stream:
         return False
-    if not self.properties or "numBytes" not in self.properties:
-        self.get()
-    return self.properties.get("numBytes") > (
-        1e10 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11
+    if self._is_query:
+        if not self.properties or "outputNumBytes" not in self.properties:
+            self.get()
+        num_bytes = self.properties.get("outputNumBytes")
+    else:
+        if not self.properties or "numBytes" not in self.properties:
+            self.get()
+        num_bytes = self.properties.get("numBytes")
+
+    return num_bytes > (
+        1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11
     )

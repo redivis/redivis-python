@@ -44,6 +44,7 @@ def get_tempdir():
 
     return created_temp_dir
 
+
 def get_parquet_rows_per_group(data):
     import pandas as pd
     import pyarrow as pa
@@ -51,7 +52,7 @@ def get_parquet_rows_per_group(data):
     from dask.dataframe import DataFrame as dask_df
     import polars
 
-    TARGET_GROUP_BYTES = 128 * 1024**2   # ~128MB per row group
+    TARGET_GROUP_BYTES = 128 * 1024**2  # ~128MB per row group
     MAX_RPG = 1_000_000
     MIN_RPG = 1
     SAMPLE_N = 10_000
@@ -66,7 +67,7 @@ def get_parquet_rows_per_group(data):
                 total_bytes += os.path.getsize(f)
             except OSError:
                 pass
-        n_rows = data.count_rows()          # metadata-only for parquet
+        n_rows = data.count_rows()  # metadata-only for parquet
         if n_rows > 0 and total_bytes > 0:
             bytes_per_row = total_bytes / n_rows
 
@@ -107,6 +108,7 @@ def get_parquet_rows_per_group(data):
     rpg = int(TARGET_GROUP_BYTES / bytes_per_row)
     return max(MIN_RPG, min(MAX_RPG, rpg))
 
+
 def convert_data_to_parquet(data):
     temp_file_path = f"{get_tempdir()}/parquet/{uuid.uuid4()}"
     pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
@@ -130,7 +132,7 @@ def convert_data_to_parquet(data):
             index=False,
             row_group_size=rows_per_group,
             write_statistics=False,
-            engine="pyarrow"
+            engine="pyarrow",
         )
     elif isinstance(data, pd.DataFrame):
         data.to_parquet(
@@ -140,7 +142,7 @@ def convert_data_to_parquet(data):
             index=False,
             row_group_size=rows_per_group,
             write_statistics=False,
-            engine="pyarrow"
+            engine="pyarrow",
         )
     elif isinstance(data, pa_dataset.Dataset):
         pa_dataset.write_dataset(
@@ -151,7 +153,7 @@ def convert_data_to_parquet(data):
             file_options=pa_dataset.ParquetFileFormat().make_write_options(
                 coerce_timestamps="us",
                 allow_truncated_timestamps=True,
-                write_statistics=False
+                write_statistics=False,
             ),
             min_rows_per_group=rows_per_group,
             max_rows_per_group=rows_per_group,
@@ -160,14 +162,14 @@ def convert_data_to_parquet(data):
         temp_file_path = f"{temp_file_path}/part-0.parquet"
     elif isinstance(data, (pa.Table, pa.RecordBatch)):
         if isinstance(data, pa.RecordBatch):
-             data = pa.Table.from_batches([data])
+            data = pa.Table.from_batches([data])
         pa_parquet.write_table(
             data,
             temp_file_path,
             coerce_timestamps="us",
             allow_truncated_timestamps=True,
             row_group_size=rows_per_group,
-            write_statistics=False
+            write_statistics=False,
         )
     elif isinstance(data, dask_df):
         # TODO: this can be multiple files, we'll want to refactor once we have the new import API
@@ -178,14 +180,14 @@ def convert_data_to_parquet(data):
             allow_truncated_timestamps=True,
             row_group_size=rows_per_group,
             write_statistics=False,
-            engine="pyarrow"
+            engine="pyarrow",
         )
         temp_file_path = f"{temp_file_path}/part.0.parquet"
     elif isinstance(data, polars.LazyFrame):
         data.sink_parquet(
-            temp_file_path, 
+            temp_file_path,
             row_group_size=rows_per_group,
-            statistics=False # Note that this arg looks different than write_statistics elsewhere
+            statistics=False,  # Note that this arg looks different than write_statistics elsewhere
         )
     elif isinstance(data, polars.DataFrame):
         data.write_parquet(
@@ -207,7 +209,12 @@ def convert_data_to_parquet(data):
 
 
 def raise_api_error(response_json=None, response_text=None, response=None):
-    status_code = response.status_code if response else response_json.get("status")
+    # NB: a requests.Response for an error status is falsy, so test for None
+    status_code = (
+        response.status_code
+        if response is not None
+        else (response_json.get("status") if response_json else None)
+    )
     error = response_json.get("error") if response_json else "api_error"
     description = (
         response_json.get("error_description") if response_json else response_text

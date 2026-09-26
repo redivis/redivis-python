@@ -7,7 +7,7 @@ import warnings
 from urllib.parse import unquote
 import time
 
-from .auth import get_auth_token, refresh_credentials
+from .auth import get_auth_token, has_credentials, refresh_credentials
 from .._version import __version__
 from .util import raise_api_error
 
@@ -24,6 +24,7 @@ def make_request(
     files=None,
     headers=None,
     retry_count=0,
+    auth_failures=(),
 ):
     if headers is None:
         headers = {}
@@ -99,12 +100,15 @@ def get_request_args(
 
     method = method.upper()
     headers = {
-        **{
-            "Authorization": f"Bearer {get_auth_token()}",
-            "User-Agent": __get_user_agent(),
-        },
+        **{"User-Agent": __get_user_agent()},
         **headers,
     }
+
+    # Only obtain a token if we already have credentials on hand; otherwise send
+    # the request anonymously, since the resource may be publicly accessible.
+    # If it isn't, process_request_response() authenticates and retries.
+    if "Authorization" not in headers and has_credentials():
+        headers["Authorization"] = f"Bearer {get_auth_token()}"
 
     if parse_payload and payload:
         payload = json.dumps(payload)
@@ -124,23 +128,36 @@ def get_request_args(
 
 previously_printed_warnings = {}
 
+# A backstop on authentication retries, in case the server's failures keep
+# changing without ever succeeding. See process_request_response()
+MAX_AUTH_ATTEMPTS = 5
+
 
 def process_request_response(
     r, parse_response=True, method=None, original_parameters=None
 ):
     method = method.lower()
     response_json = {}
-    try:
-        # Retry with exponential backoff on service unavailable
-        if r.status_code == 503 and original_parameters["retry_count"] < 0:
-            logging.debug("API is currently unavailable, retrying...")
-            time.sleep(original_parameters["retry_count"])
-            original_parameters["retry_count"] += 1
-            return make_request(**original_parameters)
 
-        if r.status_code >= 400 or (
-            method != "head" and parse_response and r.text != "OK"
-        ):
+    # Retry with backoff on service unavailable.
+    if (
+        r.status_code == 503
+        and original_parameters["retry_count"] < 10
+        and __rewind_request_body(original_parameters)
+    ):
+        logging.debug("API is currently unavailable, retrying...")
+        # Release the connection now; otherwise a streamed response holds its
+        # socket open for as long as the retries take.
+        r.close()
+        time.sleep(original_parameters["retry_count"])
+        original_parameters["retry_count"] += 1
+        return make_request(**original_parameters)
+
+    # NB: only the response parsing belongs in this try. Anything else in here
+    # (notably the authentication retry below) would have its errors swallowed
+    # and reported as an unrelated API error.
+    if r.status_code >= 400 or (method != "head" and parse_response and r.text != "OK"):
+        try:
             if method == "head":
                 if "X-REDIVIS-ERROR-PAYLOAD" in r.headers:
                     response_json = json.loads(
@@ -151,44 +168,66 @@ def process_request_response(
                     response_json = {"error": "unknown_error", "status": r.status_code}
             else:
                 response_json = r.json()
-
-        if (
-            (
-                r.status_code == 401
-                or (
-                    r.status_code == 403
-                    and response_json["error"] == "insufficient_scope"
+        except Exception:
+            if method == "head":
+                error_payload = r.headers.get("X-REDIVIS-ERROR-PAYLOAD")
+                response_text = (
+                    unquote(error_payload) if error_payload is not None else r.text
                 )
-            )
-            and os.getenv("REDIVIS_API_TOKEN") is None
-            and os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None
-        ):
-            warnings.warn(
-                f"{response_json['error']}: {response_json['error_description']}"
-            )
-            refresh_credentials(
-                scope=(
-                    response_json["scope"].split(" ")
-                    if "scope" in response_json
-                    else None
-                ),
-                amr_values=(
-                    response_json["amr_values"]
-                    if "amr_values" in response_json
-                    else None
-                ),
-            )
-            return make_request(**original_parameters)
-    except Exception:
-        if method == "head":
-            error_payload = r.headers.get("X-REDIVIS-ERROR-PAYLOAD")
-            response_text = (
-                unquote(error_payload) if error_payload is not None else r.text
-            )
-            raise_api_error(response_text=response_text, response=r)
+                raise_api_error(response_text=response_text, response=r)
 
-        else:
-            raise_api_error(response_text=r.text, response=r)
+            else:
+                raise_api_error(response_text=r.text, response=r)
+
+    is_auth_failure = r.status_code == 401 or (
+        r.status_code == 403 and response_json.get("error") == "insufficient_scope"
+    )
+    # Authenticating is only worth retrying while it makes progress, i.e. each
+    # attempt fails differently than the ones before it: an anonymous request
+    # that's rejected, then a scope upgrade after logging in, and so on. Once a
+    # failure repeats, re-authenticating can't help, and retrying anyway would
+    # loop forever rather than surfacing the server's error.
+    auth_failure = (
+        json.dumps(
+            {
+                "status": r.status_code,
+                "authenticated": "Authorization" in r.request.headers,
+                "error": response_json.get("error"),
+                "error_description": response_json.get("error_description"),
+                "scope": response_json.get("scope"),
+                "amr_values": response_json.get("amr_values"),
+            },
+            sort_keys=True,
+        )
+        if is_auth_failure
+        else None
+    )
+
+    if (
+        is_auth_failure
+        and os.getenv("REDIVIS_API_TOKEN") is None
+        and os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None
+        and auth_failure not in original_parameters["auth_failures"]
+        and len(original_parameters["auth_failures"]) < MAX_AUTH_ATTEMPTS
+        and __rewind_request_body(original_parameters)
+    ):
+        warnings.warn(
+            f"{response_json.get('error')}: {response_json.get('error_description', 'Authentication is required to access this resource.')}"
+        )
+        refresh_credentials(
+            scope=(
+                response_json["scope"].split(" ") if "scope" in response_json else None
+            ),
+            amr_values=(
+                response_json["amr_values"] if "amr_values" in response_json else None
+            ),
+        )
+        r.close()
+        original_parameters["auth_failures"] = (
+            *original_parameters["auth_failures"],
+            auth_failure,
+        )
+        return make_request(**original_parameters)
 
     if "X-REDIVIS-WARNING" in r.headers:
         global previously_printed_warnings
@@ -202,6 +241,29 @@ def process_request_response(
         return response_json
     else:
         return r
+
+
+def __rewind_request_body(original_parameters):
+    """Prepare a request to be sent again, reporting whether that's possible.
+
+    `files` holds file-like objects that the first attempt already consumed, so
+    they have to be rewound — re-sending one as-is would upload nothing at all.
+    """
+    files = original_parameters.get("files")
+
+    if not files:
+        return True
+
+    for value in files.values():
+        if not hasattr(value, "read"):
+            continue
+
+        if not hasattr(value, "seek") or not getattr(value, "seekable", lambda: True)():
+            return False
+
+        value.seek(0)
+
+    return True
 
 
 def __get_user_agent():

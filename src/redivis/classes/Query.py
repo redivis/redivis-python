@@ -31,7 +31,7 @@ class Query(TabularReader):
             self.payload["defaultDataset"] = default_dataset
 
     def __repr__(self):
-        return f"<Query {self.payload.get('id', '[uninitiated]')}>"
+        return f"<Query {self.properties.get('id', '[uninitiated]')}>"
 
     def get(self):
         self._initiate()
