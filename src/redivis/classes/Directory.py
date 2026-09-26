@@ -32,6 +32,7 @@ class Directory(Base):
         self.parent = parent
         self.children = {}
         self._mount_path = None
+        self._remove_mount_dir = False
         self._last_cached_at = None
 
     def __repr__(self) -> str:
@@ -167,6 +168,8 @@ class Directory(Base):
             path = Path(path)
 
         mount_path = path.expanduser()
+        # As in mount_directory: only a directory that mounting creates is removed on unmount
+        self._remove_mount_dir = not mount_path.exists()
         mount_directory(
             self,
             mount_path,
@@ -207,10 +210,11 @@ class Directory(Base):
 
         # The FUSE background thread also removes the directory on exit,
         # but attempt removal here as well in case that hasn't run yet.
-        try:
-            Path(mount_path).rmdir()
-        except OSError:
-            pass
+        if self._remove_mount_dir:
+            try:
+                Path(mount_path).rmdir()
+            except OSError:
+                pass
 
         print(f"Unmounted directory at {mount_path}")
 

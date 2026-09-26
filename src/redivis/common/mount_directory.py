@@ -4,12 +4,14 @@ import re
 import shutil
 import stat
 import errno
+import sys
 import tempfile
 import threading
 import time
 from collections import OrderedDict
 
 from ..common import exceptions
+import mfusepy
 from mfusepy import FUSE, FuseOSError, Operations
 
 # Files are downloaded into the local cache in blocks of this size, and a read is served
@@ -628,25 +630,59 @@ class RedivisFS(Operations):
         }
 
 
-def _run_fuse_and_cleanup(fs, mount_path, remove_cache_dir):
-    """Run the FUSE event loop, then remove the mount directory (and a temporary cache) when it exits."""
+def _fuse_options():
+    """Options for FUSE() that only some FUSE implementations accept. Any other rejects them, and
+    fails to mount at all."""
+    options = {}
+    libfuse_version = (
+        getattr(mfusepy, "fuse_version_major", None),
+        getattr(mfusepy, "fuse_version_minor", None),
+    )
+    if not sys.platform.startswith("linux") or libfuse_version[0] != 3:
+        # Including FUSE-T and macFUSE, which implement libfuse 2
+        return options
+
+    if libfuse_version >= (3, 12):
+        options["max_threads"] = os.cpu_count() or 2
+        # Idle threads are never stopped either way, as there are never more than max_threads of
+        # them. It's only set because libfuse 3.12-3.14 otherwise logs "Ignoring invalid max threads
+        # value 4294967295", misreporting the default for this as an invalid max_threads.
+        options["max_idle_threads"] = options["max_threads"]
+
+    # libfuse looks for fusermount3 in its install directory as well as on PATH
+    search_path = os.pathsep.join([os.environ.get("PATH", ""), "/usr/bin", "/bin"])
+    if shutil.which("fusermount3", path=search_path) is not None:
+        # Have fusermount3 unmount the directory if this process exits without unmounting it (e.g. a
+        # notebook kernel restart), rather than leave a dead mount behind that fails every access with
+        # "Transport endpoint is not connected". With this option libfuse always mounts through
+        # fusermount3, even as root, so it's only asked for when that's installed; otherwise a root
+        # process that can mount(2) directly would stop being able to mount at all. Keep in step
+        # with redivis-r's fuse_mount.c.
+        options["auto_unmount"] = True
+    return options
+
+
+def _run_fuse_and_cleanup(fs, mount_path, remove_mount_dir, remove_cache_dir):
+    """Run the FUSE event loop, then remove the mount directory (if mount() created it) and a
+    temporary cache when it exits."""
     try:
         FUSE(
             fs,
             str(mount_path),
             nothreads=False,
             foreground=True,
-            max_threads=os.cpu_count() or 2,
+            **_fuse_options(),
         )
     except Exception as e:
         print(e)
         pass
     finally:
         fs.close()
-        try:
-            mount_path.rmdir()
-        except OSError:
-            pass
+        if remove_mount_dir:
+            try:
+                mount_path.rmdir()
+            except OSError:
+                pass
         if remove_cache_dir:
             shutil.rmtree(fs.cache_dir, ignore_errors=True)
 
@@ -655,8 +691,23 @@ def mount_directory(directory, path, foreground, cache_dir=None, max_cache_size=
 
     mount_path = path.expanduser()
 
-    if mount_path.exists():
-        raise exceptions.ValueError(f"Mount path {mount_path} already exists")
+    # An existing directory is fine as long as it's empty, e.g. one left behind by an earlier mount
+    # whose process was killed. A directory mount() creates is removed again on unmount; an existing
+    # one is left in place.
+    remove_mount_dir = not mount_path.exists()
+    if not remove_mount_dir:
+        if not mount_path.is_dir():
+            raise exceptions.ValueError(
+                f"Mount path {mount_path} already exists and is not a directory"
+            )
+        if os.path.ismount(mount_path):
+            raise exceptions.ValueError(
+                f"Mount path {mount_path} is already a mount point"
+            )
+        if any(mount_path.iterdir()):
+            raise exceptions.ValueError(
+                f"Mount path {mount_path} already exists and is not empty"
+            )
 
     if max_cache_size is not None and max_cache_size < 0:
         raise exceptions.ValueError("max_cache_size must not be negative")
@@ -672,17 +723,18 @@ def mount_directory(directory, path, foreground, cache_dir=None, max_cache_size=
         cache_dir = os.path.expanduser(str(cache_dir))
         os.makedirs(cache_dir, mode=0o700, exist_ok=True)
 
-    mount_path.mkdir(parents=True)
+    if remove_mount_dir:
+        mount_path.mkdir(parents=True)
 
     # Create and start FUSE filesystem
     fs = RedivisFS(directory, cache_dir, max_cache_size)
     print(f"Mounted directory at {mount_path}")
     if foreground:
-        _run_fuse_and_cleanup(fs, mount_path, remove_cache_dir)
+        _run_fuse_and_cleanup(fs, mount_path, remove_mount_dir, remove_cache_dir)
     else:
         mount_thread = threading.Thread(
             target=_run_fuse_and_cleanup,
-            args=(fs, mount_path, remove_cache_dir),
+            args=(fs, mount_path, remove_mount_dir, remove_cache_dir),
             daemon=True,
         )
         mount_thread.start()
