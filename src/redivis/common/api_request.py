@@ -139,13 +139,9 @@ def process_request_response(
     method = method.lower()
     response_json = {}
 
-    # Retry with backoff on service unavailable. Only methods that are safe to
-    # repeat are retried: a POST may have been processed before the 503 was
-    # returned (e.g. by a proxy timing out), and replaying it could duplicate an
-    # upload or re-run a query. PATCH requests are idempotent in this API.
+    # Retry with backoff on service unavailable.
     if (
         r.status_code == 503
-        and method in ("get", "head", "patch")
         and original_parameters["retry_count"] < 10
         and __rewind_request_body(original_parameters)
     ):

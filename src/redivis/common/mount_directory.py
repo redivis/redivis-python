@@ -2,6 +2,7 @@ import atexit
 import os
 import re
 import shutil
+import signal
 import stat
 import errno
 import sys
@@ -9,6 +10,11 @@ import tempfile
 import threading
 import time
 from collections import OrderedDict
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
 
 from ..common import exceptions
 import mfusepy
@@ -42,6 +48,14 @@ MEMORY_BUFFER_BLOCKS = MAX_STREAM_SKIP_BLOCKS + STREAM_READAHEAD_BLOCKS + 2
 # Once the cache exceeds its maximum size, files are evicted until it is back under this fraction
 # of it, so that eviction runs occasionally rather than on every block downloaded.
 EVICTION_TARGET = 0.9
+
+# Without an explicit cache_dir, a mount caches files in a directory of its own in the system's
+# temporary directory, named with this prefix. It holds a lock on the TEMPORARY_CACHE_LOCK file inside
+# for as long as its process is alive, so that a later mount can remove the cache of a process that
+# was killed while mounted (e.g. by a notebook kernel restart), and so never removed its own. Keep in
+# step with redivis-r's fuse_mount.c, so that each cleans up after the other.
+TEMPORARY_CACHE_PREFIX = "redivis_mount_cache_"
+TEMPORARY_CACHE_LOCK = ".lock"
 
 
 class _BlockStream:
@@ -662,7 +676,97 @@ def _fuse_options():
     return options
 
 
-def _run_fuse_and_cleanup(fs, mount_path, remove_mount_dir, remove_cache_dir):
+def _ignore_sigpipe(signum, frame):
+    pass
+
+
+def _keep_ignoring_sigpipe():
+    """Stop libfuse from turning Python's ignored SIGPIPE back on, which kills the process.
+
+    FUSE() calls libfuse's fuse_main(), which on exit resets SIGPIPE to its default action (terminate)
+    if it's ignored, even though libfuse only ignored it itself if it wasn't already. Python ignores
+    it at startup, so after an unmount any write to a closed pipe or socket kills the process, and
+    FUSE-T's own teardown does just that. A handler that does nothing is left alone by libfuse, and
+    behaves the same as ignoring it: the write still fails with EPIPE (BrokenPipeError).
+    """
+    # Signal handlers can only be set from the main thread
+    if (
+        not hasattr(signal, "SIGPIPE")
+        or threading.current_thread() is not threading.main_thread()
+    ):
+        return
+    if signal.getsignal(signal.SIGPIPE) == signal.SIG_IGN:
+        signal.signal(signal.SIGPIPE, _ignore_sigpipe)
+
+
+class _TemporaryCacheDir:
+    """A cache directory for a single mount, removed when it's unmounted (see TEMPORARY_CACHE_PREFIX)"""
+
+    def __init__(self):
+        parent = tempfile.gettempdir()
+        _remove_orphaned_cache_dirs(parent)
+        self.path = tempfile.mkdtemp(prefix=TEMPORARY_CACHE_PREFIX, dir=parent)
+        try:
+            self._lock_file = open(os.path.join(self.path, TEMPORARY_CACHE_LOCK), "x")
+            if fcntl is not None:
+                fcntl.flock(self._lock_file, fcntl.LOCK_EX)
+            # Written once locked, since until then another process could take the lock itself
+            self._lock_file.write(f"{os.getpid()}\n")
+            self._lock_file.flush()
+        except BaseException:
+            shutil.rmtree(self.path, ignore_errors=True)
+            raise
+        # In case the process exits while still mounted, and the FUSE thread never cleans up
+        atexit.register(self.remove)
+
+    def remove(self):
+        atexit.unregister(self.remove)
+        # Closed first, since on Windows even its owner can't delete a file it has open
+        self._lock_file.close()
+        shutil.rmtree(self.path, ignore_errors=True)
+
+
+def _remove_orphaned_cache_dirs(parent):
+    """Remove the temporary caches of processes that exited while mounted"""
+    try:
+        with os.scandir(parent) as entries:
+            candidates = [e for e in entries if e.name.startswith(TEMPORARY_CACHE_PREFIX)]
+    except OSError:
+        return
+    for entry in candidates:
+        try:
+            # Only this user's own directories, so as never to follow a link somewhere else
+            entry_stat = entry.stat(follow_symlinks=False)
+            if not stat.S_ISDIR(entry_stat.st_mode) or (
+                hasattr(os, "getuid") and entry_stat.st_uid != os.getuid()
+            ):
+                continue
+            if _is_orphaned(os.path.join(entry.path, TEMPORARY_CACHE_LOCK)):
+                shutil.rmtree(entry.path, ignore_errors=True)
+        except OSError:
+            continue
+
+
+def _is_orphaned(lock_path):
+    if fcntl is None:
+        # On Windows, a file can't be deleted while it's open, so this only succeeds once its owner
+        # has exited. A cache without one yet is still being set up.
+        try:
+            os.remove(lock_path)
+            return True
+        except OSError:
+            return False
+    try:
+        with open(lock_path) as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # Empty while its owner is still setting it up
+            return bool(lock_file.read())
+    except OSError:
+        # Missing (not a cache set up this way, or not yet), or locked by a live process
+        return False
+
+
+def _run_fuse_and_cleanup(fs, mount_path, remove_mount_dir, temporary_cache_dir=None):
     """Run the FUSE event loop, then remove the mount directory (if mount() created it) and a
     temporary cache when it exits."""
     try:
@@ -683,8 +787,8 @@ def _run_fuse_and_cleanup(fs, mount_path, remove_mount_dir, remove_cache_dir):
                 mount_path.rmdir()
             except OSError:
                 pass
-        if remove_cache_dir:
-            shutil.rmtree(fs.cache_dir, ignore_errors=True)
+        if temporary_cache_dir is not None:
+            temporary_cache_dir.remove()
 
 
 def mount_directory(directory, path, foreground, cache_dir=None, max_cache_size=None):
@@ -712,29 +816,34 @@ def mount_directory(directory, path, foreground, cache_dir=None, max_cache_size=
     if max_cache_size is not None and max_cache_size < 0:
         raise exceptions.ValueError("max_cache_size must not be negative")
 
-    # Without an explicit cache_dir, files are cached in a private temporary directory that is
-    # removed on unmount. An explicit cache_dir is kept, so later mounts can reuse it.
-    remove_cache_dir = cache_dir is None
-    if remove_cache_dir:
-        cache_dir = tempfile.mkdtemp(prefix="redivis_mount_cache_")
-        # In case the process exits while still mounted, and the FUSE thread never cleans up
-        atexit.register(shutil.rmtree, cache_dir, ignore_errors=True)
+    # Without an explicit cache_dir, files are cached in a temporary directory that is removed on
+    # unmount. An explicit cache_dir is kept, so later mounts can reuse it.
+    temporary_cache_dir = None
+    if cache_dir is None:
+        temporary_cache_dir = _TemporaryCacheDir()
+        cache_dir = temporary_cache_dir.path
     else:
         cache_dir = os.path.expanduser(str(cache_dir))
         os.makedirs(cache_dir, mode=0o700, exist_ok=True)
 
-    if remove_mount_dir:
-        mount_path.mkdir(parents=True)
+    try:
+        if remove_mount_dir:
+            mount_path.mkdir(parents=True)
 
-    # Create and start FUSE filesystem
-    fs = RedivisFS(directory, cache_dir, max_cache_size)
+        # Create and start FUSE filesystem
+        fs = RedivisFS(directory, cache_dir, max_cache_size)
+    except BaseException:
+        if temporary_cache_dir is not None:
+            temporary_cache_dir.remove()
+        raise
+    _keep_ignoring_sigpipe()
     print(f"Mounted directory at {mount_path}")
     if foreground:
-        _run_fuse_and_cleanup(fs, mount_path, remove_mount_dir, remove_cache_dir)
+        _run_fuse_and_cleanup(fs, mount_path, remove_mount_dir, temporary_cache_dir)
     else:
         mount_thread = threading.Thread(
             target=_run_fuse_and_cleanup,
-            args=(fs, mount_path, remove_mount_dir, remove_cache_dir),
+            args=(fs, mount_path, remove_mount_dir, temporary_cache_dir),
             daemon=True,
         )
         mount_thread.start()

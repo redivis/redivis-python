@@ -210,18 +210,124 @@ def test_empty_file(api, table, tmp_path):
     assert api["raw_file_ranges"] == []
 
 
-def test_temporary_cache_dir_is_removed_on_unmount(api, table, tmp_path, monkeypatch):
+@pytest.fixture
+def temp_dir(tmp_path, monkeypatch):
+    """Where temporary caches are made"""
+    path = tmp_path / "tmp"
+    path.mkdir()
+    monkeypatch.setattr(mount_directory.tempfile, "tempdir", str(path))
+    return path
+
+
+def test_temporary_cache_dir_is_removed_on_unmount(
+    api, table, tmp_path, temp_dir, monkeypatch
+):
     monkeypatch.setattr(
         mount_directory, "FUSE", lambda fs, *args, **kwargs: read_all(fs)
     )
-    fs = make_fs(api, table, tmp_path / "cache")
+    temporary_cache_dir = mount_directory._TemporaryCacheDir()
+    fs = make_fs(api, table, temporary_cache_dir.path)
     mount_path = tmp_path / "mnt"
     mount_path.mkdir()
 
-    mount_directory._run_fuse_and_cleanup(fs, mount_path, remove_cache_dir=True)
+    mount_directory._run_fuse_and_cleanup(
+        fs, mount_path, remove_mount_dir=True, temporary_cache_dir=temporary_cache_dir
+    )
 
-    assert not Path(fs.cache_dir).exists()
+    assert list(temp_dir.iterdir()) == []
     assert not mount_path.exists()
+
+
+def make_orphaned_cache_dir(temp_dir, name, lock_contents="12345\n"):
+    """A temporary cache as left by a process killed while mounted"""
+    path = temp_dir / f"{mount_directory.TEMPORARY_CACHE_PREFIX}{name}"
+    path.mkdir()
+    (path / f"{key(DATA)}.data").write_bytes(DATA)
+    if lock_contents is not None:
+        (path / mount_directory.TEMPORARY_CACHE_LOCK).write_text(lock_contents)
+    return path
+
+
+def test_temporary_cache_dirs_of_exited_processes_are_removed(temp_dir):
+    live = mount_directory._TemporaryCacheDir()
+    orphaned = make_orphaned_cache_dir(temp_dir, "orphaned")
+    # Not yet locked by the process making it
+    being_made = make_orphaned_cache_dir(temp_dir, "being_made", lock_contents="")
+    unlocked = make_orphaned_cache_dir(temp_dir, "unlocked", lock_contents=None)
+    (temp_dir / "notes.txt").write_text("not a cache")
+
+    new = mount_directory._TemporaryCacheDir()
+
+    assert sorted(p.name for p in temp_dir.iterdir()) == sorted(
+        [Path(live.path).name, being_made.name, unlocked.name, Path(new.path).name, "notes.txt"]
+    )
+    assert not orphaned.exists()
+    live.remove()
+    new.remove()
+
+
+def test_temporary_cache_dir_is_removed_if_mounting_fails(table, tmp_path, temp_dir):
+    mount_path = tmp_path / "mnt"
+    mount_path.touch()
+    with pytest.raises(Exception, match="not a directory"):
+        mount_directory.mount_directory(
+            Directory(path="/", table=table), mount_path, foreground=True
+        )
+    assert list(temp_dir.iterdir()) == []
+
+
+# --- mount path ----------------------------------------------------------------
+
+
+def mount_in_foreground(table, mount_path, monkeypatch, tmp_path):
+    """Mounts an empty directory with FUSE stubbed out, returning whether the mount path was a
+    directory while "mounted"."""
+    mounted = []
+    monkeypatch.setattr(
+        mount_directory,
+        "FUSE",
+        lambda fs, path, **kwargs: mounted.append(os.path.isdir(path)),
+    )
+    mount_directory.mount_directory(
+        Directory(path="/", table=table),
+        mount_path,
+        foreground=True,
+        cache_dir=tmp_path / "cache",
+    )
+    return mounted == [True]
+
+
+def test_mount_creates_a_new_mount_dir_and_removes_it_on_unmount(
+    table, tmp_path, monkeypatch
+):
+    mount_path = tmp_path / "mnt"
+    assert mount_in_foreground(table, mount_path, monkeypatch, tmp_path)
+    assert not mount_path.exists()
+
+
+def test_mount_accepts_an_existing_empty_dir_and_leaves_it_on_unmount(
+    table, tmp_path, monkeypatch
+):
+    mount_path = tmp_path / "mnt"
+    mount_path.mkdir()
+    assert mount_in_foreground(table, mount_path, monkeypatch, tmp_path)
+    assert mount_path.is_dir()
+
+
+@pytest.mark.parametrize(
+    "make_path, message",
+    [
+        (lambda path: (path.mkdir(), (path / "x").touch()), "not empty"),
+        (lambda path: path.touch(), "not a directory"),
+    ],
+)
+def test_mount_rejects_an_existing_path_that_is_not_an_empty_dir(
+    table, tmp_path, monkeypatch, make_path, message
+):
+    mount_path = tmp_path / "mnt"
+    make_path(mount_path)
+    with pytest.raises(Exception, match=message):
+        mount_in_foreground(table, mount_path, monkeypatch, tmp_path)
 
 
 # --- shared contents -----------------------------------------------------------
