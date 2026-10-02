@@ -225,6 +225,15 @@ class Stream(io.BufferedIOBase):
             return self._get_response(True)
 
     def read(self, size=-1):
+        # urllib3 and urllib3-future interpret `read(size=-1)` differently. In 
+        # urllib3-future, this means read only the currently buffered data. In 
+        # urllib3, this means the same as None --- read all the data (to EOF).
+        # See https://github.com/jawah/urllib3.future/issues/429
+        #
+        # `-1` and `None` behaving the same is python's contract for reading 
+        # files, so enforce it here.
+        if size is not None and size < 0:
+            size = None
         r = self._get_response()
         if not r:
             return b""
