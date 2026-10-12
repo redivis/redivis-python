@@ -63,8 +63,6 @@ class Member(Base):
             payload["status"] = status
         if labels is not None:
             payload["labels"] = labels
-        if labels is not None:
-            payload["labels"] = labels
         if labels_to_add is not None:
             payload["labelsToAdd"] = labels_to_add
         if labels_to_remove is not None:
@@ -77,7 +75,7 @@ class Member(Base):
         )
         self.properties = response
         self.user.properties = response["user"]
-        return
+        return self
 
     def exists(self):
         try:
