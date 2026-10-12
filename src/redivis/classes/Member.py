@@ -1,3 +1,5 @@
+import warnings
+
 from .Base import Base
 from .User import User
 from ..common.api_request import make_request
@@ -32,24 +34,20 @@ class Member(Base):
         return self
 
     def add_labels(self, labels):
-        self.get()
-        self.update(
-            labels=list(
-                set(self.properties.get("labels", []))
-                | set(label.lower() for label in labels)
-            )
+        warnings.warn(
+            "This method is deprecated, and will be removed in a future version. Use member.update(labels_to_add=[...]) instead",
+            FutureWarning,
+            stacklevel=2,
         )
-        return self
+        return self.update(labels_to_add=labels)
 
     def remove_labels(self, labels):
-        self.get()
-        self.update(
-            labels=list(
-                set(self.properties.get("labels", []))
-                - set(label.lower() for label in labels)
-            )
+        warnings.warn(
+            "This method is deprecated, and will be removed in a future version. Use member.update(labels_to_remove=[...]) instead",
+            FutureWarning,
+            stacklevel=2,
         )
-        return self
+        return self.update(labels_to_remove=labels)
 
     def add_comment(self, text):
         make_request(
@@ -59,12 +57,18 @@ class Member(Base):
         )
         return self
 
-    def update(self, *, labels=None, status=None):
+    def update(self, *, status=None, labels=None, labels_to_add=None, labels_to_remove=None):
         payload = {}
-        if labels is not None:
-            payload["labels"] = labels
         if status is not None:
             payload["status"] = status
+        if labels is not None:
+            payload["labels"] = labels
+        if labels is not None:
+            payload["labels"] = labels
+        if labels_to_add is not None:
+            payload["labelsToAdd"] = labels_to_add
+        if labels_to_remove is not None:
+            payload["labelsToRemove"] = labels_to_remove
 
         response = make_request(
             method="PATCH",

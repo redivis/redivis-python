@@ -1,7 +1,7 @@
 from .Table import Table
 from .Version import Version
 import os
-
+import warnings
 from .Query import Query
 from .Base import Base
 from urllib.parse import quote as quote_uri
@@ -212,27 +212,35 @@ class Dataset(Base):
         return Table(name, dataset=self)
 
     def add_labels(self, labels):
-        self.get()
-        self.update(
-            labels=list(
-                set(self.properties.get("labels", []))
-                | set(label.lower() for label in labels)
-            )
+        warnings.warn(
+            "This method is deprecated, and will be removed in a future version. Use dataset.update(labels_to_add=[...]) instead",
+            FutureWarning,
+            stacklevel=2,
         )
-        return self
+        return self.update(labels_to_add=labels)
 
     def remove_labels(self, labels):
-        self.get()
-        self.update(
-            labels=list(
-                set(self.properties.get("labels", []))
-                - set(label.lower() for label in labels)
-            )
+        warnings.warn(
+            "This method is deprecated, and will be removed in a future version. Use dataset.update(labels_to_remove=[...]) instead",
+            FutureWarning,
+            stacklevel=2,
         )
-        return self
+        return self.update(labels_to_remove=labels)
 
     def update(
-        self, *, name=None, public_access_level=None, description=None, labels=None
+        self, 
+        *, 
+        name=None, 
+        public_access_level=None, 
+        description=None, 
+        methodology_markdown=None, 
+        usage_markdown=None, 
+        labels=None, 
+        labels_to_add=None, 
+        labels_to_remove=None, 
+        tags=None, 
+        tags_to_add=None, 
+        tags_to_remove=None
     ):
         payload = {}
         if name:
@@ -241,8 +249,22 @@ class Dataset(Base):
             payload["publicAccessLevel"] = public_access_level
         if description is not None:
             payload["description"] = description
+        if methodology_markdown is not None:
+            payload["methodologyMarkdown"] = methodology_markdown
+        if usage_markdown is not None:
+            payload["usageMarkdown"] = usage_markdown
         if labels is not None:
             payload["labels"] = labels
+        if labels_to_add is not None:
+            payload["labelsToAdd"] = labels_to_add
+        if labels_to_remove is not None:
+            payload["labelsToRemove"] = labels_to_remove
+        if tags is not None:
+            payload["tags"] = tags
+        if tags_to_add is not None:
+            payload["tagsToAdd"] = tags_to_add
+        if tags_to_remove is not None:
+            payload["tagsToRemove"] = tags_to_remove
 
         res = make_request(
             method="PATCH",

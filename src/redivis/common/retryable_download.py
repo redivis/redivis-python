@@ -367,8 +367,13 @@ async def _parallel_download_worker(
             "Authorization": f"Bearer {get_auth_token()}",
             "User-Agent": __get_user_agent(),
         },
-        timeout=(60, None),
-        pool_connections=1,
+        # A read timeout ensures a stalled stream raises and is retried
+        # (resuming via Range when supported) rather than hanging forever.
+        timeout=(60, 120),
+        # Downloads may 302 to a second host (e.g. a GCS signed URL). With a
+        # single pool slot, concurrent requests to the two hosts deadlock
+        # waiting on each other's pool to go idle.
+        pool_connections=10,
         pool_maxsize=max_concurrency,
     ) as client:
         tasks = [

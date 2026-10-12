@@ -1,4 +1,4 @@
-from .Table import Table
+from .Table import Table, resolve_table_for_write
 from .Base import Base
 from ..common import exceptions
 from ..common.api_request import make_request
@@ -130,6 +130,7 @@ class Notebook(Base):
             payload["name"] = name
         if source_table is not None:
             if isinstance(source_table, Table):
+                resolve_table_for_write(source_table)
                 payload["sourceTable"] = source_table.qualified_reference
             else:
                 payload["sourceTable"] = source_table

@@ -1,5 +1,6 @@
 from urllib.parse import quote as quote_uri
 import os
+import re
 import time
 import glob
 import concurrent.futures
@@ -27,10 +28,12 @@ class Table(TabularReader):
         if len(name.split(".")) != 3:
             dataset, workflow = get_table_parents(dataset, workflow)
 
+        is_workflow_table = False
         if dataset:
             reference_scope = f"{dataset.qualified_reference}."
         elif workflow:
             reference_scope = f"{workflow.qualified_reference}."
+            is_workflow_table = True
         elif len(name.split(".")) == 3:
             from .Dataset import Dataset
             from .Workflow import Workflow
@@ -62,7 +65,12 @@ class Table(TabularReader):
             if "scopedReference" in (properties or {})
             else self.name
         )
-        self.uri = f"/tables/{quote_uri(self.qualified_reference, '')}"
+        if is_workflow_table:
+            # Tables are resolved within their workflow, which also finds tables
+            # inherited through the workflow's datasources
+            self.uri = f"{workflow.uri}/tables/{quote_uri(self.scoped_reference, '')}"
+        else:
+            self.uri = f"/tables/{quote_uri(self.qualified_reference, '')}"
         self.properties = properties
 
     def __repr__(self):
@@ -300,6 +308,7 @@ class Table(TabularReader):
 
 
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
+        resolve_table_for_write(self)
         payload = {}
         if name:
             payload["name"] = name
@@ -317,6 +326,7 @@ class Table(TabularReader):
         return self
 
     def update_variables(self, variables):
+        resolve_table_for_write(self)
         make_request(
             method="PATCH",
             path=f"{self.uri}/variables",
@@ -348,6 +358,19 @@ def get_table_parents(dataset, workflow):
             )
         ), None
     return None, None
+
+
+def is_workflow_scoped_uri(uri):
+    return re.match(r"^/workflows/[^/]+/tables/", uri) is not None
+
+
+# A workflow-scoped table URI (/workflows/:workflow/tables/:table) can also
+# resolve tables inherited through the workflow's datasources. Writes must never
+# go through it, since that would make it easy to unintentionally modify a table
+# outside of the workflow, so tables are fetched to get their canonical URI first.
+def resolve_table_for_write(table):
+    if is_workflow_scoped_uri(table.uri):
+        table.get()
 
 
 def update_properties(instance, properties):
