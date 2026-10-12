@@ -57,13 +57,13 @@ class Dataset(Base):
             if version_search:
                 version = version_search[1]
 
-        if (
-            version
-            and version != "current"
-            and version != "next"
-            and not version.lower().startswith("v")
-        ):
-            version = f"v{version}"
+        if version and version not in ("current", "next"):
+            if not re.fullmatch(r"[vV]?\d+[._]\d+", version):
+                raise exceptions.ValueError(
+                    f'Invalid version "{version}". Must be "current", "next", or a version tag of the form "v1.0" (or "1.0", "v1_0")'
+                )
+            if not version.lower().startswith("v"):
+                version = f"v{version}"
 
         self.version_tag = version
         self.scoped_reference = (properties or {}).get(
