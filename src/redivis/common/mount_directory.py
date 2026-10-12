@@ -57,6 +57,13 @@ EVICTION_TARGET = 0.9
 TEMPORARY_CACHE_PREFIX = "redivis_mount_cache_"
 TEMPORARY_CACHE_LOCK = ".lock"
 
+# A mounted directory never changes, so the kernel may keep what it learns about it (which paths
+# exist, their attributes, and the contents of files) for this long, rather than asking again after
+# libfuse's default of a second. Otherwise, a tool that regularly walks the whole tree (e.g. a
+# notebook's periodic file count) makes a call into Python for every file, competing with the
+# notebook's own code for the GIL. Keep in step with redivis-r's fuse_mount.c.
+KERNEL_CACHE_TIMEOUT_SECONDS = 86400
+
 
 class _BlockStream:
     """A single open-ended request for a file, read on a thread of its own that caches each block as
@@ -536,6 +543,16 @@ class RedivisFS(Operations):
         else:
             return node
 
+    def init_with_config(self, conn_info, config):
+        """Have the kernel cache the directory's metadata and contents (see KERNEL_CACHE_TIMEOUT_SECONDS).
+        The config is only given by libfuse 3."""
+        if config is None:
+            return
+        config.kernel_cache = 1
+        config.entry_timeout = KERNEL_CACHE_TIMEOUT_SECONDS
+        config.attr_timeout = KERNEL_CACHE_TIMEOUT_SECONDS
+        config.negative_timeout = KERNEL_CACHE_TIMEOUT_SECONDS
+
     def getattr(self, path, fh=None):
         """Get file attributes"""
         node = self._get_node(path)
@@ -564,6 +581,12 @@ class RedivisFS(Operations):
 
         return attrs
 
+    def opendir(self, path):
+        """Open a directory. Defined so that _FUSE.opendir() is called, to cache its listing."""
+        if not hasattr(self._get_node(path), "children"):
+            raise FuseOSError(errno.ENOTDIR)
+        return 0
+
     def readdir(self, path, fh):
         """List directory contents"""
         node = self._get_node(path)
@@ -571,12 +594,12 @@ class RedivisFS(Operations):
         if not hasattr(node, "children"):
             raise FuseOSError(errno.ENOTDIR)
 
-        entries = [".", ".."]
-        for child_name in node.children.keys():
-            entries.append(child_name)
-
-        for entry in entries:
-            yield entry
+        # Each entry's type is listed, so that e.g. `find -type f` needn't also stat every file
+        yield ".", {"st_mode": stat.S_IFDIR}, 0
+        yield "..", {"st_mode": stat.S_IFDIR}, 0
+        for child_name, child in node.children.items():
+            mode = stat.S_IFDIR if hasattr(child, "children") else stat.S_IFREG
+            yield child_name, {"st_mode": mode}, 0
 
     def open(self, path, flags):
         """Open a file"""
@@ -642,6 +665,22 @@ class RedivisFS(Operations):
             "f_bavail": 1000000,
             "f_bfree": 1000000,
         }
+
+
+class _FUSE(FUSE):
+    """mfusepy's FUSE, also having the kernel cache directory listings, which RedivisFS can't ask
+    for itself since mfusepy doesn't pass it the directory's fuse_file_info."""
+
+    def opendir(self, path, fip):
+        result = super().opendir(path, fip)
+        # Only libfuse 3.5+ has this, though some later releases (3.14, at least) don't pass it on
+        # to the kernel, and only Linux 4.20+ acts on it; keep_cache stops the kernel from
+        # discarding the cached listing whenever the directory is opened again. Keep in step with
+        # redivis-r's fuse_mount.c.
+        if hasattr(fip.contents, "cache_readdir"):
+            fip.contents.cache_readdir = 1
+            fip.contents.keep_cache = 1
+        return result
 
 
 def _fuse_options():
@@ -770,7 +809,7 @@ def _run_fuse_and_cleanup(fs, mount_path, remove_mount_dir, temporary_cache_dir=
     """Run the FUSE event loop, then remove the mount directory (if mount() created it) and a
     temporary cache when it exits."""
     try:
-        FUSE(
+        _FUSE(
             fs,
             str(mount_path),
             nothreads=False,

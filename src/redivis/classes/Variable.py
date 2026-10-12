@@ -61,6 +61,12 @@ class Variable(Base):
         return statistics
 
     def update(self, *, label=None, description=None, value_labels=None):
+        from .Table import is_workflow_scoped_uri, resolve_table_for_write
+
+        if self.table and is_workflow_scoped_uri(self.uri):
+            resolve_table_for_write(self.table)
+            self.uri = f"{self.table.uri}/variables/{self.name}"
+
         payload = {}
         if label is not None:
             payload["label"] = label

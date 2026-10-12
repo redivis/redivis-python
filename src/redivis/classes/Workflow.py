@@ -69,9 +69,10 @@ class Workflow(Base):
             for data_source in data_sources
         ]
 
-    def list_tables(self, *, max_results=None):
+    def list_tables(self, *, max_results=None, include_datasources=False):
         tables = make_paginated_request(
             path=f"{self.uri}/tables",
+            query={"includeDataSources": "true"} if include_datasources else {},
             page_size=100,
             max_results=max_results,
         )

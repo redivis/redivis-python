@@ -225,12 +225,12 @@ class Stream(io.BufferedIOBase):
             return self._get_response(True)
 
     def read(self, size=-1):
-        # urllib3 and urllib3-future interpret `read(size=-1)` differently. In 
-        # urllib3-future, this means read only the currently buffered data. In 
+        # urllib3 and urllib3-future interpret `read(size=-1)` differently. In
+        # urllib3-future, this means read only the currently buffered data. In
         # urllib3, this means the same as None --- read all the data (to EOF).
         # See https://github.com/jawah/urllib3.future/issues/429
         #
-        # `-1` and `None` behaving the same is python's contract for reading 
+        # `-1` and `None` behaving the same is python's contract for reading
         # files, so enforce it here.
         if size is not None and size < 0:
             size = None
@@ -251,6 +251,10 @@ class Stream(io.BufferedIOBase):
             return self.read(size)
 
     def read1(self, size=-1):
+        # read1() may return any number of bytes when size is -1, so return a single
+        # chunk rather than buffering the rest of the file into memory
+        if size is None or size < 0:
+            size = self._iter_chunk_size
         return self.read(size)
 
     def readall(self):
@@ -285,7 +289,9 @@ class Stream(io.BufferedIOBase):
         self._closed = True
 
     def readline(self, size=-1):
-        self._get_response()
+        r = self._get_response()
+        if not r:
+            return b""
         try:
             line = self.response.raw.readline(size)
             self.bytes_read += len(line)
@@ -300,17 +306,19 @@ class Stream(io.BufferedIOBase):
             return self.readline(size)
 
     def readlines(self, hint=-1):
-        self._get_response()
-        if hint is None:
-            hint = -1
+        # Per io.IOBase, stop once the lines read by this call total at least hint bytes;
+        # a hint of None or <= 0 means no limit
+        if hint is not None and hint <= 0:
+            hint = None
         lines = []
-        while (hint == -1 or self.bytes_read < hint) and not self._closed:
+        total_size = 0
+        while hint is None or total_size < hint:
             # Try/catch handled in self.readline()
             line = self.readline()
-            if line:
-                lines.append(self.readline())
-            else:
+            if not line:
                 break
+            lines.append(line)
+            total_size += len(line)
         return lines
 
     def seek(self, offset, whence=os.SEEK_SET):

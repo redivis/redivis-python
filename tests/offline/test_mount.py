@@ -6,10 +6,13 @@ These call the FUSE operations directly, so they need no FUSE installation.
 import base64
 import hashlib
 import os
+import stat
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from mfusepy import FuseOSError
 from redivis.classes.Directory import Directory
 from redivis.classes.File import File
 from redivis.common import mount_directory
@@ -210,6 +213,32 @@ def test_empty_file(api, table, tmp_path):
     assert api["raw_file_ranges"] == []
 
 
+def test_directory_listing_includes_each_entry_type(api, table, tmp_path):
+    fs = make_fs(api, table, tmp_path / "cache")
+    subdir = Directory(path="/sub", table=table, parent=fs.directory)
+    fs.directory.children["sub"] = subdir
+    entries = {name: attrs["st_mode"] for name, attrs, _ in fs.readdir("/", 0)}
+    assert entries == {
+        ".": stat.S_IFDIR,
+        "..": stat.S_IFDIR,
+        "data.bin": stat.S_IFREG,
+        "sub": stat.S_IFDIR,
+    }
+    assert fs.opendir("/sub") == 0
+    with pytest.raises(FuseOSError):
+        fs.opendir("/data.bin")
+
+
+def test_kernel_caches_metadata_and_contents(fs):
+    config = SimpleNamespace()
+    fs.init_with_config(None, config)
+    assert config.kernel_cache == 1
+    for timeout in ("entry_timeout", "attr_timeout", "negative_timeout"):
+        assert getattr(config, timeout) == mount_directory.KERNEL_CACHE_TIMEOUT_SECONDS
+    # libfuse 2 has no config
+    fs.init_with_config(None, None)
+
+
 @pytest.fixture
 def temp_dir(tmp_path, monkeypatch):
     """Where temporary caches are made"""
@@ -223,7 +252,7 @@ def test_temporary_cache_dir_is_removed_on_unmount(
     api, table, tmp_path, temp_dir, monkeypatch
 ):
     monkeypatch.setattr(
-        mount_directory, "FUSE", lambda fs, *args, **kwargs: read_all(fs)
+        mount_directory, "_FUSE", lambda fs, *args, **kwargs: read_all(fs)
     )
     temporary_cache_dir = mount_directory._TemporaryCacheDir()
     fs = make_fs(api, table, temporary_cache_dir.path)
@@ -297,7 +326,7 @@ def mount_in_foreground(table, mount_path, monkeypatch, tmp_path):
     mounted = []
     monkeypatch.setattr(
         mount_directory,
-        "FUSE",
+        "_FUSE",
         lambda fs, path, **kwargs: mounted.append(os.path.isdir(path)),
     )
     mount_directory.mount_directory(
