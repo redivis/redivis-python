@@ -141,7 +141,7 @@ class Workflow(Base):
     def notebook(self, name):
         return Notebook(name, workflow=self)
 
-    def transform(self, name):
+    def transform(self, name=None):
         return Transform(name, workflow=self)
 
     def parameter(self, name):

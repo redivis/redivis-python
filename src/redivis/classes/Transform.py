@@ -63,6 +63,25 @@ class Transform(Base):
             properties=self.properties["sourceTable"],
         )
 
+    def create(self, *, source_table, query=None):
+        payload = {"name": self.name}
+
+        if query is not None:
+            payload["query"] = query
+        if isinstance(source_table, Table):
+            resolve_table_for_write(source_table)
+            payload["sourceTable"] = source_table.qualified_reference
+        else:
+            payload["sourceTable"] = source_table
+
+        response = make_request(
+            method="POST",
+            path=f"{self.workflow.uri}/transforms",
+            payload=payload,
+        )
+        update_properties(self, response)
+        return self
+
     def update(self, *, name=None, source_table=None, query=None):
         payload = {}
 
@@ -145,3 +164,11 @@ class Transform(Base):
             path=f"{self.uri}/cancel",
         )
         self.uri = self.properties["uri"]
+
+
+def update_properties(instance, properties):
+    instance.properties = properties
+    instance.qualified_reference = properties["qualifiedReference"]
+    instance.scoped_reference = properties["scopedReference"]
+    instance.name = properties["name"]
+    instance.uri = properties["uri"]

@@ -64,7 +64,7 @@ class Parameter(Base):
         if values is not None:
             payload["values"] = values
 
-        self.properties = make_request(path=self.uri, method="PATCH")
+        self.properties = make_request(path=self.uri, method="PATCH", payload=payload)
         self.uri = self.properties["uri"]
         return self
 
