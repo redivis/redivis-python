@@ -5,6 +5,7 @@ import warnings
 from .Query import Query
 from .Base import Base
 from urllib.parse import quote as quote_uri
+from ..common.util import split_reference
 import re
 
 from ..common import exceptions
@@ -25,9 +26,8 @@ class Dataset(Base):
             from .User import User
             from .Organization import Organization
 
-            if len(name.split(".")) == 2:
-                username = name.split(".")[0]
-                name = name.split(".")[1]
+            if len(split_reference(name)) == 2:
+                username, name = split_reference(name)
                 organization = Organization(username)
                 user = User(username)
             elif os.getenv("REDIVIS_DEFAULT_USER"):
@@ -96,9 +96,9 @@ class Dataset(Base):
     def create(self, *, public_access_level="none", description=None):
         self._rectify_ambiguous_owner()
         if self.organization:
-            path = f"/organizations/{self.organization.name}/datasets"
+            path = f"{self.organization.uri}/datasets"
         else:
-            path = f"/users/{self.user.name}/datasets"
+            path = f"{self.user.uri}/datasets"
 
         properties = make_request(
             method="POST",
@@ -199,14 +199,12 @@ class Dataset(Base):
         return Version(tag, dataset=self)
 
     def previous_version(self):
-        if not self.version_tag:
-            self.get()
-        return Version(self.version_tag, dataset=self).previous_version().dataset()
+        version = self.version().previous_version()
+        return version.dataset() if version else None
 
     def next_version(self):
-        if not self.version_tag:
-            self.get()
-        return Version(self.version_tag, dataset=self).next_version().dataset()
+        version = self.version().next_version()
+        return version.dataset() if version else None
 
     def table(self, name):
         return Table(name, dataset=self)
@@ -288,4 +286,7 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
+    if (properties.get("version") or {}).get("tag"):
+        # In the form used in references (v1_0, rather than v1.0)
+        instance.version_tag = properties["version"]["tag"].replace(".", "_")
     instance._rectify_ambiguous_owner()

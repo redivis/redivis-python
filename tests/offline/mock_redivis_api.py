@@ -59,6 +59,8 @@ def reset():
             "require_auth": False,
             # Return 503 for the next N requests
             "fail_503": 0,
+            # Drop the connection, without responding, for the next N requests
+            "drop_connection": 0,
             # Queued responses for the next requests, as (status, body). A status
             # of None lets that request through to the normal handler.
             "response_script": [],
@@ -77,6 +79,18 @@ def reset():
             # Everything received, as (method, path, query, had_authorization)
             "requests": [],
             "post_body_lengths": [],
+            # The JSON bodies received, as (method, path, body)
+            "json_bodies": [],
+            # The bodies uploaded to temp storage, by path
+            "temp_storage": {},
+            # The variables listed for the table, if not VARIABLES
+            "variables": None,
+            # The table's file index, as rows of file_id, file_name, and alt_name (a
+            # second name variable)
+            "file_index": [],
+            # Respond 304 Not Modified to listings of the file index that send If-
+            # Modified-Since
+            "file_index_unchanged": True,
         }
     )
 
@@ -154,6 +168,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         self._handle("PATCH")
 
+    def do_DELETE(self):
+        self._handle("DELETE")
+
+    def do_PUT(self):
+        self._handle("PUT")
+
     def _send(self, body, *, status=200, content_type="application/json"):
         if not isinstance(body, bytes):
             body = json.dumps(body).encode()
@@ -202,6 +222,11 @@ class Handler(BaseHTTPRequestHandler):
         """Apply any injected failures, returning True if a response was sent."""
         STATE["requests"].append((method, path, query, "Authorization" in self.headers))
 
+        if STATE["drop_connection"]:
+            STATE["drop_connection"] -= 1
+            self.close_connection = True
+            return True
+
         if STATE["fail_503"]:
             STATE["fail_503"] -= 1
             self._send(
@@ -241,6 +266,8 @@ class Handler(BaseHTTPRequestHandler):
         query = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
         if method in ("POST", "PATCH"):
             STATE["post_body_lengths"].append(len(body))
+            if self.headers.get("Content-Type", "").startswith("application/json"):
+                STATE["json_bodies"].append((method, path, json.loads(body or "null")))
 
         if self._intercepted(method, path, query):
             return
@@ -275,6 +302,26 @@ class Handler(BaseHTTPRequestHandler):
                         "numRows": num_rows,
                     }
                 )
+            if path.endswith("/tempUploads"):
+                temp_uploads = json.loads(body)["tempUploads"]
+                return self._send(
+                    {
+                        "results": [
+                            {
+                                "id": f"temp-{i}",
+                                # A signed URL, served by this mock (see the PUT
+                                # handler)
+                                "url": f"http://{self.headers['Host']}/tempStorage/{i}",
+                                "resumable": False,
+                            }
+                            for i, _ in enumerate(temp_uploads)
+                        ]
+                    }
+                )
+            if path.endswith("/uploads"):
+                return self._send(
+                    {"uri": "/uploads/u1", "name": "My Upload", "status": "queued"}
+                )
             if path.endswith("/exports"):
                 return self._send(
                     {
@@ -291,8 +338,29 @@ class Handler(BaseHTTPRequestHandler):
         if method == "PATCH":
             return self._send({"ok": True})
 
+        if method == "PUT" and path.startswith("/tempStorage/"):
+            STATE["temp_storage"][path] = body
+            return self._send(b"", content_type="text/plain")
+
         if path.endswith("/variables"):
-            return self._send({"results": VARIABLES, "nextPageToken": None})
+            return self._send(
+                {"results": STATE["variables"] or VARIABLES, "nextPageToken": None}
+            )
+
+        if path.endswith("/rawFiles"):
+            if STATE["file_index_unchanged"] and self.headers.get("If-Modified-Since"):
+                return self._send(b"", status=304)
+            name_variable = query.get("fileNameVariable", "file_name")
+            listing = pyarrow.table(
+                {
+                    "file_id": [f["file_id"] for f in STATE["file_index"]],
+                    name_variable: [f[name_variable] for f in STATE["file_index"]],
+                }
+            )
+            sink = io.BytesIO()
+            with pyarrow.ipc.new_stream(sink, listing.schema) as writer:
+                writer.write_table(listing)
+            return self._send_arrow(sink.getvalue())
 
         if path.startswith("/api/v1/rawFiles/"):
             return self._send_raw_file(urllib.parse.unquote(path.rsplit("/", 1)[1]))

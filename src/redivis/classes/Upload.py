@@ -61,6 +61,7 @@ class Upload(TabularReader):
             path=self.uri,
         )
         self.uri = self.properties["uri"]
+        return self
 
     def insert_rows(self, rows):
         response = make_request(
@@ -70,7 +71,7 @@ class Upload(TabularReader):
         )
         return response
 
-    def list_variables(self, *, max_results=10000):
+    def list_variables(self, *, max_results=None):
         variables = make_paginated_request(
             path=f"{self.uri}/variables", page_size=1000, max_results=max_results
         )
@@ -138,168 +139,183 @@ class Upload(TabularReader):
                 "`content` argument was a string, but is an invalid file path. To upload data as content, make sure that the `content` argument is provided as binary data."
             )
 
-        if isinstance(content, str) or isinstance(content, pathlib.PurePath):
-            did_reopen_file = True
-            content = open(content, "rb")
-
-        if hasattr(content, "name") and not self.name:
-            self.name = pathlib.Path(content.name).name
-
-        if content is not None and not hasattr(content, "read"):
-            if isinstance(content, (bytes, bytearray)):
-                size = len(content)
-                content = io.BytesIO(content)
-            else:
-                tempfile_to_remove = convert_data_to_parquet(content)
-                did_reopen_file = True
-                type = "parquet"
-                content = open(tempfile_to_remove, "rb")
-
-        if content is not None and (
-            (
-                isinstance(content, io.IOBase)
-                and (
-                    not hasattr(content, "name")
-                    or os.stat(content.name).st_size > MAX_SIMPLE_UPLOAD_SIZE
-                )
-            )
-            or (hasattr(content, "__len__") and len(content) > MAX_SIMPLE_UPLOAD_SIZE)
-        ):
-            pbar_bytes = None
-            # If file isn't in binary mode, we need to reopen, otherwise uploading of non-text files will fail
-            if hasattr(content, "mode") and "b" not in content.mode:
-                content = open(content.name, "rb")
-                did_reopen_file = True
-
-            if size is None:
-                size = os.stat(content.name).st_size
-
-            if progress:
-                pbar_bytes = tqdm(
-                    total=size, unit="B", leave=False, unit_scale=True, mininterval=0.1
-                )
-
-            res = make_request(
-                method="POST",
-                path=f"{self.table.uri}/tempUploads",
-                payload={
-                    "tempUploads": [
-                        {
-                            "size": size,
-                            "name": self.name or str(uuid.uuid4()),
-                            "resumable": size >= MIN_RESUMABLE_UPLOAD_SIZE,
-                        }
-                    ]
-                },
-            )
-            temp_upload = res["results"][0]
-            if temp_upload["resumable"]:
-                perform_resumable_upload(
-                    data=content,
-                    size=size,
-                    progressbar=pbar_bytes,
-                    temp_upload_url=temp_upload["url"],
-                )
-            else:
-                perform_standard_upload(
-                    data=content,
-                    temp_upload_url=temp_upload["url"],
-                    progressbar=pbar_bytes,
-                )
-
-            if did_reopen_file:
-                content.close()
-            if progress:
-                pbar_bytes.close()
-            if tempfile_to_remove is not None:
-                os.remove(tempfile_to_remove)
-
-            temp_upload_id = temp_upload["id"]
-            content = None
-
-        if schema and type != "stream":
-            warnings.warn(
-                "The schema option is ignored for uploads that aren't of type `stream`"
-            )
-
-        exists = False
-
-        if self.name != "":
-            if self.properties is None or "uri" not in self.properties:
-                self.uri = f"{self.table.uri}/uploads/{quote_uri(self.name.replace('.', '_'), '')}"
-            exists = self.exists()
-
-        if if_not_exists and exists:
-            return self
-
         if replace_on_conflict is True and rename_on_conflict is True:
             raise exceptions.ValueError(
                 "Invalid parameters. replace_on_conflict and rename_on_conflict cannot both be True."
             )
 
-        if exists:
-            if replace_on_conflict is True:
-                self.delete()
-            elif rename_on_conflict is not True:
-                raise exceptions.ValueError(
-                    f"An upload with the name {self.name} already exists on this version of the table. If you want to upload this file anyway, set the parameter rename_on_conflict=True or replace_on_conflict=True."
-                )
+        if not self.name:
+            if isinstance(content, (str, pathlib.PurePath)):
+                self.name = pathlib.Path(content).name
+            elif hasattr(content, "name") and isinstance(content.name, str):
+                self.name = pathlib.Path(content.name).name
 
-        files = None
-        payload = {
-            "name": self.name,
-            "type": type,
-            "schema": schema,
-            "metadata": metadata,
-            "hasHeaderRow": has_header_row,
-            "skipBadRecords": skip_bad_records,
-            "hasQuotedNewlines": has_quoted_newlines,
-            "allowJaggedRows": allow_jagged_rows,
-            "quoteCharacter": quote_character,
-            "escapeCharacter": escape_character,
-            "nullMarkers": null_markers,
-            "delimiter": delimiter,
-            "tempUploadId": temp_upload_id,
-            "transferSpecification": transfer_specification,
-        }
-
-        if content is not None:
-            files = {"metadata": json.dumps(payload), "data": content}
-            payload = None
-
-        response = make_request(
-            method="POST",
-            path=f"{self.table.uri}/uploads",
-            parse_payload=content is None,
-            payload=payload,
-            files=files,
-        )
-        self.properties = response
-        self.uri = self.properties["uri"]
+        # Check for a conflicting upload before uploading anything
+        if self.name != "":
+            if self.properties is None or "uri" not in self.properties:
+                self.uri = f"{self.table.uri}/uploads/{quote_uri(self.name.replace('.', '_'), '')}"
+            if self.exists():
+                if if_not_exists:
+                    return self
+                elif replace_on_conflict is True:
+                    self.delete()
+                elif rename_on_conflict is not True:
+                    raise exceptions.ValueError(
+                        f"An upload with the name {self.name} already exists on this version of the table. If you want to upload this file anyway, set the parameter rename_on_conflict=True or replace_on_conflict=True."
+                    )
 
         try:
-            if (
-                content or temp_upload_id or transfer_specification
-            ) and wait_for_finish:
-                while True:
-                    time.sleep(2)
-                    self.get()
-                    if (
-                        self.properties["status"] == "completed"
-                        or self.properties["status"] == "failed"
-                    ):
-                        if self.properties["status"] == "failed" and raise_on_fail:
-                            raise exceptions.JobError(
-                                message=self.properties.get("errorMessage"),
-                                status=self.properties.get("status"),
-                                kind=self.properties.get("kind"),
-                            )
-                        break
+            if isinstance(content, str) or isinstance(content, pathlib.PurePath):
+                did_reopen_file = True
+                content = open(content, "rb")
+
+            if content is not None and not hasattr(content, "read"):
+                if isinstance(content, (bytes, bytearray)):
+                    size = len(content)
+                    content = io.BytesIO(content)
+                else:
+                    tempfile_to_remove = convert_data_to_parquet(content)
+                    did_reopen_file = True
+                    type = "parquet"
+                    content = open(tempfile_to_remove, "rb")
+
+            if content is not None and (
+                (
+                    isinstance(content, io.IOBase)
+                    and (
+                        not hasattr(content, "name")
+                        or os.stat(content.name).st_size > MAX_SIMPLE_UPLOAD_SIZE
+                    )
+                )
+                or (
+                    hasattr(content, "__len__")
+                    and len(content) > MAX_SIMPLE_UPLOAD_SIZE
+                )
+            ):
+                pbar_bytes = None
+                # If file isn't in binary mode, we need to reopen, otherwise uploading
+                # of non-text files will fail
+                if hasattr(content, "mode") and "b" not in content.mode:
+                    if did_reopen_file:
+                        content.close()
+                    content = open(content.name, "rb")
+                    did_reopen_file = True
+
+                if size is None:
+                    size = os.stat(content.name).st_size
+
+                if progress:
+                    pbar_bytes = tqdm(
+                        total=size,
+                        unit="B",
+                        leave=False,
+                        unit_scale=True,
+                        mininterval=0.1,
+                    )
+
+                res = make_request(
+                    method="POST",
+                    path=f"{self.table.uri}/tempUploads",
+                    payload={
+                        "tempUploads": [
+                            {
+                                "size": size,
+                                "name": self.name or str(uuid.uuid4()),
+                                "resumable": size >= MIN_RESUMABLE_UPLOAD_SIZE,
+                            }
+                        ]
+                    },
+                )
+                temp_upload = res["results"][0]
+                try:
+                    if temp_upload["resumable"]:
+                        perform_resumable_upload(
+                            data=content,
+                            size=size,
+                            progressbar=pbar_bytes,
+                            temp_upload_url=temp_upload["url"],
+                        )
                     else:
-                        logging.debug("Upload is still in progress...")
-        except Exception:
-            if remove_on_fail and self.properties["status"] == "failed":
-                self.delete()
-            raise
+                        perform_standard_upload(
+                            data=content,
+                            temp_upload_url=temp_upload["url"],
+                            progressbar=pbar_bytes,
+                        )
+                finally:
+                    if pbar_bytes is not None:
+                        pbar_bytes.close()
+
+                temp_upload_id = temp_upload["id"]
+                if did_reopen_file:
+                    content.close()
+                content = None
+
+            if schema and type != "stream":
+                warnings.warn(
+                    "The schema option is ignored for uploads that aren't of type `stream`"
+                )
+
+            files = None
+            payload = {
+                "name": self.name,
+                "type": type,
+                "schema": schema,
+                "metadata": metadata,
+                "hasHeaderRow": has_header_row,
+                "skipBadRecords": skip_bad_records,
+                "hasQuotedNewlines": has_quoted_newlines,
+                "allowJaggedRows": allow_jagged_rows,
+                "quoteCharacter": quote_character,
+                "escapeCharacter": escape_character,
+                "nullMarkers": null_markers,
+                "delimiter": delimiter,
+                "tempUploadId": temp_upload_id,
+                "transferSpecification": transfer_specification,
+            }
+
+            if content is not None:
+                files = {"metadata": json.dumps(payload), "data": content}
+                payload = None
+
+            response = make_request(
+                method="POST",
+                path=f"{self.table.uri}/uploads",
+                parse_payload=content is None,
+                payload=payload,
+                files=files,
+            )
+            self.properties = response
+            self.uri = self.properties["uri"]
+            is_small_upload = content is not None
+        finally:
+            # Small content is sent with the request above, so any file is only closed
+            # once it's been made
+            if did_reopen_file and content is not None:
+                content.close()
+            if tempfile_to_remove is not None:
+                os.remove(tempfile_to_remove)
+
+        if (
+            is_small_upload or temp_upload_id or transfer_specification
+        ) and wait_for_finish:
+            while True:
+                time.sleep(2)
+                self.get()
+                status = self.properties["status"]
+                if status == "completed":
+                    break
+                elif status == "failed":
+                    error = exceptions.JobError(
+                        message=self.properties.get("errorMessage"),
+                        status=status,
+                        kind=self.properties.get("kind"),
+                    )
+                    if remove_on_fail:
+                        self.delete()
+                    if raise_on_fail:
+                        raise error
+                    break
+                else:
+                    logging.debug("Upload is still in progress...")
 
         return self

@@ -4,10 +4,8 @@ from ..common.api_request import make_request
 from .Table import Table, resolve_table_for_write
 import os
 from urllib.parse import quote as quote_uri
-import time
-import logging
 import warnings
-from ..common.util import get_warning
+from ..common.util import get_warning, split_reference, wait_for_run
 
 
 class Transform(Base):
@@ -15,9 +13,10 @@ class Transform(Base):
         from .Workflow import Workflow  # avoid circular import
 
         if not workflow:
-            if len(name.split(".")) == 3:
-                workflow = Workflow(".".join(name.split(".")[0:2]))
-                name = name.split(".")[-1]
+            if name is not None and len(split_reference(name)) == 3:
+                parts = split_reference(name)
+                workflow = Workflow(".".join(parts[0:2]))
+                name = parts[-1]
             elif os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
                 workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
             else:
@@ -31,12 +30,23 @@ class Transform(Base):
         self.workflow = workflow
         self.name = name
 
+        # A transform without a name (yet) is named by the API when it's created
         self.qualified_reference = (properties or {}).get(
-            "qualifiedReference", f"{self.workflow.qualified_reference}.{self.name}"
+            "qualifiedReference",
+            (
+                f"{self.workflow.qualified_reference}.{self.name}"
+                if self.name is not None
+                else None
+            ),
         )
         self.scoped_reference = (properties or {}).get("scopedReference", self.name)
         self.uri = (properties or {}).get(
-            "uri", f"/transforms/{quote_uri(self.qualified_reference, '')}"
+            "uri",
+            (
+                f"/transforms/{quote_uri(self.qualified_reference, '')}"
+                if self.qualified_reference is not None
+                else None
+            ),
         )
         self.properties = properties
 
@@ -64,8 +74,9 @@ class Transform(Base):
         )
 
     def create(self, *, source_table, query=None):
-        payload = {"name": self.name}
-
+        payload = {}
+        if self.name is not None:
+            payload["name"] = self.name
         if query is not None:
             payload["query"] = query
         if isinstance(source_table, Table):
@@ -136,25 +147,7 @@ class Transform(Base):
         self.uri = self.properties["uri"]
 
         if wait_for_finish:
-            while True:
-                time.sleep(2)
-                self.get()
-                current_job = self.properties.get("currentJob") or self.properties.get(
-                    "lastRunJob"
-                )
-                if current_job and current_job["status"] in [
-                    "completed",
-                    "failed",
-                ]:
-                    if current_job["status"] == "failed":
-                        raise exceptions.JobError(
-                            message=current_job.get("errorMessage"),
-                            status=current_job.get("status"),
-                            kind=current_job.get("kind"),
-                        )
-                    break
-                else:
-                    logging.debug("Transform is still in progress...")
+            wait_for_run(self, self.properties)
 
         return self
 
@@ -164,6 +157,7 @@ class Transform(Base):
             path=f"{self.uri}/cancel",
         )
         self.uri = self.properties["uri"]
+        return self
 
 
 def update_properties(instance, properties):

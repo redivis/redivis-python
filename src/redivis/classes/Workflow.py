@@ -8,6 +8,7 @@ from .Transform import Transform
 
 from .Base import Base
 from urllib.parse import quote as quote_uri
+from ..common.util import split_reference
 
 from ..common import exceptions
 from ..common.api_request import make_request, make_paginated_request
@@ -19,9 +20,8 @@ class Workflow(Base):
         from .Organization import Organization  # avoid circular import
 
         if not user and not organization:
-            if len(name.split(".")) == 2:
-                username = name.split(".")[0]
-                name = name.split(".")[1]
+            if len(split_reference(name)) == 2:
+                username, name = split_reference(name)
                 organization = Organization(username)
                 user = User(username)
             elif os.getenv("REDIVIS_DEFAULT_USER"):
@@ -37,7 +37,7 @@ class Workflow(Base):
             user = User(user)
 
         if isinstance(organization, str):
-            organization = Organization(user)
+            organization = Organization(organization)
 
         self.user = user
         self.organization = organization

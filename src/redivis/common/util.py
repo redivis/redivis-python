@@ -1,9 +1,12 @@
 import os
+import re
 import tempfile
+import time
 import atexit
 import shutil
 import pathlib
 import uuid
+import logging
 
 from ..common import exceptions
 
@@ -17,6 +20,44 @@ def get_warning(kind):
         return "The source_tables() method has been renamed to referenced_tables(); please use this instead. This method will be removed in the future."
     else:
         return "WARNING"
+
+
+def split_reference(reference):
+    """Splits a reference like `owner.dataset:v1_0.table` into its dot-separated parts.
+
+    A version tag can also be written with a dot (`:v1.0`), so it's first normalized
+    to the equivalent underscore form.
+    """
+    return re.sub(r":v(\d+)\.(\d+)", r":v\1_\2", reference).split(".")
+
+
+def wait_for_run(instance, run_properties):
+    """Waits for a transform or notebook run, given the response to starting it.
+
+    Raises a JobError if the run fails or is cancelled.
+    """
+    job_id = (run_properties.get("currentJob") or {}).get("id")
+    while True:
+        time.sleep(2)
+        instance.get()
+        jobs = [
+            instance.properties.get("currentJob"),
+            instance.properties.get("lastRunJob"),
+        ]
+        if job_id:
+            # Track the job this run started, rather than whichever is most recent
+            job = next((j for j in jobs if j and j.get("id") == job_id), None)
+        else:
+            job = jobs[0] or jobs[1]
+        if job and job["status"] in ["completed", "failed", "cancelled"]:
+            if job["status"] != "completed":
+                raise exceptions.JobError(
+                    message=job.get("errorMessage"),
+                    status=job.get("status"),
+                    kind=job.get("kind"),
+                )
+            return
+        logging.debug("Job is still in progress...")
 
 
 created_temp_dir = None

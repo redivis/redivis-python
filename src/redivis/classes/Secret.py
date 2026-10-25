@@ -1,5 +1,6 @@
 from .Base import Base
 from ..common.api_request import make_request
+from urllib.parse import quote as quote_uri
 
 
 class Secret(Base):
@@ -10,7 +11,7 @@ class Secret(Base):
 
         base_path = user.uri if user else organization.uri
 
-        self.uri = f"{base_path}/secrets/{name}"
+        self.uri = f"{base_path}/secrets/{quote_uri(name, '')}"
         self.properties = None
 
     def __repr__(self):

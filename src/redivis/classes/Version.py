@@ -55,10 +55,12 @@ class Version(Base):
     def delete(self):
         self.properties = make_request(method="DELETE", path=self.uri)
         self.uri = self.properties["uri"]
+        return self
 
     def undelete(self):
         self.properties = make_request(method="POST", path=f"{self.uri}/undelete")
         self.uri = self.properties["uri"]
+        return self
 
     def previous_version(self):
         if "previousVersion" not in (self.properties or {}):
@@ -85,7 +87,7 @@ class Version(Base):
         from .Dataset import Dataset
 
         return Dataset(
-            self._dataset.scopedReference,
+            self._dataset.scoped_reference,
             organization=self._dataset.organization,
             user=self._dataset.user,
             version=self.tag,

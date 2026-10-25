@@ -42,7 +42,18 @@ def make_request(
     )
 
     logging.debug(f"Making API '{method}' request to '{args['url']}'")
-    r = requests.request(**args)
+    try:
+        r = requests.request(**args)
+    except (requests.ConnectionError, requests.Timeout):
+        # Retry a request that failed to connect (or timed out) with backoff. Only
+        # idempotent requests are safe to repeat, since we can't know whether the server
+        # received the original.
+        if method.upper() in ("GET", "HEAD") and retry_count < 10:
+            logging.debug("Request failed to connect, retrying...")
+            time.sleep(retry_count)
+            original_parameters["retry_count"] = retry_count + 1
+            return make_request(**original_parameters)
+        raise
 
     return process_request_response(r, parse_response, method, original_parameters)
 

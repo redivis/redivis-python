@@ -100,11 +100,12 @@ class File(Base):
         )
 
     def read(self, *, as_text=False, start_byte=0, end_byte=None):
+        start_byte = int(start_byte or 0)
         range_headers = {}
-        if end_byte:
-            range_headers["Range"] = f"bytes={int(start_byte)}-{int(end_byte)}"
+        if end_byte is not None:
+            range_headers["Range"] = f"bytes={start_byte}-{int(end_byte)}"
         elif start_byte:
-            range_headers["Range"] = f"bytes={int(start_byte)}-"
+            range_headers["Range"] = f"bytes={start_byte}-"
 
         r = make_request(
             method="GET",
@@ -112,6 +113,12 @@ class File(Base):
             parse_response=False,
             headers=range_headers,
         )
+        if range_headers and r.status_code != 206:
+            # The server ignored the range and sent the whole file
+            content = r.content[
+                start_byte : int(end_byte) + 1 if end_byte is not None else None
+            ]
+            return content.decode(r.encoding or "utf-8") if as_text else content
         if as_text:
             return r.text
         else:
@@ -123,7 +130,7 @@ class File(Base):
             FutureWarning,
             stacklevel=2,
         )
-        return self.open(start_byte=start_byte, end_byte=end_byte)
+        return self.open("rb", start_byte=start_byte, end_byte=end_byte)
 
     def open(self, mode="r", encoding="utf-8", *, start_byte=0, end_byte=None):
         if mode not in ("r", "rb", "rt"):
@@ -135,7 +142,7 @@ class File(Base):
             mode = "r"
         if start_byte:
             start_byte = int(start_byte)
-        if end_byte:
+        if end_byte is not None:
             end_byte = int(end_byte)
 
         if mode == "r":
@@ -190,7 +197,7 @@ class Stream(io.BufferedIOBase):
                 # Don't attempt to read past the last byte; this will raise an error from the Redivis API
                 return None
 
-            if self.end_byte:
+            if self.end_byte is not None:
                 range_headers["Range"] = f"bytes={start_byte}-{self.end_byte}"
             elif start_byte:
                 range_headers["Range"] = f"bytes={start_byte}-"

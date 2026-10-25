@@ -4,6 +4,7 @@ from ..common import exceptions
 
 from .Base import Base
 from ..common.api_request import make_request
+from urllib.parse import quote as quote_uri
 
 
 class Variable(Base):
@@ -24,11 +25,11 @@ class Variable(Base):
         if "uri" in (properties or {}):
             self.uri = properties["uri"]
         elif table:
-            self.uri = f"{table.uri}/variables/{self.name}"
+            self.uri = f"{table.uri}/variables/{quote_uri(self.name, '')}"
         elif upload:
-            self.uri = f"{upload.uri}/variables/{self.name}"
+            self.uri = f"{upload.uri}/variables/{quote_uri(self.name, '')}"
         else:
-            self.uri = f"{query.uri}/variables/{self.name}"
+            self.uri = f"{query.uri}/variables/{quote_uri(self.name, '')}"
 
         self.properties = properties
 
@@ -65,7 +66,7 @@ class Variable(Base):
 
         if self.table and is_workflow_scoped_uri(self.uri):
             resolve_table_for_write(self.table)
-            self.uri = f"{self.table.uri}/variables/{self.name}"
+            self.uri = f"{self.table.uri}/variables/{quote_uri(self.name, '')}"
 
         payload = {}
         if label is not None:

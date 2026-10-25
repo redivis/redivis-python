@@ -5,6 +5,7 @@ from ..common.api_request import make_request
 
 from urllib.parse import quote as quote_uri
 import os
+import re
 
 
 class Datasource(Base):
@@ -136,25 +137,35 @@ class Datasource(Base):
                     raise exceptions.ValueError(
                         "Versions are not applicable to datasources that reference a workflow"
                     )
+            else:
+                # Keep the existing sample setting, unless it's being changed
+                is_sample = (
+                    sample
+                    if sample is not None
+                    else re.search(r":sample\b", source_dataset) is not None
+                )
+                source_dataset = re.sub(r":sample\b", "", source_dataset)
 
-        if isinstance(version, Version):
-            version = version.tag
+                if version is not None:
+                    if isinstance(version, Version):
+                        version = version.tag
+                    source_dataset = Dataset(
+                        source_dataset, version=version
+                    ).qualified_reference
 
-        source_dataset = Dataset(source_dataset, version=version).qualified_reference
+                if is_sample:
+                    source_dataset += ":sample"
 
-        if sample == False:
-            source_dataset.replace(":sample", "")
-        elif sample == True and not ":sample" in source_dataset:
-            source_dataset += ":sample"
-
+        payload = {
+            "sourceDataset": source_dataset,
+            "sourceWorkflow": source_workflow,
+            "mappedTables": mapped_tables,
+        }
         self.properties = make_request(
             method="PATCH",
             path=self.uri,
-            payload={
-                "sourceDataset": source_dataset,
-                "sourceWorkflow": source_workflow,
-                "mappedTables": mapped_tables,
-            },
+            # Only change what was specified
+            payload={key: value for key, value in payload.items() if value is not None},
         )
         self.uri = self.properties["uri"]
 

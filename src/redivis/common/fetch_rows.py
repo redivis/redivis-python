@@ -203,7 +203,9 @@ class RedivisArrowIterator:
                 self.variables_in_stream = list(
                     map(
                         lambda field_name: next(
-                            x for x in self.mapped_variables if x["name"] == field_name
+                            x
+                            for x in self.mapped_variables
+                            if x["name"].lower() == field_name.lower()
                         ),
                         self.current_record_batch_reader.schema.names,
                     )
@@ -218,14 +220,16 @@ class RedivisArrowIterator:
             self.fields_to_add = []
 
             if self.mapped_variables is not None:
-                reader_names = self.current_record_batch_reader.schema.names
+                reader_names_lower = [
+                    n.lower() for n in self.current_record_batch_reader.schema.names
+                ]
 
-                for i, field_name in enumerate(reader_names):
+                for i, field_name in enumerate(reader_names_lower):
                     mapped_index = next(
                         (
                             j
                             for j, v in enumerate(self.mapped_variables)
-                            if v["name"] == field_name
+                            if v["name"].lower() == field_name
                         ),
                         None,
                     )
@@ -234,7 +238,9 @@ class RedivisArrowIterator:
                         break
 
                 self.fields_to_add = [
-                    v for v in self.mapped_variables if v["name"] not in reader_names
+                    v
+                    for v in self.mapped_variables
+                    if v["name"].lower() not in reader_names_lower
                 ]
 
                 if self.fields_to_add:
@@ -310,20 +316,22 @@ class RedivisArrowIterator:
                     for v in self.fields_to_add
                 ]
                 all_arrays = list(batch.columns) + null_arrays
-                all_names = list(batch.schema.names) + [
-                    v["name"] for v in self.fields_to_add
+                all_names = [n.lower() for n in batch.schema.names] + [
+                    v["name"].lower() for v in self.fields_to_add
                 ]
                 name_to_array = dict(zip(all_names, all_arrays))
                 ordered_arrays = [
-                    name_to_array[v["name"]] for v in self.mapped_variables
+                    name_to_array[v["name"].lower()] for v in self.mapped_variables
                 ]
                 batch = pyarrow.RecordBatch.from_arrays(
                     ordered_arrays, schema=self.output_schema
                 )
             elif self.should_reorder_fields:
-                name_to_array = dict(zip(batch.schema.names, batch.columns))
+                name_to_array = {
+                    n.lower(): a for n, a in zip(batch.schema.names, batch.columns)
+                }
                 ordered_arrays = [
-                    name_to_array[v["name"]] for v in self.mapped_variables
+                    name_to_array[v["name"].lower()] for v in self.mapped_variables
                 ]
                 batch = pyarrow.RecordBatch.from_arrays(
                     ordered_arrays, schema=self.output_schema
@@ -420,6 +428,10 @@ def make_rows_request(
     num_rows = 0
 
     if isinstance(instance, ReadStream):
+        if max_results is not None:
+            raise exceptions.ValueError(
+                "max_results isn't supported for read streams, which each read their share of the read session"
+            )
         sources = [read_stream_source(instance.id)]
         num_rows = instance.properties.get("estimatedRows", 0)
         max_parallelization = 1

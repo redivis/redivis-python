@@ -92,11 +92,15 @@ class TabularReader(Base):
         if self._is_query:
             check_is_ready(self)
 
-        if self.directory is None and cached_directories.get(self.uri):
-            self.directory = cached_directories[self.uri]
+        # A listing depends on the variables it was made with, as well as the table or
+        # query
+        self._directory_variables = (file_id_variable, file_name_variable)
+        cache_key = (self.uri, file_id_variable, file_name_variable)
+        cached_directory = cached_directories.get(cache_key)
 
-        if self.directory and self._is_query:
+        if cached_directory and self._is_query:
             # Queries are immutable, always use the cached version
+            self.directory = cached_directory
             return self.directory
 
         import pyarrow
@@ -104,9 +108,9 @@ class TabularReader(Base):
         # Compute this here, to get the timestamp before the request was sent
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         headers = {}
-        if self.directory:
+        if cached_directory:
             headers["If-Modified-Since"] = datetime.fromtimestamp(
-                self.directory._last_cached_at / 1000, tz=timezone.utc
+                cached_directory._last_cached_at / 1000, tz=timezone.utc
             ).strftime("%a, %d %b %Y %H:%M:%S GMT")
 
         with closing(
@@ -124,7 +128,8 @@ class TabularReader(Base):
             )
         ) as res:
             if res.status_code == 304:
-                self.directory._last_cached_at = now_ms
+                cached_directory._last_cached_at = now_ms
+                self.directory = cached_directory
                 return self.directory
 
             directory = Directory(
@@ -164,20 +169,27 @@ class TabularReader(Base):
 
             self.directory = directory
             self.directory._last_cached_at = now_ms
-            cached_directories[self.uri] = self.directory
+            cached_directories[cache_key] = self.directory
             return self.directory
 
     def file(self, path: Union[str, Path]) -> File:
-        if self.directory is None and cached_directories.get(self.uri):
-            self.directory = cached_directories[self.uri]
+        # Look files up with the same variables as the last listing, if any
+        file_id_variable, file_name_variable = getattr(
+            self, "_directory_variables", (None, None)
+        )
+        directory = cached_directories.get(
+            (self.uri, file_id_variable, file_name_variable)
+        )
 
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        if self.directory is None or (
-            now_ms - self.directory._last_cached_at > 30000  # cache for 30s
+        if directory is None or (
+            now_ms - directory._last_cached_at > 30000  # cache for 30s
         ):
-            self.to_directory()
+            directory = self.to_directory(
+                file_id_variable=file_id_variable, file_name_variable=file_name_variable
+            )
 
-        node = self.directory.get(path)
+        node = directory.get(path)
         if isinstance(node, Directory):
             raise exceptions.ValueError(f"{path} is a directory, not a file")
         if node is None:
@@ -852,8 +864,12 @@ def check_is_ready(self: TabularReader) -> None:
 
 def get_mapped_variables(
     self: TabularReader, variables: Optional[Iterable[str]], *, refresh: bool = True
-) -> Tuple[List[Dict[str, Any]], bool]:
+) -> Tuple[List[Dict[str, Any]], Optional[Iterable[str]], bool]:
     if self._is_read_stream:
+        if variables is not None:
+            raise exceptions.ValueError(
+                "A read stream's variables are chosen when it's created; pass them to to_read_streams() instead"
+            )
         return get_mapped_variables(
             (
                 self.table
@@ -945,7 +961,7 @@ def get_geography_variable(
         return None
     else:
         for variable in variables:
-            if variable["name"] == geography_variable_name:
+            if variable["name"].lower() == geography_variable_name.lower():
                 return variable
 
         raise exceptions.NotFoundError(
@@ -966,6 +982,10 @@ def should_use_export_api(self: TabularReader) -> bool:
         if not self.properties or "numBytes" not in self.properties:
             self.get()
         num_bytes = self.properties.get("numBytes")
+
+    # The size may not be known (e.g., for an upload that's still being processed)
+    if num_bytes is None:
+        return False
 
     return num_bytes > (
         1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11

@@ -4,6 +4,7 @@ from .Base import Base
 from .User import User
 from ..common.api_request import make_request
 from ..common import exceptions
+from urllib.parse import quote as quote_uri
 
 
 class Member(Base):
@@ -17,7 +18,7 @@ class Member(Base):
         self.uri = (
             properties["uri"]
             if "uri" in (properties or {})
-            else (f"{organization.uri}/members/{self.name}")
+            else (f"{organization.uri}/members/{quote_uri(self.name, '')}")
         )
         self.properties = properties
 

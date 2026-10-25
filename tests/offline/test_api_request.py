@@ -245,3 +245,18 @@ def test_raise_api_error_reads_the_status_from_an_error_response():
 
     with pytest.raises(exceptions.NotFoundError):
         raise_api_error(response_text="missing", response=response)
+
+
+def test_idempotent_requests_are_retried_after_connection_failures(api, table):
+    import mock_redivis_api
+    from redivis.common.api_request import make_request
+
+    api["drop_connection"] = 2
+    table.get()
+    assert (
+        mock_redivis_api.paths("/tables/a.b.mock").count("/api/v1/tables/a.b.mock") == 3
+    )
+
+    api["drop_connection"] = 1
+    with pytest.raises(requests.ConnectionError):
+        make_request(method="POST", path="/queries", payload={"query": "SELECT 1"})
