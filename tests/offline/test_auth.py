@@ -3,11 +3,14 @@
 import json
 import os
 import stat
+import subprocess
+import sys
 import time
+from pathlib import Path
 
 import pytest
 import redivis
-from redivis.common import auth
+from redivis.common import auth, exceptions
 
 from mock_redivis_api import jwt
 
@@ -23,11 +26,14 @@ TOKEN = {
 
 
 class FakeResponse:
-    def __init__(self, body):
-        self.status_code = 200
+    def __init__(self, body, status_code=200):
+        self.status_code = status_code
         self._body = body
+        self.text = body if isinstance(body, str) else json.dumps(body)
 
     def json(self):
+        if isinstance(self._body, str):
+            raise ValueError("not JSON")
         return self._body
 
     def raise_for_status(self):
@@ -82,6 +88,24 @@ def test_login_creates_the_credentials_directory(anonymous, oauth_server):
         json.loads(auth.credentials_file.read_text())["access_token"]
         == TOKEN["access_token"]
     )
+    assert file_mode(auth.redivis_dir) == 0o700
+
+
+def test_the_credentials_directory_can_be_overridden(tmp_path):
+    # It's resolved on import, so check it in a fresh interpreter
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from redivis.common import auth; print(auth.credentials_file)",
+        ],
+        env={**os.environ, "REDIVIS_CONFIG_DIR": str(tmp_path / "config")},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert Path(result.stdout.strip()) == tmp_path / "config" / "python_credentials"
 
 
 def test_private_resource_prompts_a_login_then_succeeds(anonymous, oauth_server):
@@ -155,3 +179,51 @@ def test_refreshed_credentials_stay_private(api, oauth_server):
     assert json.loads(auth.credentials_file.read_text())["access_token"] == (
         TOKEN["access_token"]
     )
+
+
+def test_a_failed_write_leaves_the_previous_credentials_intact(api):
+    auth.write_cached_credentials()
+    previous = auth.credentials_file.read_text()
+    # Fails partway through serializing, after some of the file is written
+    auth.cached_credentials["access_token"] = object()
+
+    with pytest.raises(TypeError):
+        auth.write_cached_credentials()
+
+    assert auth.credentials_file.read_text() == previous
+    assert os.listdir(auth.redivis_dir) == [auth.credentials_file.name]
+
+
+def test_a_server_error_while_refreshing_keeps_the_credentials(api, monkeypatch):
+    auth.write_cached_credentials()
+    monkeypatch.setattr(
+        auth.requests,
+        "post",
+        lambda url, **kwargs: FakeResponse("<html>Bad gateway</html>", 502),
+    )
+
+    with pytest.raises(exceptions.APIError):
+        auth.refresh_credentials()
+
+    assert auth.cached_credentials["refresh_token"] == "refresh"
+    assert auth.credentials_file.exists()
+
+
+def test_a_rejected_refresh_token_prompts_a_login(api, monkeypatch):
+    auth.write_cached_credentials()
+    monkeypatch.setattr(
+        auth.requests,
+        "post",
+        lambda url, **kwargs: FakeResponse({"error": "invalid_grant"}, 400),
+    )
+    logins = []
+
+    def login(**kwargs):
+        logins.append(kwargs)
+        auth.cached_credentials = dict(TOKEN)
+
+    monkeypatch.setattr(auth, "perform_oauth_login", login)
+
+    assert auth.refresh_credentials() == TOKEN["access_token"]
+    assert len(logins) == 1
+    assert not auth.credentials_file.exists()

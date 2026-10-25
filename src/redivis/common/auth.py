@@ -2,6 +2,7 @@ import os
 import json
 import time
 import sys
+import tempfile
 import warnings
 import base64
 from pathlib import Path
@@ -11,7 +12,9 @@ import requests
 from . import exceptions
 from .util import raise_api_error
 
-redivis_dir = Path.home() / ".redivis"
+# Overridable for environments where the home directory isn't writable, or is
+# shared between users
+redivis_dir = Path(os.getenv("REDIVIS_CONFIG_DIR") or "~/.redivis").expanduser()
 cached_credentials = None
 verify_ssl = (
     os.getenv("REDIVIS_API_ENDPOINT", "https://redivis.com").find(
@@ -89,9 +92,6 @@ This environment variable should only ever be set in a non-interactive environme
         else:
             return cached_credentials["access_token"]
     else:
-        if not redivis_dir.is_dir():
-            redivis_dir.mkdir()
-
         perform_oauth_login(
             scope=missing_scope if len(missing_scope) > 0 else scope,
             upgrade_credentials=bool(len(missing_scope)),
@@ -186,16 +186,21 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
 
 
 def write_cached_credentials():
-    # get_auth_token() normally creates this, but a login prompted by an
-    # anonymous request's 401 never went through it.
-    redivis_dir.mkdir(parents=True, exist_ok=True)
-    # The file holds a refresh token, so keep it private to this user. Creating
-    # it with these permissions means it's never readable by others, even
-    # briefly; the chmod covers a file that already existed.
-    fd = os.open(credentials_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(cached_credentials, f, indent=2)
-    os.chmod(credentials_file, 0o600)
+    # The file holds a refresh token, so keep it private to this user
+    redivis_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Write a temporary file and swap it into place, so that another process
+    # (e.g. a second notebook kernel) never reads a partially written file.
+    # mkstemp creates it readable only by this user, so the token is never
+    # exposed to others, even briefly, and replacing the file also replaces
+    # the permissions of one written by an earlier version of the client.
+    fd, temp_path = tempfile.mkstemp(dir=redivis_dir, prefix=".python_credentials.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(cached_credentials, f, indent=2)
+        os.replace(temp_path, credentials_file)
+    except BaseException:
+        Path(temp_path).unlink(missing_ok=True)
+        raise
 
 
 def refresh_credentials(scope=None, amr_values=None):
@@ -221,8 +226,18 @@ def refresh_credentials(scope=None, amr_values=None):
                 "refresh_token": cached_credentials["refresh_token"],
             },
         )
-        if res.status_code >= 400:
+        if res.status_code in (400, 401):
+            # The refresh token was rejected (e.g. revoked or expired), so the
+            # user needs to log in again
             clear_cached_credentials()
+        elif res.status_code >= 400:
+            # Anything else (e.g. a 503 during a deploy) says nothing about the
+            # refresh token, so keep it for a later call to retry with
+            try:
+                response_json = res.json()
+            except Exception:
+                raise_api_error(response_text=res.text, response=res)
+            raise_api_error(response_json=response_json, response=res)
         else:
             refresh_response = res.json()
             cached_credentials["access_token"] = refresh_response["access_token"]
