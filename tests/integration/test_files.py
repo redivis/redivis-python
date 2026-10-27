@@ -50,7 +50,10 @@ def test_read(files_table, path):
 
 
 def test_read_as_text(files_table):
-    assert files_table.file("readme.txt").read(as_text=True) == FILES["readme.txt"].decode()
+    assert (
+        files_table.file("readme.txt").read(as_text=True)
+        == FILES["readme.txt"].decode()
+    )
 
 
 def test_read_byte_range(files_table):
@@ -159,7 +162,9 @@ def test_add_files_from_paths(new_table, tmp_path):
     path = tmp_path / "local.txt"
     path.write_bytes(b"from disk")
 
-    table.add_files(files=[str(path), {"path": str(path), "name": "copy.txt"}], progress=False)
+    table.add_files(
+        files=[str(path), {"path": str(path), "name": "copy.txt"}], progress=False
+    )
 
     assert sorted(str(f.path) for f in table.list_files()) == ["copy.txt", "local.txt"]
     assert table.get().properties["numRows"] == 2

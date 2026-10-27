@@ -1,0 +1,56 @@
+# Runs the unit tests, and checks the code is formatted with black, on pull requests into main and
+# before each release (see publish.yml).
+name: Unit tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: black
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      # The version of black pinned in pyproject.toml's test dependencies, without installing the rest
+      - run: |
+          python -m pip install "$(python -c "import tomllib; print(next(d for d in tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['test'] if d.startswith('black')))")"
+      - run: black --check --diff .
+
+  unit-tests:
+    name: ${{ matrix.os }}, Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every supported Python version on Linux, and one on Windows and macOS for the
+        # platform-specific code (paths, temp and config directories, file locking)
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      # mfusepy loads libfuse when it's imported, which the mount tests do. They're skipped on
+      # Windows and macOS, whose runners have no FUSE (and macFUSE can't be installed on them)
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libfuse3-3
+      - run: python -m pip install -e ".[test]"
+      - run: python -m pytest tests/unit -n auto

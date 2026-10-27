@@ -35,39 +35,37 @@ class TabularReader(Base):
         self.properties = {}
 
     def download(
-            self,
-            path=None,
-            *,
-            format="csv",
-            overwrite=False,
-            progress=None,
-            max_parallelization=None,
-            max_concurrency=None,
-        ):
-            if self._is_read_stream:
-                raise exceptions.ValueError(
-                    "Downloading read streams is not supported"
-                )
-            check_is_ready(self)
-            res = make_request(
-                method="POST",
-                path=f"{self.uri}/exports",
-                payload={"format": format},
-            )
-            export_job = Export(
-                res["id"], 
-                table=self if self._is_table else None, 
-                query=self if self._is_query else None, 
-                upload=self if self._is_upload else None, 
-                properties=res
-            )
-            return export_job.download_files(
-                path=path,
-                overwrite=overwrite,
-                progress=progress,
-                max_concurrency=max_concurrency,
-                max_parallelization=max_parallelization,
-            )
+        self,
+        path=None,
+        *,
+        format="csv",
+        overwrite=False,
+        progress=None,
+        max_parallelization=None,
+        max_concurrency=None,
+    ):
+        if self._is_read_stream:
+            raise exceptions.ValueError("Downloading read streams is not supported")
+        check_is_ready(self)
+        res = make_request(
+            method="POST",
+            path=f"{self.uri}/exports",
+            payload={"format": format},
+        )
+        export_job = Export(
+            res["id"],
+            table=self if self._is_table else None,
+            query=self if self._is_query else None,
+            upload=self if self._is_upload else None,
+            properties=res,
+        )
+        return export_job.download_files(
+            path=path,
+            overwrite=overwrite,
+            progress=progress,
+            max_concurrency=max_concurrency,
+            max_parallelization=max_parallelization,
+        )
 
     # TODO: prefix? pattern? Don't cache if these are present
     def to_directory(
@@ -634,11 +632,12 @@ class TabularReader(Base):
                 temp_file_path = f"{tmpdirname}/cleaned.csv"
 
                 # This allows SAS to handle line breaks in cells
-                with open(
-                    f"{tmpdirname}/part-0.csv", "r", newline="", encoding="utf-8"
-                ) as fin, open(
-                    temp_file_path, "w", newline="", encoding="utf-8"
-                ) as fout:
+                with (
+                    open(
+                        f"{tmpdirname}/part-0.csv", "r", newline="", encoding="utf-8"
+                    ) as fin,
+                    open(temp_file_path, "w", newline="", encoding="utf-8") as fout,
+                ):
                     reader = csv.reader(fin)
                     writer = csv.writer(fout, lineterminator="\r\n")
 
@@ -859,9 +858,13 @@ def check_is_ready(self: TabularReader) -> None:
         if not self.properties or "container" not in self.properties:
             self.get()
     elif self._is_upload:
-        if not self.properties or "status" not in self.properties or self.properties['status'] != "completed":
+        if (
+            not self.properties
+            or "status" not in self.properties
+            or self.properties["status"] != "completed"
+        ):
             self.get()
-        if self.properties['status'] != "completed":
+        if self.properties["status"] != "completed":
             raise exceptions.ValueError(
                 f"Cannot read data from an upload with status: {self.properties['status']}"
             )
@@ -999,6 +1002,4 @@ def should_use_export_api(self: TabularReader) -> bool:
     if num_bytes is None:
         return False
 
-    return num_bytes > (
-        1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11
-    )
+    return num_bytes > (1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11)

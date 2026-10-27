@@ -110,7 +110,9 @@ def test_release_and_version_history(new_dataset):
     assert next_version.previous_version().version_tag == "v1.0"
 
     # The released versions remain readable by their tags
-    assert redivis.dataset(f"{dataset.qualified_reference.rsplit(':', 1)[0]}:v1.0").exists()
+    assert redivis.dataset(
+        f"{dataset.qualified_reference.rsplit(':', 1)[0]}:v1.0"
+    ).exists()
 
     # A historic version's data is removed in the background
     first_version = next(

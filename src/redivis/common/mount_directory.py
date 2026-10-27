@@ -769,7 +769,9 @@ def _remove_orphaned_cache_dirs(parent):
     """Remove the temporary caches of processes that exited while mounted"""
     try:
         with os.scandir(parent) as entries:
-            candidates = [e for e in entries if e.name.startswith(TEMPORARY_CACHE_PREFIX)]
+            candidates = [
+                e for e in entries if e.name.startswith(TEMPORARY_CACHE_PREFIX)
+            ]
     except OSError:
         return
     for entry in candidates:

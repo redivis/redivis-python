@@ -90,9 +90,15 @@ try:
     upload(two_uploads, "first.csv")
     upload(two_uploads, "second.csv")
     report("two uploads", list_rows(two_uploads))
-    report("two uploads, maxResults=3 (only reaches the first)", list_rows(two_uploads, maxResults=3))
+    report(
+        "two uploads, maxResults=3 (only reaches the first)",
+        list_rows(two_uploads, maxResults=3),
+    )
     report("two uploads, maxResults=4", list_rows(two_uploads, maxResults=4))
-    report("two uploads, format=csv (only arrow is refused)", list_rows(two_uploads, format="csv"))
+    report(
+        "two uploads, format=csv (only arrow is refused)",
+        list_rows(two_uploads, format="csv"),
+    )
     report("two uploads, readSession (works)", read_session(two_uploads))
 
     # The previous version's rows count as another table, for the append strategy
@@ -121,11 +127,18 @@ try:
     without_rows = unreleased.table("without_rows").create()
     upload(without_rows, "header_only.csv", b"id,name\n")
     report("unreleased, maxResults=0", list_rows(with_rows, maxResults=0))
-    report("unreleased, maxResults=0, format=csv", list_rows(with_rows, maxResults=0, format="csv"))
-    report("unreleased, maxResults=0, readSession", read_session(with_rows, maxResults=0))
+    report(
+        "unreleased, maxResults=0, format=csv",
+        list_rows(with_rows, maxResults=0, format="csv"),
+    )
+    report(
+        "unreleased, maxResults=0, readSession", read_session(with_rows, maxResults=0)
+    )
     report("unreleased, no rows", list_rows(without_rows))
     report("unreleased, no rows, readSession", read_session(without_rows))
-    report("unreleased, maxResults=1 (for comparison)", list_rows(with_rows, maxResults=1))
+    report(
+        "unreleased, maxResults=1 (for comparison)", list_rows(with_rows, maxResults=1)
+    )
 
     # The same tables, once released. Reads of a table that's still being released go
     # through the unreleased path; the API doesn't say when its release finishes, but
@@ -133,10 +146,14 @@ try:
     unreleased.release()
     released = redivis.dataset(unreleased.qualified_reference)
     for _ in range(60):
-        if read_session(released.table("with_rows"), maxResults=0).endswith("1 stream(s)"):
+        if read_session(released.table("with_rows"), maxResults=0).endswith(
+            "1 stream(s)"
+        ):
             break
         time.sleep(5)
-    report("released, maxResults=0", list_rows(released.table("with_rows"), maxResults=0))
+    report(
+        "released, maxResults=0", list_rows(released.table("with_rows"), maxResults=0)
+    )
     report("released, no rows", list_rows(released.table("without_rows")))
 
     # An unreleased version appending to a released one: the previous version's rows

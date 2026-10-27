@@ -268,7 +268,9 @@ def test_workflow_create(api):
 
 def test_workflow_create_resolves_an_ambiguous_owner(api):
     # The owner of "owner.wf" is an organization if one by that name exists
-    script(api, {"results": [], "nextPageToken": None}, workflow_properties("organization"))
+    script(
+        api, {"results": [], "nextPageToken": None}, workflow_properties("organization")
+    )
 
     workflow = redivis.workflow("owner.wf").create(is_public=True)
 

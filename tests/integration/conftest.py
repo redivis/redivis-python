@@ -51,7 +51,9 @@ class LiveEnvironment:
         if self.keep_resources:
             return
         # The dataset as a whole, rather than whichever version it references
-        reference = re.sub(r":(v\d+_\d+|next|current)$", "", dataset.qualified_reference)
+        reference = re.sub(
+            r":(v\d+_\d+|next|current)$", "", dataset.qualified_reference
+        )
         helpers.delete_dataset(redivis.dataset(reference))
 
 
@@ -133,12 +135,16 @@ def delete_stale_resources(owner):
         created_at = resource.properties["createdAt"]
         if isinstance(created_at, str):
             # Workflows' are ISO 8601 strings, rather than milliseconds
-            created_at = datetime.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            created_at = datetime.datetime.fromisoformat(
+                created_at.replace("Z", "+00:00")
+            )
         else:
             created_at = datetime.datetime.fromtimestamp(
                 created_at / 1000, datetime.timezone.utc
             )
-        return resource.name.startswith(RESOURCE_PREFIX) and now - created_at > STALE_AFTER
+        return (
+            resource.name.startswith(RESOURCE_PREFIX) and now - created_at > STALE_AFTER
+        )
 
     for dataset in filter(is_stale, owner.list_datasets()):
         try:
@@ -203,7 +209,9 @@ def sample_dataset(live, tmp_path_factory):
     dataset = live.create_dataset("sample", description="Sample data for tests")
 
     tiny = dataset.table("tiny").create(description="tiny.csv")
-    tiny.upload("tiny.csv").create(helpers.TINY_CSV, wait_for_finish=False, progress=False)
+    tiny.upload("tiny.csv").create(
+        helpers.TINY_CSV, wait_for_finish=False, progress=False
+    )
 
     typed = dataset.table("typed").create()
     typed.upload("typed").create(

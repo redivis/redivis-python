@@ -173,7 +173,9 @@ def test_typed_values_to_pandas(typed_table):
     expected = helpers.typed_arrow_table().to_pandas()
 
     actual = helpers.sorted_by(
-        typed_table.to_pandas_dataframe(progress=False, dtype_backend="numpy", date_as_object=True)
+        typed_table.to_pandas_dataframe(
+            progress=False, dtype_backend="numpy", date_as_object=True
+        )
     )
 
     pandas.testing.assert_frame_equal(actual, expected)

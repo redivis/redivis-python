@@ -53,12 +53,17 @@ def test_list_contents(any_workflow):
 
 def test_create(created_workflow, live):
     assert created_workflow.exists()
-    assert created_workflow.properties["description"] == "Created by the redivis-python tests"
+    assert (
+        created_workflow.properties["description"]
+        == "Created by the redivis-python tests"
+    )
     assert created_workflow.properties["publicAccessLevel"] == "none"
     assert created_workflow.properties["owner"]["kind"] == (
         "user" if created_workflow.user else "organization"
     )
-    assert (created_workflow.organization or created_workflow.user).name == live.owner.name
+    assert (
+        created_workflow.organization or created_workflow.user
+    ).name == live.owner.name
     assert created_workflow.qualified_reference.startswith(f"{live.owner.name}.")
 
     fetched = redivis.workflow(created_workflow.qualified_reference).get()
@@ -150,7 +155,9 @@ def test_transform(scratch_workflow, sample_datasource, tiny_table, live):
 
 def test_parameter(scratch_workflow, live):
     name = live.unique_name("param")
-    parameter = scratch_workflow.parameter(name).create(type="string", values=["a", "b"])
+    parameter = scratch_workflow.parameter(name).create(
+        type="string", values=["a", "b"]
+    )
 
     try:
         assert parameter.exists()

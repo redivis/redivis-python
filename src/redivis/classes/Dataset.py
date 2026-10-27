@@ -235,19 +235,19 @@ class Dataset(Base):
         return self.update(labels_to_remove=labels)
 
     def update(
-        self, 
-        *, 
-        name=None, 
-        public_access_level=None, 
-        description=None, 
-        methodology_markdown=None, 
-        usage_markdown=None, 
-        labels=None, 
-        labels_to_add=None, 
-        labels_to_remove=None, 
-        tags=None, 
-        tags_to_add=None, 
-        tags_to_remove=None
+        self,
+        *,
+        name=None,
+        public_access_level=None,
+        description=None,
+        methodology_markdown=None,
+        usage_markdown=None,
+        labels=None,
+        labels_to_add=None,
+        labels_to_remove=None,
+        tags=None,
+        tags_to_add=None,
+        tags_to_remove=None,
     ):
         payload = {}
         if name:

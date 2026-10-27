@@ -40,17 +40,26 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# For running the test suite; see CONTRIBUTING.md
+# For running the test suite and formatting the code; see CONTRIBUTING.md
 test = [
     "pytest >= 7.0",
     "pytest-xdist >= 3.0",
+    # Pinned, so that everyone (and CI) formats the code the same way. 25.11.0 is the last
+    # version that runs on Python 3.9
+    "black == 25.11.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/redivis/redivis-python"
+Changelog = "https://github.com/redivis/redivis-python/blob/main/CHANGELOG.md"
 
 [tool.setuptools.dynamic]
 version = { attr = "redivis._version.__version__" }
+
+[tool.black]
+target-version = ["py39"]
+# Fails rather than formatting differently with another version, e.g., one installed globally
+required-version = "25.11.0"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

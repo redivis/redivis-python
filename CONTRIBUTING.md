@@ -17,6 +17,21 @@ To try the client against the local development environment:
 REDIVIS_API_ENDPOINT=https://local.host:8443/api/v1 python3
 ```
 
+### Formatting
+
+The code is formatted with [black](https://black.readthedocs.io), which CI checks on every pull
+request. Before committing, run:
+
+```sh
+black .
+```
+
+Use the version of black that `.[test]` installs, which is pinned in `pyproject.toml` so that
+everyone's formatting matches; other versions refuse to run. Most editors can run it on save, e.g.,
+with the [Black Formatter](https://marketplace.visualstudio.com/items?itemName=ms-python.black-formatter)
+extension for VS Code, or PyCharm's built-in support (Settings → Tools → Black), pointed at the
+virtual environment.
+
 ### Running the tests
 
 The tests live in two suites:
@@ -25,6 +40,9 @@ The tests live in two suites:
 |---------------------|--------------------------------------------------------------------------------------------------------------------|-------------------------------------------|
 | `tests/unit`        | The client's internals (retries, auth, reading, uploads, downloads, mounting…), against an in-process mock of the API | Nothing; runs offline in seconds          |
 | `tests/integration` | End-to-end behavior against a live Redivis API, by uploading data and verifying what's read back                  | A running environment, and a login for it |
+
+The unit tests also run on every pull request into `main`, on each supported Python version (see
+[the test workflow](.github/workflows/test.yml)).
 
 ```sh
 pytest                             # Everything, with the integration tests run against dev
@@ -136,17 +154,23 @@ the same everywhere.
 
 ### To upload to PyPI
 
-First, update the version in `src/redivis/_version.py` and commit it. Then tag that commit with
-the version and push the tag:
+Describe each user-facing change under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md), in the
+pull request that makes it.
 
-```sh
-git tag v0.21.2
-git push origin v0.21.2
-```
+To release, update the version in `src/redivis/_version.py`, and rename `## Unreleased` in
+CHANGELOG.md to the version (e.g., `## 0.22.0`), adding a new, empty `## Unreleased` section above
+it. Then merge that into `main`. For a pre-release, use a version like `0.22.0rc1`; pip only
+installs it when asked for it explicitly.
 
-This runs the [publish workflow](.github/workflows/publish.yml), which builds the package and
-uploads it to PyPI. It fails without publishing if the tag doesn't match the version in
-`_version.py`. PyPI trusts the workflow directly (trusted publishing), so no API token is needed.
+On each push to `main`, the [publish workflow](.github/workflows/publish.yml) checks whether
+there's a `v<version>` tag for that version. If not, it runs the unit tests, uploads the package
+to PyPI, and then creates a GitHub release for the version, which also creates its tag. The
+release's notes are the version's section of CHANGELOG.md; if there isn't one, the workflow fails
+before publishing anything. PyPI trusts the workflow directly (trusted publishing), so no API token is
+needed. Don't create release tags yourself: a tag for the version means it's already been released.
+
+If the workflow fails, fix the problem and re-run it from the Actions tab. Re-running it is safe
+even after the upload to PyPI succeeded.
 
 To check the build locally, run `python -m pip install build && python -m build`, which writes the
 sdist and wheel to `dist/`.

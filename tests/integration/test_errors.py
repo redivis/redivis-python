@@ -45,4 +45,3 @@ def test_invalid_request_raises_an_api_error(scratch_dataset):
         scratch_dataset.table("").create()
 
     assert 400 <= excinfo.value.status_code < 500
-

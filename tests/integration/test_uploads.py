@@ -39,8 +39,12 @@ def test_upload_file_object(new_table):
     with open(helpers.TINY_CSV, "rb") as f:
         upload = table.upload("tiny.csv").create(f, type="delimited", progress=False)
 
-    actual = helpers.sorted_by(upload.to_pandas_dataframe(progress=False, dtype_backend="numpy"))
-    pandas.testing.assert_frame_equal(actual, helpers.tiny_dataframe(), check_dtype=False)
+    actual = helpers.sorted_by(
+        upload.to_pandas_dataframe(progress=False, dtype_backend="numpy")
+    )
+    pandas.testing.assert_frame_equal(
+        actual, helpers.tiny_dataframe(), check_dtype=False
+    )
 
 
 def test_upload_bytes(new_table):
@@ -59,7 +63,9 @@ def test_quoted_newlines(new_table):
     table = new_table()
     content = b'id,text\n1,"first\nsecond"\n2,"a ""quoted"" word"\n3,plain\n'
 
-    table.upload("newlines.csv").create(content, has_quoted_newlines=True, progress=False)
+    table.upload("newlines.csv").create(
+        content, has_quoted_newlines=True, progress=False
+    )
 
     assert read_sorted(table)["text"].tolist() == [
         "first\nsecond",
@@ -148,7 +154,9 @@ def test_upload_geodataframe(new_table):
 
     table.upload("points").create(gdf, progress=False)
 
-    assert {v.name: v["type"] for v in table.list_variables()}["geometry"] == "geography"
+    assert {v.name: v["type"] for v in table.list_variables()}[
+        "geometry"
+    ] == "geography"
     actual = helpers.sorted_by(table.to_geopandas_dataframe(progress=False))
     assert [(p.x, p.y) for p in actual.geometry] == [(-122.0, 37.0), (0.5, 51.5)]
 
@@ -171,7 +179,9 @@ def test_upload_metadata_sets_variable_metadata(new_table):
     variable = table.variable("name").get()
     assert variable.properties["label"] == "Name label"
     assert variable.properties["description"] == "Name description"
-    assert variable.properties["valueLabels"] == [{"value": "a", "label": "The letter a"}]
+    assert variable.properties["valueLabels"] == [
+        {"value": "a", "label": "The letter a"}
+    ]
 
 
 def test_append_merge_strategy(new_table):
@@ -253,20 +263,28 @@ def test_upload_name_conflicts(new_table):
     with pytest.raises(exceptions.ValueError, match="already exists"):
         table.upload("data.csv").create(SMALL_CSV, progress=False)
 
-    existing = table.upload("data.csv").create(SMALL_CSV, if_not_exists=True, progress=False)
+    existing = table.upload("data.csv").create(
+        SMALL_CSV, if_not_exists=True, progress=False
+    )
     assert existing.uri == original.uri
     assert len(table.list_uploads()) == 1
 
-    renamed = table.upload("data.csv").create(SMALL_CSV, rename_on_conflict=True, progress=False)
+    renamed = table.upload("data.csv").create(
+        SMALL_CSV, rename_on_conflict=True, progress=False
+    )
     assert renamed.name != "data.csv"
     assert len(table.list_uploads()) == 2
 
-    table.upload("data.csv").create(b"id,name,value\n9,z,9.5\n", replace_on_conflict=True, progress=False)
+    table.upload("data.csv").create(
+        b"id,name,value\n9,z,9.5\n", replace_on_conflict=True, progress=False
+    )
     assert len(table.list_uploads()) == 2
     assert table.get().properties["numRows"] == 4
 
     with pytest.raises(exceptions.ValueError):
-        table.upload("data.csv").create(SMALL_CSV, rename_on_conflict=True, replace_on_conflict=True)
+        table.upload("data.csv").create(
+            SMALL_CSV, rename_on_conflict=True, replace_on_conflict=True
+        )
 
 
 JAGGED_CSV = b"a,b\n1,2\n3\n4,5\n"
@@ -296,7 +314,9 @@ def test_failed_upload_can_be_removed_without_raising(new_table):
 def test_allow_jagged_rows(new_table):
     table = new_table()
 
-    table.upload("jagged.csv").create(JAGGED_CSV, allow_jagged_rows=True, progress=False)
+    table.upload("jagged.csv").create(
+        JAGGED_CSV, allow_jagged_rows=True, progress=False
+    )
 
     df = read_sorted(table, "a")
     assert df["a"].tolist() == [1, 3, 4]
@@ -312,7 +332,9 @@ def test_skip_bad_records(new_table):
 
 
 def large_csv(num_rows):
-    lines = ["id,text"] + [f"{i},row number {i} of the large upload" for i in range(num_rows)]
+    lines = ["id,text"] + [
+        f"{i},row number {i} of the large upload" for i in range(num_rows)
+    ]
     return ("\n".join(lines) + "\n").encode()
 
 
@@ -352,8 +374,12 @@ def test_transfer_from_a_redivis_table(new_table, tiny_table):
         progress=False,
     )
 
-    actual = helpers.sorted_by(table.to_pandas_dataframe(progress=False, dtype_backend="numpy"))
-    pandas.testing.assert_frame_equal(actual, helpers.tiny_dataframe(), check_dtype=False)
+    actual = helpers.sorted_by(
+        table.to_pandas_dataframe(progress=False, dtype_backend="numpy")
+    )
+    pandas.testing.assert_frame_equal(
+        actual, helpers.tiny_dataframe(), check_dtype=False
+    )
 
 
 def test_stream_upload(new_table):
@@ -381,7 +407,9 @@ def test_stream_upload(new_table):
         "name": "string",
         "when": "dateTime",
     }
-    df = helpers.sorted_by(upload.to_pandas_dataframe(progress=False, dtype_backend="numpy_nullable"))
+    df = helpers.sorted_by(
+        upload.to_pandas_dataframe(progress=False, dtype_backend="numpy_nullable")
+    )
     assert df["id"].tolist() == [1, 2, 3]
     assert df["name"].isna().tolist() == [False, True, False]
 

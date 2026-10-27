@@ -312,7 +312,6 @@ class Table(TabularReader):
 
             raise e
 
-
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
         resolve_table_for_write(self)
         payload = {}

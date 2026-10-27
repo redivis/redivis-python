@@ -1,16 +1,65 @@
-# Publishes the package to PyPI when a version tag (e.g., v0.21.2) is pushed; see CONTRIBUTING.md.
+# Releases the package when the version in src/redivis/_version.py changes on main; see
+# CONTRIBUTING.md. If there's no tag for that version yet, this runs the unit tests, publishes the
+# package to PyPI, and then creates a GitHub release (and its tag) for the version, with its notes
+# from CHANGELOG.md.
 # Authenticates with PyPI's trusted publishing, so there's no API token to store.
 name: Publish to PyPI
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Releases happen one at a time, in the order they're merged
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        name: Check whether this version has been released
+        run: |
+          version=$(python3 -c "import runpy; print(runpy.run_path('src/redivis/_version.py')['__version__'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Exits with 2 if there's no such tag, or with another code if it couldn't check
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "v$version has already been released"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if [ "$status" -ne 2 ]; then exit "$status"; fi
+            echo "Releasing v$version"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+          # e.g., 0.22.0rc1 or 0.22.0.dev1, which pip only installs when asked for explicitly
+          if [[ "$version" =~ (a|b|rc|dev)[0-9]*$ ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+      # Before anything is published, so that a version is never released without notes
+      - name: Check CHANGELOG.md has notes for this version
+        if: steps.version.outputs.release == 'true'
+        run: python3 .github/scripts/release_notes.py "${{ steps.version.outputs.version }}" > /dev/null
+
+  test:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    uses: ./.github/workflows/test.yml
+
   build:
+    needs: [check, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -21,9 +70,6 @@ jobs:
           python-version: "3.x"
       - run: python -m pip install build
       - run: python -m build
-      # Fails if the tag doesn't match the version in src/redivis/_version.py
-      - name: Check the tag matches the package version
-        run: ls "dist/redivis-${GITHUB_REF_NAME#v}-py3-none-any.whl"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -44,3 +90,36 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # So that re-running this workflow, if creating the release failed, doesn't fail here
+          skip-existing: true
+
+  release:
+    needs: [check, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create the GitHub release and its tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.check.outputs.version }}
+          PRERELEASE: ${{ needs.check.outputs.prerelease }}
+        run: |
+          python3 .github/scripts/release_notes.py "$VERSION" > "$RUNNER_TEMP/notes.md"
+          # Link to the changes since the latest release, as GitHub's generated notes do
+          if previous=$(gh release view --json tagName --jq .tagName 2> /dev/null); then
+            printf '\n**Full Changelog**: https://github.com/%s/compare/%s...v%s\n' \
+              "$GH_REPO" "$previous" "$VERSION" >> "$RUNNER_TEMP/notes.md"
+          fi
+          flags=(--target "$GITHUB_SHA" --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md")
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "v$VERSION" dist/* "${flags[@]}"

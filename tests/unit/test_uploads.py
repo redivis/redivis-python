@@ -170,7 +170,9 @@ def test_large_in_memory_file_is_uploaded_from_its_position(api, table):
     content = io.BytesIO(b"skipped" + b"x" * (2**20 + 1))
     content.seek(len(b"skipped"))
 
-    table.upload("data.csv").create(content, rename_on_conflict=True, wait_for_finish=False)
+    table.upload("data.csv").create(
+        content, rename_on_conflict=True, wait_for_finish=False
+    )
 
     assert [body for _, _, body in api["json_bodies"] if "tempUploads" in body] == [
         {"tempUploads": [{"size": 2**20 + 1, "name": "data.csv", "resumable": False}]}

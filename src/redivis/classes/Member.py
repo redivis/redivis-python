@@ -58,7 +58,9 @@ class Member(Base):
         )
         return self
 
-    def update(self, *, status=None, labels=None, labels_to_add=None, labels_to_remove=None):
+    def update(
+        self, *, status=None, labels=None, labels_to_add=None, labels_to_remove=None
+    ):
         payload = {}
         if status is not None:
             payload["status"] = status

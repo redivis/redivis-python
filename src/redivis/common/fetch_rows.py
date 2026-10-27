@@ -824,9 +824,12 @@ def process_stream(
             )
             # IMPORTANT: we need to wrap this in a buffered reader, otherwise we get partial read errors
             #            with chunked transfers over http 1.1 (happens w/ notebooks in-cluster)
-            with file_context as f, pyarrow.ipc.RecordBatchStreamReader(
-                io.BufferedReader(arrow_response.raw, buffer_size=1024 * 1024)
-            ) as reader:
+            with (
+                file_context as f,
+                pyarrow.ipc.RecordBatchStreamReader(
+                    io.BufferedReader(arrow_response.raw, buffer_size=1024 * 1024)
+                ) as reader,
+            ):
                 if coerce_schema:
                     variables_in_stream = list(
                         map(

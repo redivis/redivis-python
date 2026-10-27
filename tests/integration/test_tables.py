@@ -107,7 +107,9 @@ def test_update_variable(new_table):
     assert variable.properties["label"] == "A code"
     fetched = table.variable("code").get()
     assert fetched.properties["description"] == "Identifies the row"
-    assert fetched.properties["valueLabels"] == [{"value": "a", "label": "The letter a"}]
+    assert fetched.properties["valueLabels"] == [
+        {"value": "a", "label": "The letter a"}
+    ]
 
 
 def test_update_variables_in_bulk(new_table):
@@ -122,7 +124,9 @@ def test_update_variables_in_bulk(new_table):
     )
 
     assert table.variable("code").get().properties["label"] == "Code label"
-    assert table.variable("value").get().properties["description"] == "Value description"
+    assert (
+        table.variable("value").get().properties["description"] == "Value description"
+    )
 
 
 @pytest.mark.parametrize("name", ["Key", "key", "KEY"])

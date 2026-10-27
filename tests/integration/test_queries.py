@@ -35,9 +35,7 @@ def test_global_query(tiny_table, expected):
     actual = helpers.sorted_by(query.to_pandas_dataframe(progress=False), "Key")
 
     grouped = expected.groupby("Key").agg(n=("id", "size"), total=("Numeric", "sum"))
-    pandas.testing.assert_frame_equal(
-        actual, grouped.reset_index(), check_dtype=False
-    )
+    pandas.testing.assert_frame_equal(actual, grouped.reset_index(), check_dtype=False)
 
 
 def test_query_scoped_to_a_dataset(sample_dataset, tiny_table, expected):

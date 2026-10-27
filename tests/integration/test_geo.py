@@ -36,7 +36,9 @@ def test_to_geopandas_dataframe(geo_table):
 
 
 def test_geography_variable_can_be_chosen_or_skipped(geo_table):
-    gdf = geo_table.to_geopandas_dataframe(geography_variable="GEOMETRY", progress=False)
+    gdf = geo_table.to_geopandas_dataframe(
+        geography_variable="GEOMETRY", progress=False
+    )
     assert gdf.geometry.name == "geometry"
 
     df = geo_table.to_geopandas_dataframe(geography_variable=None, progress=False)

@@ -48,7 +48,7 @@ class Export(Base):
     ):
         self.wait_for_finish(progress=progress)
         file_count = self.properties["fileCount"]
-        escaped_name = 'export'
+        escaped_name = "export"
         if self.table is not None:
             escaped_name = re.sub(
                 r"\W+", "_", self.table.properties.get("name", "table")
@@ -60,7 +60,7 @@ class Export(Base):
             escaped_name = re.sub(
                 r"\W+", "_", self.upload.properties.get("name", "upload")
             ).lower()
-        
+
         is_dir = False
         if path:
             path = os.path.expanduser(path)

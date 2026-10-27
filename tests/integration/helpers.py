@@ -29,7 +29,9 @@ def typed_arrow_table():
     return pyarrow.table(
         {
             "id": pyarrow.array([1, 2, 3, 4, 5], pyarrow.int64()),
-            "float_col": pyarrow.array([1.5, -2.25, None, 0.0, 1e10], pyarrow.float64()),
+            "float_col": pyarrow.array(
+                [1.5, -2.25, None, 0.0, 1e10], pyarrow.float64()
+            ),
             "string_col": pyarrow.array(
                 ["plain", "with, comma", 'with "quotes"', "multi\nline", None],
                 pyarrow.string(),
@@ -37,7 +39,9 @@ def typed_arrow_table():
             "unicode_col": pyarrow.array(
                 ["héllo", "日本語", "emoji 🎉", "tab\there", None], pyarrow.string()
             ),
-            "bool_col": pyarrow.array([True, False, None, True, False], pyarrow.bool_()),
+            "bool_col": pyarrow.array(
+                [True, False, None, True, False], pyarrow.bool_()
+            ),
             "date_col": pyarrow.array(
                 [
                     datetime.date(2020, 1, 1),
@@ -75,18 +79,27 @@ TYPED_VARIABLE_TYPES = {
 
 
 GEO_FEATURES = [
-    {"name": "point", "value": 1, "geometry": {"type": "Point", "coordinates": [-122.17, 37.43]}},
+    {
+        "name": "point",
+        "value": 1,
+        "geometry": {"type": "Point", "coordinates": [-122.17, 37.43]},
+    },
     {
         "name": "line",
         "value": 2,
-        "geometry": {"type": "LineString", "coordinates": [[-122.0, 37.0], [-121.0, 38.0]]},
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [[-122.0, 37.0], [-121.0, 38.0]],
+        },
     },
     {
         "name": "polygon",
         "value": 3,
         "geometry": {
             "type": "Polygon",
-            "coordinates": [[[-122.0, 37.0], [-121.0, 37.0], [-121.0, 38.0], [-122.0, 37.0]]],
+            "coordinates": [
+                [[-122.0, 37.0], [-121.0, 37.0], [-121.0, 38.0], [-122.0, 37.0]]
+            ],
         },
     },
 ]
@@ -114,9 +127,9 @@ def raw_files():
         "readme.txt": "A file for testing.\nIt has a few lines,\nincluding ünïcödé.\n".encode(),
         "data/numbers.csv": "".join(f"{i},{i * i}\n" for i in range(1000)).encode(),
         # Large enough to need several reads when streamed
-        "data/nested/random.bin": random.Random(0).getrandbits(8 * 3 * 2**20).to_bytes(
-            3 * 2**20, "little"
-        ),
+        "data/nested/random.bin": random.Random(0)
+        .getrandbits(8 * 3 * 2**20)
+        .to_bytes(3 * 2**20, "little"),
         "with space & symbols.txt": b"named awkwardly",
     }
 

@@ -110,7 +110,9 @@ def test_list_tables_can_include_datasources(monkeypatch, workflow):
         calls.append((path, query))
         return []
 
-    monkeypatch.setattr(workflow_module, "make_paginated_request", make_paginated_request)
+    monkeypatch.setattr(
+        workflow_module, "make_paginated_request", make_paginated_request
+    )
     workflow.list_tables()
     workflow.list_tables(include_datasources=True)
     assert calls == [
