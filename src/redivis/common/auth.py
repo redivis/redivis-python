@@ -7,6 +7,7 @@ import warnings
 import base64
 from pathlib import Path
 import re
+from urllib.parse import urlparse
 import requests
 
 from . import exceptions
@@ -26,8 +27,42 @@ def get_redivis_dir():
     return Path(get_config("config_dir") or "~/.redivis").expanduser()
 
 
+# Credentials are only valid for the environment that issued them, so each API
+# endpoint's host (e.g. "redivis.com", or "localhost_8080") has its own. The JS
+# and R clients name these directories the same way.
+def get_environment_host():
+    url = urlparse(get_config("api_endpoint"))
+    host = url.hostname
+    if url.port and url.port != {"http": 80, "https": 443}.get(url.scheme):
+        host = f"{host}:{url.port}"
+    return re.sub(r"[^\w.-]", "_", host)
+
+
+def get_credentials_dir():
+    return get_redivis_dir() / "environments" / get_environment_host()
+
+
 def get_credentials_file():
-    return get_redivis_dir() / "python_credentials"
+    return get_credentials_dir() / "python_credentials"
+
+
+# Credentials used to be stored directly in the config directory. They were
+# almost always for redivis.com, so they're moved there.
+def get_legacy_credentials_file():
+    if get_environment_host() == "redivis.com":
+        return get_redivis_dir() / "python_credentials"
+    return None
+
+
+def migrate_legacy_credentials():
+    legacy_credentials_file = get_legacy_credentials_file()
+    if legacy_credentials_file is None or not legacy_credentials_file.is_file():
+        return
+    try:
+        get_credentials_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.replace(legacy_credentials_file, get_credentials_file())
+    except OSError:
+        """ignore"""
 
 
 def get_verify_ssl():
@@ -49,6 +84,9 @@ def load_cached_credentials():
         and cached_credentials_file != credentials_file
     ):
         cached_credentials = None
+
+    if cached_credentials is None and not credentials_file.is_file():
+        migrate_legacy_credentials()
 
     if cached_credentials is None and credentials_file.is_file():
         try:
@@ -121,6 +159,10 @@ def clear_cached_credentials():
     global cached_credentials
     cached_credentials = None
     get_credentials_file().unlink(missing_ok=True)
+    # Otherwise they'd be moved into place the next time credentials are loaded
+    legacy_credentials_file = get_legacy_credentials_file()
+    if legacy_credentials_file is not None:
+        legacy_credentials_file.unlink(missing_ok=True)
 
 
 def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
@@ -205,17 +247,17 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
 def write_cached_credentials():
     global cached_credentials_file
 
-    redivis_dir = get_redivis_dir()
+    credentials_dir = get_credentials_dir()
     credentials_file = get_credentials_file()
     cached_credentials_file = credentials_file
     # The file holds a refresh token, so keep it private to this user
-    redivis_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    credentials_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Write a temporary file and swap it into place, so that another process
     # (e.g. a second notebook kernel) never reads a partially written file.
     # mkstemp creates it readable only by this user, so the token is never
     # exposed to others, even briefly, and replacing the file also replaces
     # the permissions of one written by an earlier version of the client.
-    fd, temp_path = tempfile.mkstemp(dir=redivis_dir, prefix=".python_credentials.")
+    fd, temp_path = tempfile.mkstemp(dir=credentials_dir, prefix=".python_credentials.")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(cached_credentials, f, indent=2)

@@ -114,18 +114,15 @@ def resolve_environment(environment):
     )
 
 
-def credentials_dir_for(api_endpoint):
-    """Where the integration tests keep credentials for an environment.
+def config_dir():
+    """The config directory for the integration tests, if not the default.
 
-    The client keeps a single set of credentials in ~/.redivis, whichever environment
-    they're for. Pointing it at another environment means its refresh token gets
-    rejected there, at which point the client deletes the credentials. So each
-    environment's are kept apart, and never touch the developer's own.
+    The client keeps each environment's credentials apart, in
+    ~/.redivis/environments/<host>/, so they're only moved elsewhere when asked to.
     """
     if os.getenv("REDIVIS_TEST_CONFIG_DIR"):
         return Path(os.environ["REDIVIS_TEST_CONFIG_DIR"]).expanduser()
-    host = re.match(r"https?://([^/]+)", api_endpoint).group(1)
-    return Path("~/.redivis/environments").expanduser() / re.sub(r"[^\w.-]", "_", host)
+    return None
 
 
 def pytest_configure(config):
@@ -138,7 +135,10 @@ def pytest_configure(config):
     ) or settings.get("organization")
 
     os.environ["REDIVIS_API_ENDPOINT"] = api_endpoint
-    os.environ["REDIVIS_CONFIG_DIR"] = str(credentials_dir_for(api_endpoint))
+    if config_dir():
+        os.environ["REDIVIS_CONFIG_DIR"] = str(config_dir())
+    else:
+        os.environ.pop("REDIVIS_CONFIG_DIR", None)
     for variable in AMBIENT_VARIABLES:
         os.environ.pop(variable, None)
 
@@ -152,9 +152,11 @@ def pytest_configure(config):
 
 
 def pytest_report_header(config):
+    from redivis.common import auth
+
     return [
         f"redivis API: {config.redivis_api_endpoint}",
-        f"redivis credentials: {os.environ['REDIVIS_CONFIG_DIR']}",
+        f"redivis credentials: {auth.get_credentials_dir()}",
         f"redivis test owner: {config.redivis_owner or '(the authenticated user)'}",
     ]
 

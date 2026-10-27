@@ -119,8 +119,9 @@ def test_default_workflow_resolves_unqualified_tables(api):
 
 def test_credentials_are_reloaded_when_config_dir_changes(anonymous, tmp_path):
     for name in ["a", "b"]:
-        (tmp_path / name).mkdir()
-        (tmp_path / name / "python_credentials").write_text(
+        credentials_dir = tmp_path / name / "environments" / auth.get_environment_host()
+        credentials_dir.mkdir(parents=True)
+        (credentials_dir / "python_credentials").write_text(
             json.dumps({**TOKEN, "access_token": f"token_{name}"})
         )
 
