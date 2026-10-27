@@ -14,6 +14,12 @@ from redivis.common import auth, exceptions
 
 from .mock_redivis_api import jwt
 
+# Windows has no POSIX permission bits (os.chmod only sets a file read-only), so the
+# tests of them only run elsewhere
+posix_permissions_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows has no POSIX permission bits"
+)
+
 # The fixtures replace perform_oauth_login with a guard, so keep the real one
 real_login = auth.perform_oauth_login
 
@@ -88,7 +94,8 @@ def test_login_creates_the_credentials_directory(anonymous, oauth_server):
         json.loads(auth.get_credentials_file().read_text())["access_token"]
         == TOKEN["access_token"]
     )
-    assert file_mode(auth.get_credentials_dir()) == 0o700
+    if sys.platform != "win32":  # See posix_permissions_only
+        assert file_mode(auth.get_credentials_dir()) == 0o700
 
 
 def test_the_credentials_directory_can_be_overridden(tmp_path):
@@ -171,12 +178,14 @@ def file_mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
 
 
+@posix_permissions_only
 def test_credentials_are_saved_privately(anonymous, oauth_server):
     auth.perform_oauth_login(scope=None)
 
     assert file_mode(auth.get_credentials_file()) == 0o600
 
 
+@posix_permissions_only
 def test_refreshed_credentials_stay_private(api, oauth_server):
     # e.g. a file written by an earlier version of the client
     auth.get_credentials_dir().mkdir(parents=True)

@@ -44,6 +44,8 @@ Uploads
 - Temporary uploads no longer send your Redivis credentials to the storage service, or ask you to log in.
 - `upload.get()` returns the upload, and `upload.list_variables()` lists every variable by default.
 - Uploading a pandas DataFrame or Arrow table no longer imports polars, dask, and geopandas.
+- Fixed uploading a dask DataFrame with recent versions of dask, which failed for any DataFrame with a column of
+  Python objects (e.g., strings or dates).
 
 Downloads
 - Downloads are written to a temporary file, which replaces the destination only once it's complete and its MD5 hash
@@ -54,6 +56,7 @@ Downloads
 - `file.read()` handles `end_byte=0`, and `file.stream()` returns bytes again.
 
 Reading tables and queries
+- Fixed `to_polars_lazyframe()` with polars 2, which removed an argument the client passed to it.
 - Tables whose size isn't known yet can be read.
 - Read streams raise an error when given `variables` or `max_results`, rather than ignoring them.
 - Variables, including geography variables, are matched case-insensitively when reading.

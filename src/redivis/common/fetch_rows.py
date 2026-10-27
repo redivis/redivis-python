@@ -628,7 +628,8 @@ def read_rows(
             if output_type == "polars_lazyframe":
                 import polars
 
-                return polars.scan_ipc(f"{folder_path}/*", memory_map=True)
+                # Memory-mapped by default; polars 2 removed the memory_map argument
+                return polars.scan_ipc(f"{folder_path}/*")
 
             arrow_dataset = pyarrow_dataset.dataset(
                 folder_path,

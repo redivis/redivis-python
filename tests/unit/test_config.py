@@ -3,6 +3,7 @@
 import inspect
 import json
 import os
+from pathlib import Path
 
 import pytest
 import redivis
@@ -91,7 +92,7 @@ def test_defaults(monkeypatch):
     )
     assert config["progress"] is True
     assert config["config_dir"] is None
-    assert str(auth.get_redivis_dir()) == os.path.expanduser("~/.redivis")
+    assert auth.get_redivis_dir() == Path("~/.redivis").expanduser()
     assert config["max_parallelization"] is None
 
 

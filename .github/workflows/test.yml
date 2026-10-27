@@ -35,8 +35,11 @@ jobs:
         # Every supported Python version on Linux, and one on Windows and macOS for the
         # platform-specific code (paths, temp and config directories, file locking)
         os: [ubuntu-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
+          # actions/setup-python has no build of Python 3.9 for Ubuntu 26.04
+          - os: ubuntu-24.04
+            python-version: "3.9"
           - os: windows-latest
             python-version: "3.13"
           - os: macos-latest
@@ -50,7 +53,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       # mfusepy loads libfuse when it's imported, which the mount tests do. They're skipped on
       # Windows and macOS, whose runners have no FUSE (and macFUSE can't be installed on them)
+      # (fuse3 depends on whichever libfuse3 package the Ubuntu release has, e.g., libfuse3-3 or libfuse3-4)
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libfuse3-3
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fuse3
       - run: python -m pip install -e ".[test]"
       - run: python -m pytest tests/unit -n auto

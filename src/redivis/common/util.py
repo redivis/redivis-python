@@ -162,10 +162,11 @@ def get_parquet_rows_per_group(data):
 def get_dask_parquet_schema(data):
     """The schema for dask to write a DataFrame to parquet with.
 
-    dask infers the type of each column from the DataFrame's metadata, which has an
-    object column as a string, so writing one that holds any other python objects
-    (such as dates) fails. Instead, give those the type that pyarrow infers from a
-    sample of their values.
+    dask infers the type of each column from the DataFrame's metadata, which doesn't
+    know what an object column holds: earlier versions of dask treat one as a string, so
+    writing one that holds anything else (such as dates) fails, and newer versions fill
+    it with placeholder objects that pyarrow can't infer a type from at all. Instead,
+    give those the type that pyarrow infers from a sample of their values.
     """
     import pyarrow as pa
 
@@ -176,16 +177,32 @@ def get_dask_parquet_schema(data):
     sample = data[object_columns].head(10_000, npartitions=-1)
     types = {}
     for name in object_columns:
+        # A column with no values in the sample is a string, as dask has inferred
+        types[name] = pa.string()
         values = sample[name].dropna()
         if len(values):
             try:
                 types[name] = pa.array(values, from_pandas=True).type
             except (pa.ArrowInvalid, pa.ArrowTypeError):
-                # e.g., values of mixed types, which dask will report on
+                # e.g., values of mixed types, which dask will report on when it fails
+                # to write them as strings
                 pass
 
-    # dask infers the types of any columns not given here
-    return types or "infer"
+    # Given the types of only some columns, dask still infers every column's from the
+    # metadata, so give it the whole schema, inferring the others' as dask would
+    other_columns = pa.Schema.from_pandas(
+        data._meta_nonempty.drop(columns=object_columns), preserve_index=False
+    )
+    return pa.schema(
+        [
+            (
+                pa.field(name, types[name])
+                if name in types
+                else other_columns.field(name)
+            )
+            for name in data.columns
+        ]
+    )
 
 
 def convert_data_to_parquet(data):
