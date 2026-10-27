@@ -1,3 +1,6 @@
+import logging
+import time
+
 from ..common import exceptions
 
 from .Base import Base
@@ -52,9 +55,11 @@ class Version(Base):
         self.uri = self.properties["uri"]
         return self
 
-    def delete(self):
+    def delete(self, *, wait_for_finalization=False):
         self.properties = make_request(method="DELETE", path=self.uri)
         self.uri = self.properties["uri"]
+        if wait_for_finalization:
+            self._wait_for_finalization()
         return self
 
     def undelete(self):
@@ -81,6 +86,14 @@ class Version(Base):
             return None
 
         return Version(tag=self.properties["nextVersion"]["tag"], dataset=self._dataset)
+
+    def _wait_for_finalization(self):
+        # Releasing, unreleasing, or deleting a version takes effect immediately, but its data is moved in the
+        # background, and the dataset can't be released, unreleased, or deleted again until that finishes
+        while self.properties.get("isFinalizing"):
+            logging.debug("Version is still finalizing...")
+            time.sleep(2)
+            self.get()
 
     def dataset(self):
         # Avoids circular import

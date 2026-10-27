@@ -1,7 +1,7 @@
 """Uploads: the temp upload protocols, and Upload.create()'s conflicts and failures."""
 
 import pytest
-import requests
+import niquests
 
 from . import mock_redivis_api
 from redivis.common import exceptions, retryable_upload
@@ -14,11 +14,11 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(f"{self.status_code} error", response=self)
+            raise niquests.HTTPError(f"{self.status_code} error", response=self)
 
 
 class FakeStorage:
-    """Stands in for requests.put / requests.post against temp upload URLs.
+    """Stands in for niquests.put / niquests.post against temp upload URLs.
 
     Plays out `script`: responses (or exceptions to raise) for successive requests.
     """
@@ -26,8 +26,8 @@ class FakeStorage:
     def __init__(self, monkeypatch, script):
         self.script = list(script)
         self.requests = []
-        monkeypatch.setattr(retryable_upload.requests, "put", self.put)
-        monkeypatch.setattr(retryable_upload.requests, "post", self.post)
+        monkeypatch.setattr(retryable_upload.niquests, "put", self.put)
+        monkeypatch.setattr(retryable_upload.niquests, "post", self.post)
 
     def _respond(self, method, url, headers, data):
         body = data.read() if hasattr(data, "read") else data
@@ -53,7 +53,7 @@ def test_standard_upload_resends_the_whole_body_after_a_failure(monkeypatch):
     import io
 
     storage = FakeStorage(
-        monkeypatch, [requests.ConnectionError("reset"), FakeResponse(200)]
+        monkeypatch, [niquests.ConnectionError("reset"), FakeResponse(200)]
     )
     retryable_upload.perform_standard_upload(
         data=io.BytesIO(b"hello world"), temp_upload_url="https://proxy/temp"
@@ -79,10 +79,10 @@ def test_resumable_upload_restarts_an_expired_session(monkeypatch):
         monkeypatch,
         [
             # Starting the session fails to connect, then succeeds
-            requests.ConnectionError("no route"),
+            niquests.ConnectionError("no route"),
             FakeResponse(201, {"location": "https://proxy/session/1"}),
             # The upload is interrupted, and the session turns out to have expired
-            requests.ConnectionError("reset"),
+            niquests.ConnectionError("reset"),
             FakeResponse(404),
             FakeResponse(201, {"location": "https://proxy/session/2"}),
             FakeResponse(200),
@@ -109,7 +109,7 @@ def test_resumable_upload_resumes_from_what_was_received(monkeypatch):
         monkeypatch,
         [
             FakeResponse(201, {"location": "https://proxy/session/1"}),
-            requests.ConnectionError("reset"),
+            niquests.ConnectionError("reset"),
             FakeResponse(308, {"Range": "bytes=0-3"}),
             FakeResponse(200),
         ],

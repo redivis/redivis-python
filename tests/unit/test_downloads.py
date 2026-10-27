@@ -147,7 +147,7 @@ def test_read_ranges(api, table):
 
 
 def test_read_as_text_defaults_to_utf8(api, table):
-    # Served without a charset, as raw files are. Left to guess, requests decodes
+    # Served without a charset, as raw files are. Left to guess, niquests decodes
     # this as Big5.
     content = "A file for testing.\nIt has a few lines,\nincluding ünïcödé.\n".encode()
     api["raw_files"]["f1"] = content

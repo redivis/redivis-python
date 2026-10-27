@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import tempfile
 import time
 import atexit
@@ -87,12 +88,19 @@ def get_tempdir():
     return created_temp_dir
 
 
+def is_instance_of(data, module_name, class_name):
+    """Whether data is an instance of module_name.class_name, without importing that module.
+
+    If the module hasn't been imported, data can't be one of its classes; so data
+    libraries that aren't used (or installed) are never imported.
+    """
+    module = sys.modules.get(module_name)
+    return module is not None and isinstance(data, getattr(module, class_name))
+
+
 def get_parquet_rows_per_group(data):
-    import pandas as pd
     import pyarrow as pa
     import pyarrow.dataset as pa_dataset
-    from dask.dataframe import DataFrame as dask_df
-    import polars
 
     TARGET_GROUP_BYTES = 128 * 1024**2  # ~128MB per row group
     MAX_RPG = 1_000_000
@@ -121,24 +129,24 @@ def get_parquet_rows_per_group(data):
             bytes_per_row = s.nbytes / s.num_rows
 
     # --- Dask DataFrame: measure one partition, scale by row count ---
-    elif isinstance(data, dask_df):
+    elif is_instance_of(data, "dask.dataframe", "DataFrame"):
         head = data.head(SAMPLE_N, compute=True)
         if len(head) > 0:
             bytes_per_row = head.memory_usage(deep=True).sum() / len(head)
 
     # --- pandas / polars eager DataFrame ---
-    elif isinstance(data, pd.DataFrame):
+    elif is_instance_of(data, "pandas", "DataFrame"):
         n_rows = len(data)
         if n_rows > 0:
             head = data.head(SAMPLE_N)
             bytes_per_row = head.memory_usage(deep=True).sum() / len(head)
-    elif isinstance(data, polars.DataFrame):
+    elif is_instance_of(data, "polars", "DataFrame"):
         n_rows = data.height
         if n_rows > 0:
             tbl = data.head(SAMPLE_N).to_arrow()
             bytes_per_row = tbl.nbytes / tbl.num_rows
         # --- Polars LazyFrame: fetch a small slice, measure as Arrow ---
-    elif isinstance(data, polars.LazyFrame):
+    elif is_instance_of(data, "polars", "LazyFrame"):
         sample = data.head(SAMPLE_N).collect()
         if sample.height > 0:
             tbl = sample.to_arrow()
@@ -184,15 +192,11 @@ def convert_data_to_parquet(data):
     temp_file_path = f"{get_tempdir()}/parquet/{uuid.uuid4()}"
     pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
 
-    import geopandas
-    import polars
-    import pandas as pd
     import pyarrow as pa
     import pyarrow.dataset as pa_dataset
     import pyarrow.parquet as pa_parquet
-    from dask.dataframe import DataFrame as dask_df
 
-    if isinstance(data, dask_df):
+    if is_instance_of(data, "dask.dataframe", "DataFrame"):
         import dask
 
         # dask writes a file for each partition, but an upload is a single file. So
@@ -221,17 +225,8 @@ def convert_data_to_parquet(data):
     rows_per_group = get_parquet_rows_per_group(data)
 
     # IMPORTANT: we need to coerce all timestamps to us precision, since BQ doesn't support ns, and will then just load the timestamp as int64
-    if isinstance(data, geopandas.GeoDataFrame):
-        data.to_parquet(
-            path=temp_file_path,
-            coerce_timestamps="us",
-            allow_truncated_timestamps=True,
-            index=False,
-            row_group_size=rows_per_group,
-            write_statistics=False,
-            engine="pyarrow",
-        )
-    elif isinstance(data, pd.DataFrame):
+    # This includes a geopandas.GeoDataFrame, whose to_parquet() writes its geometry as GeoParquet
+    if is_instance_of(data, "pandas", "DataFrame"):
         data.to_parquet(
             path=temp_file_path,
             coerce_timestamps="us",
@@ -268,13 +263,13 @@ def convert_data_to_parquet(data):
             row_group_size=rows_per_group,
             write_statistics=False,
         )
-    elif isinstance(data, polars.LazyFrame):
+    elif is_instance_of(data, "polars", "LazyFrame"):
         data.sink_parquet(
             temp_file_path,
             row_group_size=rows_per_group,
             statistics=False,  # Note that this arg looks different than write_statistics elsewhere
         )
-    elif isinstance(data, polars.DataFrame):
+    elif is_instance_of(data, "polars", "DataFrame"):
         data.write_parquet(
             temp_file_path,
             use_pyarrow=True,
@@ -294,7 +289,7 @@ def convert_data_to_parquet(data):
 
 
 def raise_api_error(response_json=None, response_text=None, response=None):
-    # NB: a requests.Response for an error status is falsy, so test for None
+    # NB: a niquests.Response for an error status is falsy, so test for None
     status_code = (
         response.status_code
         if response is not None

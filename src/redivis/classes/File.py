@@ -5,8 +5,8 @@ import warnings
 from base64 import b64decode
 from pathlib import Path
 import time
-from requests import RequestException
-from urllib3.exceptions import HTTPError
+from niquests import RequestException
+from niquests.packages.urllib3.exceptions import HTTPError
 from ..common import exceptions
 from .Base import Base
 from ..common.api_request import make_request
@@ -158,8 +158,8 @@ class File(Base):
 
 def get_text_encoding(response):
     """The encoding of a file's text: the charset it was served with, if any, or else
-    utf-8, as for file.open(). (requests would otherwise guess, e.g. assuming
-    ISO-8859-1 for any text/* file.)"""
+    utf-8, as for file.open(). (niquests would otherwise guess from the content,
+    which can misread utf-8 as another encoding.)"""
     charset = re.search(
         r"charset=[\"']?([\w-]+)", response.headers.get("Content-Type", ""), re.I
     )

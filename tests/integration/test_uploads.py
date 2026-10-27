@@ -190,7 +190,7 @@ def test_replace_merge_strategy(new_dataset):
     dataset = new_dataset()
     table = dataset.table("data").create(upload_merge_strategy="replace")
     table.upload("first.csv").create(SMALL_CSV, progress=False)
-    dataset.release()
+    dataset.release(wait_for_finalization=True)
 
     next_table = dataset.create_next_version().table("data")
     next_table.upload("second.csv").create(b"id,name,value\n9,z,9.5\n", progress=False)
@@ -203,7 +203,7 @@ def test_append_merge_strategy_across_versions(new_dataset):
     dataset = new_dataset()
     table = dataset.table("data").create()
     table.upload("first.csv").create(SMALL_CSV, progress=False)
-    dataset.release()
+    dataset.release(wait_for_finalization=True)
 
     next_table = dataset.create_next_version().table("data")
     next_table.upload("second.csv").create(b"id,name,value\n9,z,9.5\n", progress=False)

@@ -8,7 +8,7 @@ import base64
 from pathlib import Path
 import re
 from urllib.parse import urlparse
-import requests
+import niquests
 
 from . import exceptions
 from .util import raise_api_error
@@ -154,7 +154,7 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
 
     challenge, verifier = get_pkce()
 
-    res = requests.post(
+    res = niquests.post(
         f"{get_base_url()}/oauth/device_authorization",
         verify=get_verify_ssl(),
         headers={"Content-Type": "application/json"},
@@ -194,7 +194,7 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
 
         time.sleep(parsed_response["interval"] or 5)
 
-        res = requests.post(
+        res = niquests.post(
             f"{get_base_url()}/oauth/token",
             verify=get_verify_ssl(),
             headers=headers,
@@ -259,7 +259,7 @@ def refresh_credentials(scope=None, amr_values=None):
         # The resource isn't public, so we need to authenticate now.
         perform_oauth_login(scope=default_scope)
     elif "refresh_token" in cached_credentials:
-        res = requests.post(
+        res = niquests.post(
             f"{get_base_url()}/oauth/token",
             verify=get_verify_ssl(),
             data={

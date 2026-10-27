@@ -3,8 +3,8 @@ import uuid
 import os
 import pathlib
 import time
-from requests import RequestException
-from urllib3.exceptions import HTTPError
+from niquests import RequestException
+from niquests.packages.urllib3.exceptions import HTTPError
 from contextlib import closing, nullcontext
 
 from . import exceptions

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import pytest
-import requests
+import niquests
 
 import redivis
 from redivis.common import auth, exceptions
@@ -61,8 +61,8 @@ def live(pytestconfig, worker_id):
     be reachable and the client has credentials for it."""
     api_endpoint = pytestconfig.redivis_api_endpoint
     try:
-        requests.get(api_endpoint, timeout=10, verify=auth.get_verify_ssl())
-    except requests.ConnectionError as error:
+        niquests.get(api_endpoint, timeout=10, verify=auth.get_verify_ssl())
+    except niquests.ConnectionError as error:
         pytest.skip(f"The Redivis API at {api_endpoint} is unreachable ({error})")
 
     user = authenticate(pytestconfig)

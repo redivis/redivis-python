@@ -57,7 +57,7 @@ def oauth_server(monkeypatch):
             )
         return FakeResponse(TOKEN)
 
-    monkeypatch.setattr(auth.requests, "post", post)
+    monkeypatch.setattr(auth.niquests, "post", post)
     monkeypatch.setattr("webbrowser.open", lambda *args, **kwargs: False)
     monkeypatch.setattr(auth, "perform_oauth_login", real_login)
     return requested_scopes
@@ -208,7 +208,7 @@ def test_a_failed_write_leaves_the_previous_credentials_intact(api):
 def test_a_server_error_while_refreshing_keeps_the_credentials(api, monkeypatch):
     auth.write_cached_credentials()
     monkeypatch.setattr(
-        auth.requests,
+        auth.niquests,
         "post",
         lambda url, **kwargs: FakeResponse("<html>Bad gateway</html>", 502),
     )
@@ -223,7 +223,7 @@ def test_a_server_error_while_refreshing_keeps_the_credentials(api, monkeypatch)
 def test_a_rejected_refresh_token_prompts_a_login(api, monkeypatch):
     auth.write_cached_credentials()
     monkeypatch.setattr(
-        auth.requests,
+        auth.niquests,
         "post",
         lambda url, **kwargs: FakeResponse({"error": "invalid_grant"}, 400),
     )

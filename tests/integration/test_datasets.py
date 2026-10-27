@@ -85,20 +85,22 @@ def test_release_and_version_history(new_dataset):
     dataset = new_dataset()
     helpers.add_data(dataset)
 
-    dataset.release(release_notes="First release")
+    # The next version can't be released until this one has finished being released
+    dataset.release(release_notes="First release", wait_for_finalization=True)
 
     assert dataset.version_tag == "v1_0"
     assert dataset.properties["version"]["isReleased"] is True
     version = dataset.version().get()
     assert version.properties["tag"] == "v1.0"
     assert version.properties["releaseNotes"] == "First release"
+    assert version.properties["isFinalizing"] is False
     assert dataset.previous_version() is None
 
     next_version = dataset.create_next_version()
     assert next_version.version_tag == "next"
     # A version can only be released if it changed something
     helpers.add_data(next_version, "more_data")
-    next_version.release()
+    next_version.release(wait_for_finalization=True)
     second_tag = next_version.properties["version"]["tag"]
     assert second_tag != "v1.0"
     assert next_version.version_tag == second_tag.replace(".", "_")
@@ -109,6 +111,26 @@ def test_release_and_version_history(new_dataset):
 
     # The released versions remain readable by their tags
     assert redivis.dataset(f"{dataset.qualified_reference.rsplit(':', 1)[0]}:v1.0").exists()
+
+    # A historic version's data is removed in the background
+    first_version = next(
+        v for v in next_version.list_versions() if v.properties["tag"] == "v1.0"
+    )
+    first_version.delete(wait_for_finalization=True)
+    assert first_version.properties["isDeleted"] is True
+    assert first_version.properties["isFinalizing"] is False
+
+
+def test_unrelease(new_dataset):
+    dataset = new_dataset()
+    helpers.add_data(dataset)
+    dataset.release(wait_for_finalization=True)
+
+    dataset.unrelease(wait_for_finalization=True)
+    assert dataset.version_tag == "next"
+    version = dataset.version().get()
+    assert version.properties["isReleased"] is False
+    assert version.properties["isFinalizing"] is False
 
 
 def test_version_update(new_dataset):

@@ -3,7 +3,7 @@
 import io
 
 import pytest
-import requests
+import niquests
 from redivis.common import api_request, auth, exceptions
 from redivis.common.util import raise_api_error
 
@@ -78,14 +78,14 @@ def test_unseekable_body_is_not_retried(api):
 def responses(monkeypatch):
     """Every Response the client receives, in order."""
     received = []
-    original = requests.request
+    original = niquests.request
 
     def record(**kwargs):
         response = original(**kwargs)
         received.append(response)
         return response
 
-    monkeypatch.setattr(requests, "request", record)
+    monkeypatch.setattr(niquests, "request", record)
     return received
 
 
@@ -239,8 +239,8 @@ def test_unauthenticated_request_is_sent_without_a_token(anonymous):
 
 
 def test_raise_api_error_reads_the_status_from_an_error_response():
-    # A requests.Response for an error status is falsy
-    response = requests.Response()
+    # A niquests.Response for an error status is falsy
+    response = niquests.Response()
     response.status_code = 404
 
     with pytest.raises(exceptions.NotFoundError):
@@ -258,5 +258,5 @@ def test_idempotent_requests_are_retried_after_connection_failures(api, table):
     )
 
     api["drop_connection"] = 1
-    with pytest.raises(requests.ConnectionError):
+    with pytest.raises(niquests.ConnectionError):
         make_request(method="POST", path="/queries", payload={"query": "SELECT 1"})

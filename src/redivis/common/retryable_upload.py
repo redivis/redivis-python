@@ -1,7 +1,7 @@
 import io
 import re
 import time
-import requests
+import niquests
 import os
 import logging
 from tqdm.utils import CallbackIOWrapper
@@ -40,7 +40,7 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
             chunk = data[start_byte:]
 
         try:
-            res = requests.put(
+            res = niquests.put(
                 url=resumable_url,
                 verify=get_verify_ssl(),
                 headers={
@@ -60,7 +60,7 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
                 start_byte = get_committed_bytes(res)
                 continue
             return
-        except requests.RequestException as e:
+        except niquests.RequestException as e:
             if retry_count >= MAX_RETRIES:
                 raise exceptions.NetworkError(
                     message=f"A network error occurred. Upload failed after {retry_count} retries.",
@@ -86,7 +86,7 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
 def initiate_resumable_upload(size, temp_upload_url, retry_count=0):
     did_request_complete = False
     try:
-        res = requests.post(
+        res = niquests.post(
             temp_upload_url,
             verify=get_verify_ssl(),
             headers={
@@ -98,7 +98,7 @@ def initiate_resumable_upload(size, temp_upload_url, retry_count=0):
         res.raise_for_status()
         return res.headers["location"]
 
-    except requests.RequestException as e:
+    except niquests.RequestException as e:
         if did_request_complete:
             raise exceptions.NetworkError(original_exception=e)
         else:
@@ -122,7 +122,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url):
     logging.debug("Attempting to resume upload")
 
     try:
-        res = requests.put(
+        res = niquests.put(
             url=resumable_url,
             verify=get_verify_ssl(),
             headers={"Content-Length": "0", "Content-Range": f"bytes */{file_size}"},
@@ -141,7 +141,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url):
             raise exceptions.RedivisError(
                 "An unknown error occurred. Please try again."
             )
-    except requests.RequestException as e:
+    except niquests.RequestException as e:
         if retry_count >= MAX_RETRIES:
             raise exceptions.NetworkError(original_exception=e) from e
 
@@ -174,7 +174,7 @@ def perform_standard_upload(data, temp_upload_url=None, progressbar=None):
 
     for retry_count in range(MAX_RETRIES + 1):
         try:
-            res = requests.put(
+            res = niquests.put(
                 url=temp_upload_url,
                 data=(
                     CallbackIOWrapper(progressbar.update, data, "read")
@@ -185,7 +185,7 @@ def perform_standard_upload(data, temp_upload_url=None, progressbar=None):
             )
             res.raise_for_status()
             return
-        except requests.RequestException as e:
+        except niquests.RequestException as e:
             if retry_count >= MAX_RETRIES:
                 raise exceptions.NetworkError(
                     message=f"A network error occurred. Upload failed after {retry_count} retries.",

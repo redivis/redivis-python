@@ -1,4 +1,4 @@
-import requests
+import niquests
 import logging
 import os
 import json
@@ -44,8 +44,8 @@ def make_request(
 
     logging.debug(f"Making API '{method}' request to '{args['url']}'")
     try:
-        r = requests.request(**args)
-    except (requests.ConnectionError, requests.Timeout):
+        r = niquests.request(**args)
+    except (niquests.ConnectionError, niquests.Timeout):
         # Retry a request that failed to connect (or timed out) with backoff. Only
         # idempotent requests are safe to repeat, since we can't know whether the server
         # received the original.

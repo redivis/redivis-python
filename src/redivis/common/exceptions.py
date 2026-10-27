@@ -59,7 +59,7 @@ class NetworkError(RedivisError):
     def __init__(
         self,
         message="A network error occurred",
-        # either requests.RequestException or urllib3.exceptions.HTTPError
+        # either niquests.RequestException or urllib3.exceptions.HTTPError
         original_exception=None,
     ):
         super().__init__(message)

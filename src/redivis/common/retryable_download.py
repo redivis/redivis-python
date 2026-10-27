@@ -15,8 +15,8 @@ from ..common.config import resolve_config
 from ..common.api_request import __get_api_endpoint, __get_user_agent, make_request
 from ..common.auth import get_auth_token, has_credentials, refresh_credentials
 from contextlib import closing
-from requests import RequestException
-from urllib3.exceptions import HTTPError
+from niquests import RequestException
+from niquests.packages.urllib3.exceptions import HTTPError
 import niquests
 
 
@@ -798,7 +798,7 @@ async def _download_single_file(
                                 on_progress(pending_progress_bytes, 1)
                         completed = True
 
-                except (niquests.exceptions.RequestException,) as e:
+                except RequestException as e:
                     if retry_count < MAX_RETRIES:
                         should_retry = True
                     else:

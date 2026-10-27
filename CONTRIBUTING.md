@@ -136,10 +136,17 @@ the same everywhere.
 
 ### To upload to PyPI
 
-First, update the version in `src/redivis/_version.py`.
-Also, make sure `twine` is installed.
-Then:
+First, update the version in `src/redivis/_version.py` and commit it. Then tag that commit with
+the version and push the tag:
 
 ```sh
-python3 setup.py upload
+git tag v0.21.2
+git push origin v0.21.2
 ```
+
+This runs the [publish workflow](.github/workflows/publish.yml), which builds the package and
+uploads it to PyPI. It fails without publishing if the tag doesn't match the version in
+`_version.py`. PyPI trusts the workflow directly (trusted publishing), so no API token is needed.
+
+To check the build locally, run `python -m pip install build && python -m build`, which writes the
+sdist and wheel to `dist/`.

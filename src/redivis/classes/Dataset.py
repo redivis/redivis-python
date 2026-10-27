@@ -173,21 +173,29 @@ class Dataset(Base):
     def query(self, query):
         return Query(query, default_dataset=self.qualified_reference)
 
-    def release(self, *, release_notes=None):
+    def release(self, *, release_notes=None, wait_for_finalization=False):
         version_res = make_request(
             method="POST",
             path=f"{self.uri}/versions/next/release",
             payload={"releaseNotes": release_notes},
         )
+        if wait_for_finalization:
+            Version(
+                version_res["tag"], dataset=self, properties=version_res
+            )._wait_for_finalization()
         self.uri = version_res["datasetUri"]
         self.get()
         return self
 
-    def unrelease(self):
+    def unrelease(self, *, wait_for_finalization=False):
         version_res = make_request(
             method="POST",
             path=f"{self.uri}/versions/current/unrelease",
         )
+        if wait_for_finalization:
+            Version(
+                version_res["tag"], dataset=self, properties=version_res
+            )._wait_for_finalization()
         self.uri = version_res["datasetUri"]
         self.get()
         return self

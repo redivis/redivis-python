@@ -5,6 +5,8 @@ import pytest
 import redivis
 from redivis.common import exceptions
 
+from .mock_redivis_api import paths
+
 
 def script(api, *responses):
     """Respond to the next requests with these bodies, in order."""
@@ -99,6 +101,49 @@ def test_version_delete_and_undelete_return_the_version(api):
     script(api, {"uri": "/v/1", "isDeleted": True}, {"uri": "/v/1", "isDeleted": False})
     assert version.delete() is version
     assert version.undelete() is version
+
+
+def test_release_waits_for_finalization_when_asked(api):
+    dataset_properties = {
+        "name": "ds",
+        "uri": "/datasets/owner.ds:abc1:v1_0",
+        "qualifiedReference": "owner.ds:abc1:v1_0",
+        "scopedReference": "ds:abc1:v1_0",
+        "owner": {"kind": "organization"},
+        "version": {"tag": "v1.0"},
+    }
+    version_properties = {
+        "tag": "v1.0",
+        "uri": "/datasets/owner.ds:abc1/versions/v1_0",
+        "datasetUri": "/datasets/owner.ds:abc1:v1_0",
+    }
+    script(
+        api,
+        {**version_properties, "isFinalizing": True},
+        {**version_properties, "isFinalizing": True},
+        {**version_properties, "isFinalizing": False},
+        dataset_properties,
+    )
+    redivis.dataset("owner.ds:abc1:next").release(wait_for_finalization=True)
+    assert api["response_script"] == []
+    assert len(paths("/versions/v1_0")) == 2
+
+    # Without the flag, the release returns as soon as it has been made
+    script(api, {**version_properties, "isFinalizing": True}, dataset_properties)
+    redivis.dataset("owner.ds:abc1:next").release()
+    assert api["response_script"] == []
+    assert len(paths("/versions/v1_0")) == 2
+
+
+def test_version_delete_waits_for_finalization_when_asked(api):
+    version = redivis.dataset("owner.ds").version("v1_0")
+    script(
+        api,
+        {"uri": "/v/1", "isDeleted": True, "isFinalizing": True},
+        {"uri": "/v/1", "isDeleted": True, "isFinalizing": False},
+    )
+    assert version.delete(wait_for_finalization=True) is version
+    assert version.properties["isFinalizing"] is False
 
 
 def test_datasource_updates_keep_the_sample_unless_changed(api):
