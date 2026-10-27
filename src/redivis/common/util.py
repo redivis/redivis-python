@@ -9,6 +9,7 @@ import uuid
 import logging
 
 from ..common import exceptions
+from .config import get_config
 
 
 def get_warning(kind):
@@ -69,11 +70,11 @@ def rm_tempdir():
 
 
 def get_tempdir():
-    if os.getenv("REDIVIS_TMPDIR"):
+    if get_config("tmp_dir"):
         user_suffix = os.environ.get("USER", os.environ.get("USERNAME")) or os.getuid()
         return str(
             pathlib.Path("/").joinpath(
-                os.getenv("REDIVIS_TMPDIR"),
+                os.path.expanduser(get_config("tmp_dir")),
                 f"redivis_{user_suffix}",
             )
         )

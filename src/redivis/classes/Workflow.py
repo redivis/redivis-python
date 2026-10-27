@@ -12,6 +12,7 @@ from ..common.util import split_reference
 
 from ..common import exceptions
 from ..common.api_request import make_request, make_paginated_request
+from ..common.config import get_config
 
 
 class Workflow(Base):
@@ -24,10 +25,10 @@ class Workflow(Base):
                 username, name = split_reference(name)
                 organization = Organization(username)
                 user = User(username)
-            elif os.getenv("REDIVIS_DEFAULT_USER"):
-                user = User(os.getenv("REDIVIS_DEFAULT_USER"))
-            elif os.getenv("REDIVIS_DEFAULT_ORGANIZATION"):
-                organization = Organization(os.getenv("REDIVIS_DEFAULT_ORGANIZATION"))
+            elif get_config("default_user"):
+                user = User(get_config("default_user"))
+            elif get_config("default_organization"):
+                organization = Organization(get_config("default_organization"))
             else:
                 raise exceptions.ValueError(
                     "Invalid workflow specifier, must be the fully qualified reference if no owner is specified"

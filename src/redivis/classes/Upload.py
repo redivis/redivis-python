@@ -10,6 +10,7 @@ import uuid
 from tqdm.auto import tqdm
 
 from ..common import exceptions
+from ..common.config import resolve_config
 from ..common.TabularReader import TabularReader
 from ..common.util import convert_data_to_parquet
 
@@ -118,8 +119,9 @@ class Upload(TabularReader):
         remove_on_fail=False,
         wait_for_finish=True,
         raise_on_fail=True,
-        progress=True,
+        progress=None,
     ):
+        progress = resolve_config("progress", progress)
 
         if data is not None and content is None:
             content = data

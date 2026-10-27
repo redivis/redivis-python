@@ -14,6 +14,7 @@ from ..common.TabularReader import TabularReader
 from ..common.api_request import make_request, make_paginated_request
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
 from ..common.util import split_reference
+from ..common.config import get_config, resolve_config
 
 
 class Table(TabularReader):
@@ -137,9 +138,13 @@ class Table(TabularReader):
         *,
         files=None,
         directory=None,
-        progress=True,
-        max_parallelization=os.cpu_count() * 5,
+        progress=None,
+        max_parallelization=None,
     ):
+        progress = resolve_config("progress", progress)
+        max_parallelization = resolve_config(
+            "max_parallelization", max_parallelization, (os.cpu_count() or 1) * 5
+        )
         if (files is None) == (directory is None):
             raise exceptions.ValueError("Either files or directory must be specified")
 
@@ -349,12 +354,12 @@ def get_table_parents(dataset, workflow):
         return dataset, workflow
     elif os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is not None:
         return None, None
-    elif os.getenv("REDIVIS_DEFAULT_WORKFLOW") is not None:
+    elif get_config("default_workflow") is not None:
         # Parsing the qualified reference resolves the owner, whether a user or an
         # organization
-        return None, Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
-    elif os.getenv("REDIVIS_DEFAULT_DATASET") is not None:
-        return Dataset(os.getenv("REDIVIS_DEFAULT_DATASET")), None
+        return None, Workflow(get_config("default_workflow"))
+    elif get_config("default_dataset") is not None:
+        return Dataset(get_config("default_dataset")), None
     return None, None
 
 

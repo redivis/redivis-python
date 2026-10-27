@@ -5,6 +5,7 @@ from ..common import exceptions
 
 from ..common.TabularReader import TabularReader
 from ..common.api_request import make_request, make_paginated_request
+from ..common.config import get_config
 
 
 class Query(TabularReader):
@@ -18,10 +19,10 @@ class Query(TabularReader):
         super().__init__(is_query=True)
         self.did_initiate = False
         if not default_workflow and not default_dataset:
-            if os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
-                default_workflow = os.getenv("REDIVIS_DEFAULT_WORKFLOW")
-            elif os.getenv("REDIVIS_DEFAULT_DATASET"):
-                default_dataset = os.getenv("REDIVIS_DEFAULT_DATASET")
+            if get_config("default_workflow"):
+                default_workflow = get_config("default_workflow")
+            elif get_config("default_dataset"):
+                default_dataset = get_config("default_dataset")
 
         self.payload = {"query": query}
         self.directory = None

@@ -13,6 +13,7 @@ from contextlib import closing
 from .fetch_rows import make_rows_request
 from ..common.api_request import make_request, make_paginated_request
 from ..common.util import get_warning
+from ..common.config import resolve_config
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Literal
 from datetime import datetime, timezone
 import weakref
@@ -39,7 +40,7 @@ class TabularReader(Base):
             *,
             format="csv",
             overwrite=False,
-            progress=True,
+            progress=None,
             max_parallelization=None,
             max_concurrency=None,
         ):
@@ -259,7 +260,7 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         file_id_variable: Optional[str] = None,
         file_name_variable: Optional[str] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         max_parallelization: Optional[int] = None,
     ) -> None:
         warnings.warn(
@@ -284,9 +285,9 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
         mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
             self, variables
@@ -311,9 +312,9 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
         mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
             self, variables
@@ -338,9 +339,9 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
         mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
             self, variables
@@ -365,9 +366,9 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
         mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
             self, variables
@@ -392,11 +393,11 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         dtype_backend: str = "pyarrow",
         date_as_object: bool = False,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
         mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
             self, variables
@@ -425,11 +426,11 @@ class TabularReader(Base):
         *,
         variables: Optional[Iterable[str]] = None,
         geography_variable: Union[str, None, Literal[""]] = "",
-        progress: bool = True,
+        progress: Optional[bool] = None,
         dtype_backend: str = "pyarrow",
         date_as_object: bool = False,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
         import geopandas
 
@@ -480,7 +481,7 @@ class TabularReader(Base):
         *,
         variables: Optional[Iterable[str]] = None,
         geography_variable: Union[str, None, Literal[""]] = "",
-        progress: bool = True,
+        progress: Optional[bool] = None,
     ) -> Any:
         warnings.warn(get_warning("dataframe_deprecation"), FutureWarning, stacklevel=2)
 
@@ -527,7 +528,7 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
     ) -> Iterable[Any]:
         mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
             self, variables
@@ -550,9 +551,9 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: Optional[int] = None,
         geography_variable: Union[str, None, Literal[""]] = "",
     ) -> None:
         if self._is_read_stream:
@@ -717,9 +718,9 @@ class TabularReader(Base):
         *,
         geography_variable: Union[str, None, Literal[""]] = "",
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: Optional[int] = None,
     ) -> None:
         if self._is_read_stream:
             raise exceptions.ValueError("Cannot call to_stata() on a ReadStream.")
@@ -844,7 +845,7 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
     ):
         raise exceptions.DeprecationError(
             "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization."
@@ -921,10 +922,17 @@ def get_mapped_variables(
 
 
 def arrow_table_to_pandas(
-    arrow_table: Any, dtype_backend: str, date_as_object: bool, max_parallelization: int
+    arrow_table: Any,
+    dtype_backend: str,
+    date_as_object: bool,
+    max_parallelization: Optional[int],
 ) -> Any:
     import pandas as pd
     import pyarrow as pa
+
+    max_parallelization = resolve_config(
+        "max_parallelization", max_parallelization, os.cpu_count() or 1
+    )
 
     pa.set_cpu_count(max_parallelization)
     pa.set_io_thread_count(max_parallelization)

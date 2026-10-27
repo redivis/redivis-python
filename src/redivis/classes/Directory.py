@@ -235,7 +235,7 @@ class Directory(Base):
         max_parallelization: Optional[int] = None,
         max_concurrency: Optional[int] = None,
         overwrite: bool = False,
-        progress: bool = True,
+        progress: Optional[bool] = None,
     ) -> None:
         if isinstance(path, str):
             path = Path(path)

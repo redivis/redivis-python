@@ -33,11 +33,9 @@ def api(mock_endpoint, monkeypatch, tmp_path):
     monkeypatch.delenv("REDIVIS_DEFAULT_NOTEBOOK", raising=False)
 
     # Never read, write, or delete the real credentials file
-    monkeypatch.setattr(auth, "redivis_dir", tmp_path / ".redivis")
-    monkeypatch.setattr(
-        auth, "credentials_file", tmp_path / ".redivis" / "python_credentials"
-    )
+    monkeypatch.setenv("REDIVIS_CONFIG_DIR", str(tmp_path / ".redivis"))
     monkeypatch.setattr(auth, "cached_credentials", dict(FAKE_CREDENTIALS))
+    monkeypatch.setattr(auth, "cached_credentials_file", None)
 
     # Never open a browser; tests that exercise the login flow replace this
     def unexpected_login(*args, **kwargs):

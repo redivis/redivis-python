@@ -61,7 +61,7 @@ def live(pytestconfig, worker_id):
     be reachable and the client has credentials for it."""
     api_endpoint = pytestconfig.redivis_api_endpoint
     try:
-        requests.get(api_endpoint, timeout=10, verify=auth.verify_ssl)
+        requests.get(api_endpoint, timeout=10, verify=auth.get_verify_ssl())
     except requests.ConnectionError as error:
         pytest.skip(f"The Redivis API at {api_endpoint} is unreachable ({error})")
 
@@ -107,8 +107,10 @@ def authenticate(pytestconfig):
     expected_base_url = re.match(
         r"https?://[^/]+", pytestconfig.redivis_api_endpoint
     ).group(0)
-    assert auth.base_url == expected_base_url, auth.base_url
-    assert str(auth.redivis_dir) == os.environ["REDIVIS_CONFIG_DIR"], auth.redivis_dir
+    assert auth.get_base_url() == expected_base_url, auth.get_base_url()
+    assert (
+        str(auth.get_redivis_dir()) == os.environ["REDIVIS_CONFIG_DIR"]
+    ), auth.get_redivis_dir()
 
     if not auth.has_credentials() and os.getenv("CI"):
         pytest.fail(

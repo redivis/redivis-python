@@ -5,6 +5,7 @@ import pathlib
 from datetime import datetime
 
 from ..common import exceptions
+from ..common.config import resolve_config
 from ..common.api_request import make_request
 from tqdm.auto import tqdm
 import re
@@ -41,7 +42,7 @@ class Export(Base):
         *,
         path=None,
         overwrite=False,
-        progress=True,
+        progress=None,
         max_parallelization=None,
         max_concurrency=None,
     ):
@@ -117,7 +118,8 @@ class Export(Base):
 
         return download_paths
 
-    def wait_for_finish(self, *, progress=True):
+    def wait_for_finish(self, *, progress=None):
+        progress = resolve_config("progress", progress)
         iter_count = 0
         if progress:
             pbar = tqdm(

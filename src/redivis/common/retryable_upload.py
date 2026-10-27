@@ -7,15 +7,7 @@ import logging
 from tqdm.utils import CallbackIOWrapper
 
 from ..common import exceptions
-
-verify_ssl = (
-    False
-    if os.getenv("REDIVIS_API_ENDPOINT", "https://redivis.com/api/v1").find(
-        "https://localhost", 0
-    )
-    == 0
-    else True
-)
+from .auth import get_verify_ssl
 
 MAX_RETRIES = 10
 
@@ -50,7 +42,7 @@ def perform_resumable_upload(data, size=None, temp_upload_url=None, progressbar=
         try:
             res = requests.put(
                 url=resumable_url,
-                verify=verify_ssl,
+                verify=get_verify_ssl(),
                 headers={
                     "Content-Length": str(file_size - start_byte),
                     # An empty upload has no byte range to send
@@ -96,7 +88,7 @@ def initiate_resumable_upload(size, temp_upload_url, retry_count=0):
     try:
         res = requests.post(
             temp_upload_url,
-            verify=verify_ssl,
+            verify=get_verify_ssl(),
             headers={
                 "x-upload-content-length": str(size),
                 "x-goog-resumable": "start",
@@ -132,7 +124,7 @@ def retry_partial_upload(*, retry_count=0, file_size, resumable_url):
     try:
         res = requests.put(
             url=resumable_url,
-            verify=verify_ssl,
+            verify=get_verify_ssl(),
             headers={"Content-Length": "0", "Content-Range": f"bytes */{file_size}"},
         )
 
@@ -189,7 +181,7 @@ def perform_standard_upload(data, temp_upload_url=None, progressbar=None):
                     if progressbar
                     else data
                 ),
-                verify=verify_ssl,
+                verify=get_verify_ssl(),
             )
             res.raise_for_status()
             return

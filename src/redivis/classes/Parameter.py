@@ -3,6 +3,7 @@ from ..common import exceptions
 from ..common.api_request import make_request
 from ..common.util import split_reference
 import os
+from ..common.config import get_config
 from urllib.parse import quote as quote_uri
 
 
@@ -15,8 +16,8 @@ class Parameter(Base):
                 parts = split_reference(name)
                 workflow = Workflow(".".join(parts[0:2]))
                 name = parts[-1]
-            elif os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
-                workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+            elif get_config("default_workflow"):
+                workflow = Workflow(get_config("default_workflow"))
             else:
                 raise exceptions.ValueError(
                     "Invalid parameter specifier, must be the fully qualified reference if no workflow is specified"

@@ -64,7 +64,7 @@ class File(Base):
         path=None,
         *,
         overwrite=False,
-        progress=True,
+        progress=None,
         on_progress=None,
         cancel_event=None,
     ):

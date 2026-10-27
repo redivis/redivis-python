@@ -80,15 +80,15 @@ def test_login_for_a_default_scope_doesnt_duplicate_it(api, oauth_server):
 
 
 def test_login_creates_the_credentials_directory(anonymous, oauth_server):
-    assert not auth.redivis_dir.exists()
+    assert not auth.get_redivis_dir().exists()
 
     auth.perform_oauth_login(scope=None)
 
     assert (
-        json.loads(auth.credentials_file.read_text())["access_token"]
+        json.loads(auth.get_credentials_file().read_text())["access_token"]
         == TOKEN["access_token"]
     )
-    assert file_mode(auth.redivis_dir) == 0o700
+    assert file_mode(auth.get_redivis_dir()) == 0o700
 
 
 def test_the_credentials_directory_can_be_overridden(tmp_path):
@@ -99,7 +99,7 @@ def test_the_credentials_directory_can_be_overridden(tmp_path):
         [
             sys.executable,
             "-c",
-            "from redivis.common import auth; print(auth.credentials_file)",
+            "from redivis.common import auth; print(auth.get_credentials_file())",
         ],
         env={
             **os.environ,
@@ -129,8 +129,8 @@ def test_private_resource_prompts_a_login_then_succeeds(anonymous, oauth_server)
 def test_has_credentials(anonymous):
     assert not auth.has_credentials()
 
-    auth.redivis_dir.mkdir()
-    auth.credentials_file.write_text(json.dumps(TOKEN))
+    auth.get_redivis_dir().mkdir()
+    auth.get_credentials_file().write_text(json.dumps(TOKEN))
     assert auth.has_credentials()
     assert auth.cached_credentials["access_token"] == TOKEN["access_token"]
 
@@ -171,35 +171,35 @@ def file_mode(path):
 def test_credentials_are_saved_privately(anonymous, oauth_server):
     auth.perform_oauth_login(scope=None)
 
-    assert file_mode(auth.credentials_file) == 0o600
+    assert file_mode(auth.get_credentials_file()) == 0o600
 
 
 def test_refreshed_credentials_stay_private(api, oauth_server):
     # e.g. a file written by an earlier version of the client
-    auth.redivis_dir.mkdir()
-    auth.credentials_file.write_text("{}")
-    os.chmod(auth.credentials_file, 0o644)
+    auth.get_redivis_dir().mkdir()
+    auth.get_credentials_file().write_text("{}")
+    os.chmod(auth.get_credentials_file(), 0o644)
     auth.cached_credentials["expires_at"] = time.time()
 
     auth.get_auth_token()
 
-    assert file_mode(auth.credentials_file) == 0o600
-    assert json.loads(auth.credentials_file.read_text())["access_token"] == (
+    assert file_mode(auth.get_credentials_file()) == 0o600
+    assert json.loads(auth.get_credentials_file().read_text())["access_token"] == (
         TOKEN["access_token"]
     )
 
 
 def test_a_failed_write_leaves_the_previous_credentials_intact(api):
     auth.write_cached_credentials()
-    previous = auth.credentials_file.read_text()
+    previous = auth.get_credentials_file().read_text()
     # Fails partway through serializing, after some of the file is written
     auth.cached_credentials["access_token"] = object()
 
     with pytest.raises(TypeError):
         auth.write_cached_credentials()
 
-    assert auth.credentials_file.read_text() == previous
-    assert os.listdir(auth.redivis_dir) == [auth.credentials_file.name]
+    assert auth.get_credentials_file().read_text() == previous
+    assert os.listdir(auth.get_redivis_dir()) == [auth.get_credentials_file().name]
 
 
 def test_a_server_error_while_refreshing_keeps_the_credentials(api, monkeypatch):
@@ -214,7 +214,7 @@ def test_a_server_error_while_refreshing_keeps_the_credentials(api, monkeypatch)
         auth.refresh_credentials()
 
     assert auth.cached_credentials["refresh_token"] == "refresh"
-    assert auth.credentials_file.exists()
+    assert auth.get_credentials_file().exists()
 
 
 def test_a_rejected_refresh_token_prompts_a_login(api, monkeypatch):
@@ -234,4 +234,4 @@ def test_a_rejected_refresh_token_prompts_a_login(api, monkeypatch):
 
     assert auth.refresh_credentials() == TOKEN["access_token"]
     assert len(logins) == 1
-    assert not auth.credentials_file.exists()
+    assert not auth.get_credentials_file().exists()

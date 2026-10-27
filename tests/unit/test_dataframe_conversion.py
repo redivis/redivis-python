@@ -67,7 +67,7 @@ def test_dask_object_columns_of_dates_stay_dates():
 
 
 def test_dask_partitions_are_cleaned_up(tmp_path, monkeypatch):
-    monkeypatch.setenv("REDIVIS_TMPDIR", str(tmp_path))
+    monkeypatch.setenv("REDIVIS_TMP_DIR", str(tmp_path))
     df = dd.from_pandas(pandas.DataFrame({"id": [1, 2, 3]}), npartitions=2)
 
     path = convert_data_to_parquet(df)

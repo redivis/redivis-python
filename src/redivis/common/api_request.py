@@ -10,6 +10,7 @@ import time
 from .auth import get_auth_token, has_credentials, refresh_credentials
 from .._version import __version__
 from .util import raise_api_error
+from .config import get_config
 
 
 def make_request(
@@ -282,8 +283,4 @@ def __get_user_agent():
 
 
 def __get_api_endpoint():
-    return (
-        "https://redivis.com/api/v1"
-        if os.getenv("REDIVIS_API_ENDPOINT") is None
-        else os.getenv("REDIVIS_API_ENDPOINT")
-    )
+    return get_config("api_endpoint")

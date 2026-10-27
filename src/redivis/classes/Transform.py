@@ -6,6 +6,7 @@ import os
 from urllib.parse import quote as quote_uri
 import warnings
 from ..common.util import get_warning, split_reference, wait_for_run
+from ..common.config import get_config
 
 
 class Transform(Base):
@@ -17,8 +18,8 @@ class Transform(Base):
                 parts = split_reference(name)
                 workflow = Workflow(".".join(parts[0:2]))
                 name = parts[-1]
-            elif os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
-                workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+            elif get_config("default_workflow"):
+                workflow = Workflow(get_config("default_workflow"))
             else:
                 raise exceptions.ValueError(
                     "Invalid transform specifier, must be the fully qualified reference if no workflow is specified"

@@ -11,6 +11,7 @@ from . import exceptions
 from tqdm.auto import tqdm
 import shutil
 from .util import get_tempdir
+from .config import resolve_config
 from .api_request import make_request
 from threading import Event
 import io
@@ -422,14 +423,18 @@ def read_rows(
     max_results=None,
     selected_variables=None,
     mapped_variables=None,
-    progress=True,
+    progress=None,
     coerce_schema=False,
     batch_preprocessor=None,
     instance=None,
     use_export_api=False,
-    max_parallelization=os.cpu_count(),
+    max_parallelization=None,
     allow_list_rows=True,
 ):
+    progress = resolve_config("progress", progress)
+    max_parallelization = resolve_config(
+        "max_parallelization", max_parallelization, os.cpu_count() or 1
+    )
     import pyarrow
     import pyarrow.dataset as pyarrow_dataset  # need to import separately, it's not on the pyarrow import
     from ..classes.Table import Table

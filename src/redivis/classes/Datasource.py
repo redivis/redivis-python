@@ -6,6 +6,7 @@ from ..common.api_request import make_request
 from urllib.parse import quote as quote_uri
 import os
 import re
+from ..common.config import get_config
 
 
 class Datasource(Base):
@@ -14,11 +15,11 @@ class Datasource(Base):
         from .Dataset import Dataset
 
         if not workflow:
-            if os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
-                workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+            if get_config("default_workflow"):
+                workflow = Workflow(get_config("default_workflow"))
             else:
                 raise exceptions.ValueError(
-                    "REDIVIS_DEFAULT_WORKFLOW must be set if no workflow is specified in the Datasource constructor"
+                    "A workflow must be specified in the Datasource constructor, or set as the default via redivis.config(default_workflow=...) or the REDIVIS_DEFAULT_WORKFLOW environment variable"
                 )
         if isinstance(source, Dataset) or isinstance(source, Workflow):
             source = source.qualified_reference

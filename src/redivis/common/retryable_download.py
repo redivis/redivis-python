@@ -11,6 +11,7 @@ import math
 import concurrent.futures
 import threading
 from ..common import exceptions
+from ..common.config import resolve_config
 from ..common.api_request import __get_api_endpoint, __get_user_agent, make_request
 from ..common.auth import get_auth_token, has_credentials, refresh_credentials
 from contextlib import closing
@@ -123,7 +124,7 @@ def perform_retryable_download(
     path,
     *,
     filename=None,
-    progress=True,
+    progress=None,
     pbar=None,
     cancel_event=None,
     query=None,
@@ -134,6 +135,7 @@ def perform_retryable_download(
     on_progress=None,
     retry_count=0,
 ):
+    progress = resolve_config("progress", progress)
     if size is not None and md5_hash is not None:
         exact_file_exists = check_filename(
             filename, overwrite, retry_count, size, md5_hash
@@ -321,7 +323,7 @@ def perform_parallel_download(
     max_parallelization=None,
     total_bytes=None,
     max_concurrency=None,
-    progress=True,
+    progress=None,
 ):
     """Download a list of files in parallel using async HTTP with HTTP/2 multiplexing.
 
@@ -363,13 +365,14 @@ def perform_parallel_download(
     n = len(uris)
     avg_file_size = total_bytes / n if total_bytes else 0
     cpu_count = os.cpu_count() or 1
-    effective_max_par = (
-        max_parallelization if max_parallelization is not None else cpu_count
+    effective_max_par = resolve_config(
+        "max_parallelization", max_parallelization, cpu_count
     )
     worker_count = max(1, min(8, math.ceil(n / 1000), cpu_count, effective_max_par))
 
     pbar = None
     on_progress = None
+    progress = resolve_config("progress", progress)
     if progress and total_bytes:
         file_count = 0
         pbar = tqdm(

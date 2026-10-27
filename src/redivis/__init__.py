@@ -10,6 +10,7 @@ from .classes.Notebook import Notebook as notebook
 from .classes.Transform import Transform as transform
 from .common import exceptions
 from .common.api_request import make_request as make_api_request
+from .common.config import config, get_config as _get_config
 
 # Note: these should be deleted at the end to clean up the namespace
 import warnings
@@ -59,10 +60,8 @@ def current_user():
 
 
 def current_workflow():
-    import os
-
-    if os.getenv("REDIVIS_DEFAULT_WORKFLOW") is not None:
-        return workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+    if _get_config("default_workflow") is not None:
+        return workflow(_get_config("default_workflow"))
 
     return None
 
@@ -85,6 +84,7 @@ __all__ = [
     "current_notebook",
     "current_user",
     "current_workflow",
+    "config",
     "file",
 ]
 

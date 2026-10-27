@@ -11,6 +11,7 @@ import os
 from urllib.parse import quote as quote_uri
 
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
+from ..common.config import get_config
 from ..common.util import (
     convert_data_to_parquet,
     get_warning,
@@ -28,8 +29,8 @@ class Notebook(Base):
                 parts = split_reference(name)
                 workflow = Workflow(".".join(parts[0:2]))
                 name = parts[-1]
-            elif os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
-                workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+            elif get_config("default_workflow"):
+                workflow = Workflow(get_config("default_workflow"))
             else:
                 raise exceptions.ValueError(
                     "Invalid notebook specifier, must be the fully qualified reference if no workflow is specified"
