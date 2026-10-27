@@ -115,14 +115,13 @@ def resolve_environment(environment):
 
 
 def config_dir():
-    """The config directory for the integration tests, if not the default.
+    """The config directory for the integration tests.
 
-    The client keeps each environment's credentials apart, in
-    ~/.redivis/environments/<host>/, so they're only moved elsewhere when asked to.
+    The tests' credentials are kept apart from the developer's own, even for
+    redivis.com. Within it, the client keeps each environment's apart (e.g., the
+    dev environment's in ~/.redivis/test/environments/local.host_8443/).
     """
-    if os.getenv("REDIVIS_TEST_CONFIG_DIR"):
-        return Path(os.environ["REDIVIS_TEST_CONFIG_DIR"]).expanduser()
-    return None
+    return Path(os.getenv("REDIVIS_TEST_CONFIG_DIR") or "~/.redivis/test").expanduser()
 
 
 def pytest_configure(config):
@@ -135,10 +134,7 @@ def pytest_configure(config):
     ) or settings.get("organization")
 
     os.environ["REDIVIS_API_ENDPOINT"] = api_endpoint
-    if config_dir():
-        os.environ["REDIVIS_CONFIG_DIR"] = str(config_dir())
-    else:
-        os.environ.pop("REDIVIS_CONFIG_DIR", None)
+    os.environ["REDIVIS_CONFIG_DIR"] = str(config_dir())
     for variable in AMBIENT_VARIABLES:
         os.environ.pop(variable, None)
 

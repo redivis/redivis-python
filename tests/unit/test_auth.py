@@ -241,47 +241,23 @@ def test_a_rejected_refresh_token_prompts_a_login(api, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "api_endpoint, host",
+    "api_endpoint, environment_dir",
     [
-        ("https://redivis.com/api/v1", "redivis.com"),
-        ("https://REDIVIS.com:443/api/v1", "redivis.com"),
+        ("https://redivis.com/api/v1", None),
+        ("https://REDIVIS.com:443/api/v1", None),
         ("http://localhost:8080/api/v1", "localhost_8080"),
         ("https://local.host:8443/api/v1", "local.host_8443"),
     ],
 )
-def test_each_environment_has_its_own_credentials(anonymous, api_endpoint, host):
+def test_each_environment_has_its_own_credentials(
+    anonymous, api_endpoint, environment_dir
+):
+    # Those for redivis.com are kept directly in the config directory
+    credentials_dir = auth.get_redivis_dir()
+    if environment_dir:
+        credentials_dir = credentials_dir / "environments" / environment_dir
     redivis.config(api_endpoint=api_endpoint)
     try:
-        assert auth.get_credentials_file() == (
-            auth.get_redivis_dir() / "environments" / host / "python_credentials"
-        )
+        assert auth.get_credentials_file() == credentials_dir / "python_credentials"
     finally:
         redivis.config(api_endpoint=None)
-
-
-def test_legacy_credentials_are_moved_to_redivis_com(anonymous):
-    legacy_credentials_file = auth.get_redivis_dir() / "python_credentials"
-    redivis.config(api_endpoint="https://redivis.com/api/v1")
-    try:
-        auth.get_redivis_dir().mkdir()
-        legacy_credentials_file.write_text(json.dumps(TOKEN))
-
-        assert auth.has_credentials()
-        assert not legacy_credentials_file.exists()
-        assert json.loads(auth.get_credentials_file().read_text()) == TOKEN
-
-        # And they're deleted when logging out, even if they haven't been moved yet
-        legacy_credentials_file.write_text(json.dumps(TOKEN))
-        auth.clear_cached_credentials()
-        assert not legacy_credentials_file.exists()
-        assert not auth.has_credentials()
-    finally:
-        redivis.config(api_endpoint=None)
-
-
-def test_legacy_credentials_are_only_moved_for_redivis_com(anonymous):
-    auth.get_redivis_dir().mkdir()
-    (auth.get_redivis_dir() / "python_credentials").write_text(json.dumps(TOKEN))
-
-    assert not auth.has_credentials()
-    assert (auth.get_redivis_dir() / "python_credentials").exists()

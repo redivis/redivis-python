@@ -64,10 +64,11 @@ as such in pytest's summary).
 #### Authenticating
 
 The first time you run the integration tests against an environment, the client opens a
-browser to log in to it, as it would for any user. The client keeps each environment's
-credentials apart, in `~/.redivis/environments/<host>/`, so the test environment's never
-touch your credentials for redivis.com. Set `REDIVIS_TEST_CONFIG_DIR` to use another config
-directory.
+browser to log in to it, as it would for any user. The tests use their own config
+directory, `~/.redivis/test`, so that their credentials never touch your own, even when
+testing against redivis.com. Within it, each environment's credentials are kept apart (e.g.,
+the dev environment's in `~/.redivis/test/environments/local.host_8443/`). Set
+`REDIVIS_TEST_CONFIG_DIR` to keep them somewhere else.
 
 For a non-interactive run (e.g., in CI, where `CI` is set and the tests fail rather than wait
 for a login), provide an API token for the environment instead:

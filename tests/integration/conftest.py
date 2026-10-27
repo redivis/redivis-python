@@ -108,6 +108,9 @@ def authenticate(pytestconfig):
         r"https?://[^/]+", pytestconfig.redivis_api_endpoint
     ).group(0)
     assert auth.get_base_url() == expected_base_url, auth.get_base_url()
+    assert (
+        str(auth.get_redivis_dir()) == os.environ["REDIVIS_CONFIG_DIR"]
+    ), auth.get_redivis_dir()
 
     if not auth.has_credentials() and os.getenv("CI"):
         pytest.fail(
