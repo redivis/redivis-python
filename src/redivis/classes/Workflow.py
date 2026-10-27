@@ -58,6 +58,39 @@ class Workflow(Base):
     def __repr__(self):
         return f"<Workflow {self.qualified_reference}>"
 
+    def _rectify_ambiguous_owner(self):
+        # A reference like "owner.workflow_name" could be owned by either
+        if self.user and self.organization:
+            if (self.properties or {}).get("owner"):
+                if self.properties["owner"]["kind"] == "user":
+                    self.organization = None
+                else:
+                    self.user = None
+            elif self.organization.exists():
+                self.user = None
+            else:
+                self.organization = None
+
+    def create(self, *, description=None, is_public=False):
+        self._rectify_ambiguous_owner()
+        owner = self.organization or self.user
+
+        properties = make_request(
+            method="POST",
+            path=f"{owner.uri}/workflows",
+            payload={
+                "name": self.name,
+                "description": description,
+                "isPublic": is_public,
+            },
+        )
+        update_properties(self, properties)
+        return self
+
+    def delete(self):
+        make_request(method="DELETE", path=self.uri)
+        return
+
     def list_datasources(self, *, max_results=None):
         data_sources = make_paginated_request(
             path=f"{self.uri}/dataSources",
@@ -157,3 +190,4 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
+    instance._rectify_ambiguous_owner()

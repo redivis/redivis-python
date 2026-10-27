@@ -68,6 +68,9 @@ def reset():
             "truncate_rows_once": 0,
             # The next listRows request drops the connection without responding
             "fail_rows_once": False,
+            # listRows refuses to serve the rows as a single response, as for an
+            # unreleased table whose uploads have different schemas
+            "rows_read_session_required": False,
             # Raw file contents, by file id
             "raw_files": {},
             # The Range header of each rawFiles request (None if absent)
@@ -370,6 +373,15 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["fail_rows_once"] = False
                 self.close_connection = True
                 return
+            if STATE["rows_read_session_required"]:
+                return self._send(
+                    {
+                        "status": 400,
+                        "error": "read_session_required",
+                        "error_description": "Use a read session",
+                    },
+                    status=400,
+                )
             names = (
                 query["selectedVariables"].split(",")
                 if "selectedVariables" in query

@@ -33,6 +33,25 @@ def test_streamed_columns_match_variables_case_insensitively(api, table):
     assert batches[0].schema.names == ["ID", "Name", "VAL"]
 
 
+@pytest.mark.parametrize("num_bytes", [1000, 1e9], ids=["list_rows", "read_session"])
+def test_columns_are_coerced_to_string_variables(api, table, num_bytes):
+    # E.g., a column of integers in one upload, in a table where another upload's
+    # values made it a string
+    api["container_kind"] = "dataset"
+    api["num_bytes"] = num_bytes
+    api["variables"] = [
+        {"name": "id", "type": "string"},
+        {"name": "name", "type": "string"},
+        {"name": "val", "type": "string"},
+    ]
+
+    result = table.to_arrow_table(progress=False).sort_by("name")
+
+    assert [str(t) for t in result.schema.types] == ["string"] * 3
+    assert result.column("id").to_pylist()[:2] == ["0", "1"]
+    assert result.column("val").to_pylist()[:2] == ["0", "0.5"]
+
+
 def test_directory_listings_are_cached_by_their_variables(api, table):
     api["file_index"] = [
         {"file_id": "f1", "file_name": "a.png", "alt_name": "alt_a.png"},

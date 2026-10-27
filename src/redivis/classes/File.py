@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import warnings
 from base64 import b64decode
 from pathlib import Path
@@ -113,16 +114,13 @@ class File(Base):
             parse_response=False,
             headers=range_headers,
         )
+        content = r.content
         if range_headers and r.status_code != 206:
             # The server ignored the range and sent the whole file
-            content = r.content[
+            content = content[
                 start_byte : int(end_byte) + 1 if end_byte is not None else None
             ]
-            return content.decode(r.encoding or "utf-8") if as_text else content
-        if as_text:
-            return r.text
-        else:
-            return r.content
+        return content.decode(get_text_encoding(r)) if as_text else content
 
     def stream(self, *, start_byte=0, end_byte=None):
         warnings.warn(
@@ -156,6 +154,16 @@ class File(Base):
             uri=self.uri, start_byte=start_byte, end_byte=end_byte, file=self
         )
         return stream
+
+
+def get_text_encoding(response):
+    """The encoding of a file's text: the charset it was served with, if any, or else
+    utf-8, as for file.open(). (requests would otherwise guess, e.g. assuming
+    ISO-8859-1 for any text/* file.)"""
+    charset = re.search(
+        r"charset=[\"']?([\w-]+)", response.headers.get("Content-Type", ""), re.I
+    )
+    return charset.group(1) if charset else "utf-8"
 
 
 class Stream(io.BufferedIOBase):

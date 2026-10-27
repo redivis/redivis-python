@@ -1,15 +1,15 @@
 """Fixtures for tests that run against an in-process mock of the Redivis API.
 
-Unlike the tests in the parent directory, these need no Redivis server or
-credentials: `pytest tests/offline`
+Unlike the integration tests, these need no Redivis server or credentials:
+`pytest tests/unit`
 """
 
 import time
 
 import pytest
 
-import mock_redivis_api
-from mock_redivis_api import FAKE_CREDENTIALS
+from . import mock_redivis_api
+from .mock_redivis_api import FAKE_CREDENTIALS
 
 
 @pytest.fixture(scope="session")

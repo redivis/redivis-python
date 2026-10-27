@@ -3,7 +3,7 @@
 import pytest
 import requests
 
-import mock_redivis_api
+from . import mock_redivis_api
 from redivis.common import exceptions, retryable_upload
 
 
@@ -162,6 +162,29 @@ def test_failed_uploads_are_removed_even_without_raising(api, table):
 
     with pytest.raises(exceptions.JobError):
         table.upload("data.csv").create(b"a,b\n1,2\n", rename_on_conflict=True)
+
+
+def test_large_in_memory_file_is_uploaded_from_its_position(api, table):
+    import io
+
+    content = io.BytesIO(b"skipped" + b"x" * (2**20 + 1))
+    content.seek(len(b"skipped"))
+
+    table.upload("data.csv").create(content, rename_on_conflict=True, wait_for_finish=False)
+
+    assert [body for _, _, body in api["json_bodies"] if "tempUploads" in body] == [
+        {"tempUploads": [{"size": 2**20 + 1, "name": "data.csv", "resumable": False}]}
+    ]
+    assert list(api["temp_storage"].values()) == [b"x" * (2**20 + 1)]
+
+
+def test_upload_takes_the_name_the_api_gives_it(api, table):
+    # As happens with rename_on_conflict
+    upload = table.upload("data.csv").create(
+        b"a,b\n1,2\n", rename_on_conflict=True, wait_for_finish=False
+    )
+
+    assert upload.name == "My Upload"
 
 
 def test_upload_get_returns_the_upload(api, table):

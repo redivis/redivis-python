@@ -54,7 +54,11 @@ REQUIRED = [
 
 # What packages are optional?
 EXTRAS = {
-    # 'fancy feature': ['django'],
+    # For running the test suite; see CONTRIBUTING.md
+    "test": [
+        "pytest >= 7.0",
+        "pytest-xdist >= 3.0",
+    ],
 }
 
 # The rest you shouldn't have to touch too much :)

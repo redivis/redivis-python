@@ -116,6 +116,10 @@ class Transform(Base):
         self.uri = self.properties["uri"]
         return self
 
+    def delete(self):
+        make_request(method="DELETE", path=self.uri)
+        return
+
     def output_table(self):
         self.get()
         return Table(

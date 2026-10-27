@@ -5,7 +5,7 @@ import hashlib
 
 import pytest
 
-import mock_redivis_api
+from . import mock_redivis_api
 from redivis.common import exceptions
 from redivis.common.retryable_download import (
     perform_parallel_download,
@@ -144,6 +144,17 @@ def test_read_ranges(api, table):
     api["ignore_raw_file_range"] = True
     assert f.read(start_byte=10, end_byte=19) == CONTENT[10:20]
     assert f.read(start_byte=10) == CONTENT[10:]
+
+
+def test_read_as_text_defaults_to_utf8(api, table):
+    # Served without a charset, as raw files are. Left to guess, requests decodes
+    # this as Big5.
+    content = "A file for testing.\nIt has a few lines,\nincluding ünïcödé.\n".encode()
+    api["raw_files"]["f1"] = content
+    f = file(table, content)
+
+    assert f.read(as_text=True) == content.decode()
+    assert f.read(as_text=True, start_byte=2) == content[2:].decode()
 
 
 def test_stream_returns_bytes(api, table):

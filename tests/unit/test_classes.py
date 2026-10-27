@@ -193,3 +193,64 @@ def test_unnamed_transforms_are_named_on_creation(api):
         "sourceTable": "owner.ds.t",
         "query": "SELECT 1",
     }
+
+
+def workflow_properties(owner_kind):
+    return {
+        "name": "wf",
+        "uri": "/workflows/owner.wf:abc1",
+        "qualifiedReference": "owner.wf:abc1",
+        "scopedReference": "wf:abc1",
+        "owner": {"kind": owner_kind},
+    }
+
+
+def test_workflow_create(api):
+    script(api, workflow_properties("user"))
+
+    workflow = redivis.user("owner").workflow("wf").create(description="About")
+
+    assert ("POST", "/api/v1/users/owner/workflows") in [
+        (method, path) for method, path, _, _ in api["requests"]
+    ]
+    assert json_bodies(api, "POST") == [
+        {"name": "wf", "description": "About", "isPublic": False}
+    ]
+    assert workflow.qualified_reference == "owner.wf:abc1"
+    assert workflow.uri == "/workflows/owner.wf:abc1"
+    assert workflow.organization is None
+
+
+def test_workflow_create_resolves_an_ambiguous_owner(api):
+    # The owner of "owner.wf" is an organization if one by that name exists
+    script(api, {"results": [], "nextPageToken": None}, workflow_properties("organization"))
+
+    workflow = redivis.workflow("owner.wf").create(is_public=True)
+
+    assert [path for _, path, _, _ in api["requests"]] == [
+        "/api/v1/organizations/owner/datasets",
+        "/api/v1/organizations/owner/workflows",
+    ]
+    assert json_bodies(api, "POST")[-1]["isPublic"] is True
+    assert workflow.user is None
+    assert workflow.organization.name == "owner"
+
+
+@pytest.mark.parametrize(
+    "resource, path",
+    [
+        (lambda: redivis.workflow("owner.wf"), "/api/v1/workflows/owner.wf"),
+        (lambda: redivis.transform("owner.wf.t"), "/api/v1/transforms/owner.wf.t"),
+        (
+            lambda: redivis.workflow("owner.wf").datasource("owner.ds"),
+            "/api/v1/workflows/owner.wf/dataSources/owner.ds",
+        ),
+    ],
+)
+def test_delete(api, resource, path):
+    # As the API responds when there's nothing to return
+    api["response_script"].append((200, b"OK"))
+
+    assert resource().delete() is None
+
+    assert [(m, p) for m, p, _, _ in api["requests"]] == [("DELETE", path)]

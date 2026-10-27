@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# Always test the working tree, rather than whichever version of the package happens
+# to be installed in the environment
+pythonpath = ["src"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "integration: runs against a live Redivis API (see CONTRIBUTING.md). Deselect with -m 'not integration'",
+    "slow: takes minutes rather than seconds (e.g., multi-GB uploads); only runs with --run-slow",
+    "organization: needs an organization administered by the test user, given by --redivis-organization",
+]
+filterwarnings = [
+    "ignore::urllib3.exceptions.InsecureRequestWarning",
+    # Tests reference the resources they create by name
+    "ignore:No reference id was provided:UserWarning",
+    "ignore:Dask dataframe query planning is disabled:FutureWarning",
+]

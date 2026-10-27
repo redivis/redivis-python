@@ -9,7 +9,7 @@ from redivis.classes.ReadStream import ReadStream
 from redivis.classes.Upload import Upload
 from redivis.common import exceptions
 
-from mock_redivis_api import DEFAULT_NUM_ROWS as N, paths
+from .mock_redivis_api import DEFAULT_NUM_ROWS as N, paths
 
 
 def test_large_query_reads_via_export(api):

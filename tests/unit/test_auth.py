@@ -12,7 +12,7 @@ import pytest
 import redivis
 from redivis.common import auth, exceptions
 
-from mock_redivis_api import jwt
+from .mock_redivis_api import jwt
 
 # The fixtures replace perform_oauth_login with a guard, so keep the real one
 real_login = auth.perform_oauth_login
@@ -92,14 +92,22 @@ def test_login_creates_the_credentials_directory(anonymous, oauth_server):
 
 
 def test_the_credentials_directory_can_be_overridden(tmp_path):
-    # It's resolved on import, so check it in a fresh interpreter
+    # It's resolved on import, so check it in a fresh interpreter, importing the same
+    # copy of the package as these tests
+    package_root = str(Path(redivis.__file__).parents[1])
     result = subprocess.run(
         [
             sys.executable,
             "-c",
             "from redivis.common import auth; print(auth.credentials_file)",
         ],
-        env={**os.environ, "REDIVIS_CONFIG_DIR": str(tmp_path / "config")},
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                filter(None, [package_root, os.getenv("PYTHONPATH")])
+            ),
+            "REDIVIS_CONFIG_DIR": str(tmp_path / "config"),
+        },
         capture_output=True,
         text=True,
         check=True,

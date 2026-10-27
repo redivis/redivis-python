@@ -224,6 +224,10 @@ class TabularReader(Base):
         if target_count < 1:
             raise exceptions.ValueError("target_count must be at least 1")
 
+        if self._is_query:
+            # A query doesn't have a URI to read from until it's been started
+            check_is_ready(self)
+
         payload = {"requestedStreamCount": target_count, "format": "arrow"}
 
         if variables is not None:

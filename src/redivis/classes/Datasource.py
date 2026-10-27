@@ -57,6 +57,11 @@ class Datasource(Base):
         self.uri = self.properties["uri"]
         return self
 
+    def delete(self):
+        # Also deletes the transforms and notebooks that depend on the datasource
+        make_request(method="DELETE", path=self.uri)
+        return
+
     def exists(self):
         try:
             make_request(method="HEAD", path=self.uri)

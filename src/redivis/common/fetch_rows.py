@@ -403,7 +403,19 @@ class RedivisArrowIterator:
             pass
 
 
-def make_rows_request(
+def make_rows_request(**kwargs):
+    try:
+        return read_rows(**kwargs)
+    except exceptions.APIError as e:
+        # listRows can't always serve the rows as a single response (e.g., those of an
+        # unreleased version's uploads, when their schemas differ), so read them through
+        # a read session instead
+        if e.message != "read_session_required":
+            raise
+        return read_rows(**kwargs, allow_list_rows=False)
+
+
+def read_rows(
     *,
     uri,
     output_type="dataframe",
@@ -416,6 +428,7 @@ def make_rows_request(
     instance=None,
     use_export_api=False,
     max_parallelization=os.cpu_count(),
+    allow_list_rows=True,
 ):
     import pyarrow
     import pyarrow.dataset as pyarrow_dataset  # need to import separately, it's not on the pyarrow import
@@ -450,7 +463,11 @@ def make_rows_request(
             and max_results is None
         )
 
-        if not use_export_api and should_use_list_rows(instance, max_results):
+        if (
+            not use_export_api
+            and allow_list_rows
+            and should_use_list_rows(instance, max_results)
+        ):
             num_rows = get_expected_list_rows(instance, max_results)
             sources = [
                 list_rows_source(
@@ -486,12 +503,17 @@ def make_rows_request(
         progressbar = tqdm(total=num_rows, leave=False, mininterval=0.2)
 
     if output_type == "arrow_iterator":
-        return RedivisArrowIterator(
-            sources=sources,
-            mapped_variables=mapped_variables,
-            progressbar=progressbar,
-            coerce_schema=coerce_schema,
-        )
+        try:
+            return RedivisArrowIterator(
+                sources=sources,
+                mapped_variables=mapped_variables,
+                progressbar=progressbar,
+                coerce_schema=coerce_schema,
+            )
+        except Exception:
+            if progressbar:
+                progressbar.close()
+            raise
 
     folder = None
     folder_path = None
@@ -636,6 +658,9 @@ def make_rows_request(
             shutil.rmtree(folder_path, ignore_errors=True)
             return arrow_table
     finally:
+        # Normally already closed, unless the read failed
+        if progressbar:
+            progressbar.close()
         if (
             folder_path
             and output_type != "arrow_dataset"
@@ -668,6 +693,8 @@ def coerce_arrow_array(pyarrow_array, variable):
     import pyarrow
 
     if variable["type"] == "string" or variable["type"] == "geography":
+        # Arrays of any other type are cast to strings when they're assembled into a
+        # record batch with the variables' schema
         return pyarrow_array
     elif variable["type"] == "integer":
         if pyarrow_array.type == "int64":

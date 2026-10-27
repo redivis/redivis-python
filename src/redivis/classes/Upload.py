@@ -202,7 +202,14 @@ class Upload(TabularReader):
                     did_reopen_file = True
 
                 if size is None:
-                    size = os.stat(content.name).st_size
+                    if isinstance(getattr(content, "name", None), str):
+                        size = os.stat(content.name).st_size
+                    else:
+                        # E.g., an io.BytesIO, which has no file to stat. It's uploaded
+                        # from its current position.
+                        position = content.tell()
+                        size = content.seek(0, io.SEEK_END) - position
+                        content.seek(position)
 
                 if progress:
                     pbar_bytes = tqdm(
@@ -286,6 +293,8 @@ class Upload(TabularReader):
             )
             self.properties = response
             self.uri = self.properties["uri"]
+            # The API may have named it differently, e.g. with rename_on_conflict
+            self.name = self.properties.get("name", self.name)
             is_small_upload = content is not None
         finally:
             # Small content is sent with the request above, so any file is only closed

@@ -7,7 +7,7 @@ import requests
 from redivis.common import api_request, auth, exceptions
 from redivis.common.util import raise_api_error
 
-from mock_redivis_api import FAKE_CREDENTIALS
+from .mock_redivis_api import FAKE_CREDENTIALS
 
 TABLE = "/tables/a.b.mock"
 
@@ -248,7 +248,7 @@ def test_raise_api_error_reads_the_status_from_an_error_response():
 
 
 def test_idempotent_requests_are_retried_after_connection_failures(api, table):
-    import mock_redivis_api
+    from . import mock_redivis_api
     from redivis.common.api_request import make_request
 
     api["drop_connection"] = 2

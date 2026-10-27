@@ -150,6 +150,35 @@ def get_parquet_rows_per_group(data):
     return max(MIN_RPG, min(MAX_RPG, rpg))
 
 
+def get_dask_parquet_schema(data):
+    """The schema for dask to write a DataFrame to parquet with.
+
+    dask infers the type of each column from the DataFrame's metadata, which has an
+    object column as a string, so writing one that holds any other python objects
+    (such as dates) fails. Instead, give those the type that pyarrow infers from a
+    sample of their values.
+    """
+    import pyarrow as pa
+
+    object_columns = [name for name, dtype in data.dtypes.items() if dtype == object]
+    if not object_columns:
+        return "infer"
+
+    sample = data[object_columns].head(10_000, npartitions=-1)
+    types = {}
+    for name in object_columns:
+        values = sample[name].dropna()
+        if len(values):
+            try:
+                types[name] = pa.array(values, from_pandas=True).type
+            except (pa.ArrowInvalid, pa.ArrowTypeError):
+                # e.g., values of mixed types, which dask will report on
+                pass
+
+    # dask infers the types of any columns not given here
+    return types or "infer"
+
+
 def convert_data_to_parquet(data):
     temp_file_path = f"{get_tempdir()}/parquet/{uuid.uuid4()}"
     pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
@@ -161,6 +190,32 @@ def convert_data_to_parquet(data):
     import pyarrow.dataset as pa_dataset
     import pyarrow.parquet as pa_parquet
     from dask.dataframe import DataFrame as dask_df
+
+    if isinstance(data, dask_df):
+        import dask
+
+        # dask writes a file for each partition, but an upload is a single file. So
+        # write them to a directory, then combine them as an arrow Dataset, below.
+        partitions_dir = f"{temp_file_path}_partitions"
+        # By default, each new dask collection (including those made here, to write the
+        # DataFrame) converts its object columns to strings, which would turn e.g. a
+        # column of dates into strings. Write the DataFrame as it is instead.
+        with dask.config.set({"dataframe.convert-string": False}):
+            data.to_parquet(
+                partitions_dir,
+                write_index=False,
+                schema=get_dask_parquet_schema(data),
+                coerce_timestamps="us",
+                allow_truncated_timestamps=True,
+                write_statistics=False,
+                engine="pyarrow",
+            )
+        try:
+            return convert_data_to_parquet(
+                pa_dataset.dataset(partitions_dir, format="parquet")
+            )
+        finally:
+            shutil.rmtree(partitions_dir, ignore_errors=True)
 
     rows_per_group = get_parquet_rows_per_group(data)
 
@@ -212,18 +267,6 @@ def convert_data_to_parquet(data):
             row_group_size=rows_per_group,
             write_statistics=False,
         )
-    elif isinstance(data, dask_df):
-        # TODO: this can be multiple files, we'll want to refactor once we have the new import API
-        data.to_parquet(
-            temp_file_path,
-            write_index=False,
-            coerce_timestamps="us",
-            allow_truncated_timestamps=True,
-            row_group_size=rows_per_group,
-            write_statistics=False,
-            engine="pyarrow",
-        )
-        temp_file_path = f"{temp_file_path}/part.0.parquet"
     elif isinstance(data, polars.LazyFrame):
         data.sink_parquet(
             temp_file_path,

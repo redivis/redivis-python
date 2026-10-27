@@ -5,7 +5,7 @@ import redivis
 from redivis.common import exceptions
 from redivis.common.fetch_rows import LIST_ROWS_MAX_BYTES
 
-from mock_redivis_api import DEFAULT_NUM_ROWS as N, TABLE_PATH, paths
+from .mock_redivis_api import DEFAULT_NUM_ROWS as N, TABLE_PATH, paths
 
 ROWS = f"{TABLE_PATH}/rows"
 READ_SESSIONS = f"{TABLE_PATH}/readSessions"
@@ -113,6 +113,35 @@ def test_dataset_tables_read_via_list_rows(api, table):
     assert len(df) == N
 
 
+@pytest.mark.parametrize("output_type", ["arrow_table", "arrow_iterator"])
+def test_rows_listrows_cant_serve_are_read_through_a_read_session(
+    api, table, output_type
+):
+    api["rows_read_session_required"] = True
+
+    if output_type == "arrow_iterator":
+        num_rows = sum(
+            batch.num_rows for batch in table.to_arrow_batch_iterator(progress=False)
+        )
+    else:
+        num_rows = table.to_arrow_table(progress=False).num_rows
+
+    assert num_rows == N
+    assert data_requests()[:2] == [ROWS, READ_SESSIONS]
+
+
+def test_other_list_rows_errors_are_raised(api, table):
+    api["response_script"] = [
+        (None, None),  # The table
+        (None, None),  # Its variables
+        (400, {"status": 400, "error": "invalid_request", "error_description": "No"}),
+    ]
+
+    with pytest.raises(exceptions.APIError, match="No"):
+        table.to_arrow_table(progress=False)
+    assert not paths("/readSessions")
+
+
 def test_queries_never_use_list_rows(api):
     df = redivis.query("SELECT 1").to_pandas_dataframe(progress=False)
 
@@ -190,6 +219,16 @@ def test_read_stream_outputs(api, table):
     assert len(streams[0].to_pandas_dataframe(progress=False)) == N // 2
     assert streams[1].to_arrow_table(progress=False).num_rows == N - N // 2
     assert not paths("/exports")
+
+
+def test_query_read_streams_start_the_query(api):
+    streams = redivis.query("SELECT 1").to_read_streams(target_count=2)
+
+    assert paths("/queries", "/readSessions") == [
+        "/api/v1/queries",
+        "/api/v1/queries/q1/readSessions",
+    ]
+    assert sum(s.to_arrow_table(progress=False).num_rows for s in streams) == N
 
 
 def test_read_streams_fetch_their_parent_once(api, table):
