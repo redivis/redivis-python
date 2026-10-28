@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools >= 77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "redivis"
+description = "Redivis python client library"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Redivis Inc.", email = "support@redivis.com" }]
+dynamic = ["version"]
+dependencies = [
+    # Base libraries. These are required for working with the API
+    "tqdm >= 4.64.0",
+    "niquests >= 3.0.0",
+    # Registers the redivis:// filesystem, e.g., for pandas.read_parquet("redivis://...")
+    "fsspec >= 2023.9.0",
+    # Data processing libraries, required if pulling data off Redivis.
+    # Pyarrow is always required when working with data, other libraries only needed if returning data of that type.
+    "pyarrow >= 13.0.0",
+    "dask[dataframe] >= 2023.9.3",
+    "pandas >= 2.0.0",
+    "polars >= 0.19",
+    "mfusepy >= 3.0.0",
+    # folium and mapclassify, which geopandas only uses for GeoDataFrame.explore(), aren't
+    # included: they'd add ~135MB (scipy, scikit-learn) to every install
+    "geopandas >= 0.14.0",
+]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.optional-dependencies]
+# For running the test suite and formatting the code; see CONTRIBUTING.md
+test = [
+    "pytest >= 7.0",
+    "pytest-xdist >= 3.0",
+    # Pinned, so that everyone (and CI) formats the code the same way. 25.11.0 is the last
+    # version that runs on Python 3.9
+    "black == 25.11.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/redivis/redivis-python"
+Changelog = "https://github.com/redivis/redivis-python/blob/main/CHANGELOG.md"
+
+[tool.setuptools.dynamic]
+version = { attr = "redivis._version.__version__" }
+
+[tool.black]
+target-version = ["py39"]
+# Fails rather than formatting differently with another version, e.g., one installed globally
+required-version = "25.11.0"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# Always test the working tree, rather than whichever version of the package happens
+# to be installed in the environment
+pythonpath = ["src"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "integration: runs against a live Redivis API (see CONTRIBUTING.md). Deselect with -m 'not integration'",
+    "slow: takes minutes rather than seconds (e.g., multi-GB uploads); only runs with --run-slow",
+    "organization: needs an organization administered by the test user, given by --redivis-organization",
+]
+filterwarnings = [
+    "ignore:Unverified HTTPS request",
+    # Tests reference the resources they create by name
+    "ignore:No reference id was provided:UserWarning",
+    "ignore:Dask dataframe query planning is disabled:FutureWarning",
+]

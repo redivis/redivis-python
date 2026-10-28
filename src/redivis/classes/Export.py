@@ -5,6 +5,7 @@ import pathlib
 from datetime import datetime
 
 from ..common import exceptions
+from ..common.config import resolve_config
 from ..common.api_request import make_request
 from tqdm.auto import tqdm
 import re
@@ -41,25 +42,28 @@ class Export(Base):
         *,
         path=None,
         overwrite=False,
-        progress=True,
+        progress=None,
         max_parallelization=None,
         max_concurrency=None,
     ):
         self.wait_for_finish(progress=progress)
         file_count = self.properties["fileCount"]
-        escaped_name = 'export'
+        escaped_name = "export"
         if self.table is not None:
             escaped_name = re.sub(
                 r"\W+", "_", self.table.properties.get("name", "table")
             ).lower()
         elif self.query is not None:
+            # A query whose rows were read as it ran hasn't been fetched since
+            if "finishedAt" not in self.query.properties:
+                self.query.get()
             finished_at = self.query.properties.get("finishedAt", 0)
             escaped_name = f"query_{datetime.fromtimestamp(finished_at / 1000).isoformat().replace('.', '_').replace(':', '_')}"
         elif self.upload is not None:
             escaped_name = re.sub(
                 r"\W+", "_", self.upload.properties.get("name", "upload")
             ).lower()
-        
+
         is_dir = False
         if path:
             path = os.path.expanduser(path)
@@ -117,7 +121,8 @@ class Export(Base):
 
         return download_paths
 
-    def wait_for_finish(self, *, progress=True):
+    def wait_for_finish(self, *, progress=None):
+        progress = resolve_config("progress", progress)
         iter_count = 0
         if progress:
             pbar = tqdm(

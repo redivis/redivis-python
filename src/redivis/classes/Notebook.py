@@ -3,8 +3,6 @@ from .Base import Base
 from ..common import exceptions
 from ..common.api_request import make_request
 from tqdm.auto import tqdm
-import time
-import logging
 
 
 import warnings
@@ -13,7 +11,13 @@ import os
 from urllib.parse import quote as quote_uri
 
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
-from ..common.util import convert_data_to_parquet, get_warning
+from ..common.config import get_config
+from ..common.util import (
+    convert_data_to_parquet,
+    get_warning,
+    split_reference,
+    wait_for_run,
+)
 
 
 class Notebook(Base):
@@ -21,11 +25,12 @@ class Notebook(Base):
         from .Workflow import Workflow  # avoid circular import
 
         if not workflow:
-            if len(name.split(".")) == 3:
-                workflow = Workflow(".".join(name.split(".")[0:2]))
-                name = name.split(".")[-1]
-            elif os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
-                workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+            if name is not None and len(split_reference(name)) == 3:
+                parts = split_reference(name)
+                workflow = Workflow(".".join(parts[0:2]))
+                name = parts[-1]
+            elif get_config("default_workflow"):
+                workflow = Workflow(get_config("default_workflow"))
             else:
                 raise exceptions.ValueError(
                     "Invalid notebook specifier, must be the fully qualified reference if no workflow is specified"
@@ -73,25 +78,7 @@ class Notebook(Base):
         self.uri = self.properties["uri"]
 
         if wait_for_finish:
-            while True:
-                time.sleep(2)
-                self.get()
-                current_job = self.properties.get("currentJob") or self.properties.get(
-                    "lastRunJob"
-                )
-                if current_job and current_job["status"] in [
-                    "completed",
-                    "failed",
-                ]:
-                    if current_job["status"] == "failed":
-                        raise exceptions.JobError(
-                            message=current_job.get("errorMessage"),
-                            status=current_job.get("status"),
-                            kind=current_job.get("kind"),
-                        )
-                    break
-                else:
-                    logging.debug("Notebook is still in progress...")
+            wait_for_run(self, self.properties)
 
         return self
 

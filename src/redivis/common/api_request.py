@@ -1,4 +1,4 @@
-import requests
+import niquests
 import logging
 import os
 import json
@@ -10,6 +10,7 @@ import time
 from .auth import get_auth_token, has_credentials, refresh_credentials
 from .._version import __version__
 from .util import raise_api_error
+from .config import get_config
 
 
 def make_request(
@@ -42,7 +43,18 @@ def make_request(
     )
 
     logging.debug(f"Making API '{method}' request to '{args['url']}'")
-    r = requests.request(**args)
+    try:
+        r = niquests.request(**args)
+    except (niquests.ConnectionError, niquests.Timeout):
+        # Retry a request that failed to connect (or timed out) with backoff. Only
+        # idempotent requests are safe to repeat, since we can't know whether the server
+        # received the original.
+        if method.upper() in ("GET", "HEAD") and retry_count < 10:
+            logging.debug("Request failed to connect, retrying...")
+            time.sleep(retry_count)
+            original_parameters["retry_count"] = retry_count + 1
+            return make_request(**original_parameters)
+        raise
 
     return process_request_response(r, parse_response, method, original_parameters)
 
@@ -271,8 +283,4 @@ def __get_user_agent():
 
 
 def __get_api_endpoint():
-    return (
-        "https://redivis.com/api/v1"
-        if os.getenv("REDIVIS_API_ENDPOINT") is None
-        else os.getenv("REDIVIS_API_ENDPOINT")
-    )
+    return get_config("api_endpoint")

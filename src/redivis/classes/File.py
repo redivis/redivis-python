@@ -1,11 +1,12 @@
 import os
 import io
+import re
 import warnings
 from base64 import b64decode
 from pathlib import Path
 import time
-from requests import RequestException
-from urllib3.exceptions import HTTPError
+from niquests import RequestException
+from niquests.packages.urllib3.exceptions import HTTPError
 from ..common import exceptions
 from .Base import Base
 from ..common.api_request import make_request
@@ -63,7 +64,7 @@ class File(Base):
         path=None,
         *,
         overwrite=False,
-        progress=True,
+        progress=None,
         on_progress=None,
         cancel_event=None,
     ):
@@ -100,11 +101,12 @@ class File(Base):
         )
 
     def read(self, *, as_text=False, start_byte=0, end_byte=None):
+        start_byte = int(start_byte or 0)
         range_headers = {}
-        if end_byte:
-            range_headers["Range"] = f"bytes={int(start_byte)}-{int(end_byte)}"
+        if end_byte is not None:
+            range_headers["Range"] = f"bytes={start_byte}-{int(end_byte)}"
         elif start_byte:
-            range_headers["Range"] = f"bytes={int(start_byte)}-"
+            range_headers["Range"] = f"bytes={start_byte}-"
 
         r = make_request(
             method="GET",
@@ -112,10 +114,13 @@ class File(Base):
             parse_response=False,
             headers=range_headers,
         )
-        if as_text:
-            return r.text
-        else:
-            return r.content
+        content = r.content
+        if range_headers and r.status_code != 206:
+            # The server ignored the range and sent the whole file
+            content = content[
+                start_byte : int(end_byte) + 1 if end_byte is not None else None
+            ]
+        return content.decode(get_text_encoding(r)) if as_text else content
 
     def stream(self, *, start_byte=0, end_byte=None):
         warnings.warn(
@@ -123,7 +128,7 @@ class File(Base):
             FutureWarning,
             stacklevel=2,
         )
-        return self.open(start_byte=start_byte, end_byte=end_byte)
+        return self.open("rb", start_byte=start_byte, end_byte=end_byte)
 
     def open(self, mode="r", encoding="utf-8", *, start_byte=0, end_byte=None):
         if mode not in ("r", "rb", "rt"):
@@ -135,7 +140,7 @@ class File(Base):
             mode = "r"
         if start_byte:
             start_byte = int(start_byte)
-        if end_byte:
+        if end_byte is not None:
             end_byte = int(end_byte)
 
         if mode == "r":
@@ -149,6 +154,16 @@ class File(Base):
             uri=self.uri, start_byte=start_byte, end_byte=end_byte, file=self
         )
         return stream
+
+
+def get_text_encoding(response):
+    """The encoding of a file's text: the charset it was served with, if any, or else
+    utf-8, as for file.open(). (niquests would otherwise guess from the content,
+    which can misread utf-8 as another encoding.)"""
+    charset = re.search(
+        r"charset=[\"']?([\w-]+)", response.headers.get("Content-Type", ""), re.I
+    )
+    return charset.group(1) if charset else "utf-8"
 
 
 class Stream(io.BufferedIOBase):
@@ -190,7 +205,7 @@ class Stream(io.BufferedIOBase):
                 # Don't attempt to read past the last byte; this will raise an error from the Redivis API
                 return None
 
-            if self.end_byte:
+            if self.end_byte is not None:
                 range_headers["Range"] = f"bytes={start_byte}-{self.end_byte}"
             elif start_byte:
                 range_headers["Range"] = f"bytes={start_byte}-"

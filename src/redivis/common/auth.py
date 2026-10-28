@@ -2,30 +2,89 @@ import os
 import json
 import time
 import sys
+import tempfile
 import warnings
 import base64
 from pathlib import Path
 import re
-import requests
+from urllib.parse import urlparse
+import niquests
 
 from . import exceptions
 from .util import raise_api_error
+from .config import get_config
 
-redivis_dir = Path.home() / ".redivis"
 cached_credentials = None
-verify_ssl = (
-    os.getenv("REDIVIS_API_ENDPOINT", "https://redivis.com").find(
-        "https://localhost", 0
-    )
-    != 0
-)
-credentials_file = redivis_dir / "python_credentials"
+# The file that cached_credentials were loaded from, which changes when config_dir does
+cached_credentials_file = None
 default_scope = ["data.edit", "organization.write", "workflow.write"]
 client_id = "7YGtYWuQot1TEe0pHB3EPSj5"
+
+
+# Overridable for environments where the home directory isn't writable, or is
+# shared between users
+def get_redivis_dir():
+    return Path(get_config("config_dir") or "~/.redivis").expanduser()
+
+
+# Credentials are only valid for the environment that issued them. Those for
+# redivis.com are kept directly in the config directory, and any other API
+# endpoint's host (e.g. "localhost_8080") has its own subdirectory. The JS and R
+# clients name these directories the same way.
+def get_environment_host():
+    url = urlparse(get_config("api_endpoint"))
+    host = url.hostname
+    if url.port and url.port != {"http": 80, "https": 443}.get(url.scheme):
+        host = f"{host}:{url.port}"
+    return re.sub(r"[^\w.-]", "_", host)
+
+
+def get_credentials_dir():
+    host = get_environment_host()
+    if host == "redivis.com":
+        return get_redivis_dir()
+    return get_redivis_dir() / "environments" / host
+
+
+def get_credentials_file():
+    return get_credentials_dir() / "python_credentials"
+
+
+def get_verify_ssl():
+    return not get_config("api_endpoint").startswith("https://localhost")
+
+
 # Note that https is optional, since traffic can happen over http if all in the same cluster
-base_url = re.match(
-    r"(https?://.*?)(/|$)", os.getenv("REDIVIS_API_ENDPOINT", "https://redivis.com")
-).group(1)
+def get_base_url():
+    return re.match(r"(https?://.*?)(/|$)", get_config("api_endpoint")).group(1)
+
+
+def load_cached_credentials():
+    global cached_credentials, cached_credentials_file
+
+    credentials_file = get_credentials_file()
+    if (
+        cached_credentials is not None
+        and cached_credentials_file is not None
+        and cached_credentials_file != credentials_file
+    ):
+        cached_credentials = None
+
+    if cached_credentials is None:
+        cached_credentials = read_credentials_file(credentials_file)
+        if cached_credentials is not None:
+            cached_credentials_file = credentials_file
+
+    return cached_credentials
+
+
+def read_credentials_file(credentials_file):
+    """The credentials saved in a file, or None if there are none."""
+    try:
+        with open(credentials_file, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def has_credentials():
@@ -34,19 +93,10 @@ def has_credentials():
     Used to decide whether a request should be attempted anonymously; publicly
     accessible resources can be read without any credentials at all.
     """
-    global cached_credentials
-
     if os.getenv("REDIVIS_API_TOKEN"):
         return True
 
-    if cached_credentials is None and credentials_file.is_file():
-        try:
-            with open(credentials_file, "r") as f:
-                cached_credentials = json.load(f)
-        except Exception as e:
-            """ignore"""
-
-    return cached_credentials is not None
+    return load_cached_credentials() is not None
 
 
 def get_auth_token(scope=None):
@@ -67,12 +117,8 @@ This environment variable should only ever be set in a non-interactive environme
 """
             )
         return os.environ["REDIVIS_API_TOKEN"]
-    elif cached_credentials is None and credentials_file.is_file():
-        try:
-            with open(credentials_file, "r") as f:
-                cached_credentials = json.load(f)
-        except Exception as e:
-            """ignore"""
+    else:
+        load_cached_credentials()
 
     missing_scope = list(set(scope) - set(get_current_credential_scope()))
 
@@ -89,9 +135,6 @@ This environment variable should only ever be set in a non-interactive environme
         else:
             return cached_credentials["access_token"]
     else:
-        if not redivis_dir.is_dir():
-            redivis_dir.mkdir()
-
         perform_oauth_login(
             scope=missing_scope if len(missing_scope) > 0 else scope,
             upgrade_credentials=bool(len(missing_scope)),
@@ -103,7 +146,7 @@ This environment variable should only ever be set in a non-interactive environme
 def clear_cached_credentials():
     global cached_credentials
     cached_credentials = None
-    credentials_file.unlink(missing_ok=True)
+    get_credentials_file().unlink(missing_ok=True)
 
 
 def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
@@ -117,9 +160,9 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
 
     challenge, verifier = get_pkce()
 
-    res = requests.post(
-        f"{base_url}/oauth/device_authorization",
-        verify=verify_ssl,
+    res = niquests.post(
+        f"{get_base_url()}/oauth/device_authorization",
+        verify=get_verify_ssl(),
         headers={"Content-Type": "application/json"},
         data=json.dumps(
             {
@@ -157,9 +200,9 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
 
         time.sleep(parsed_response["interval"] or 5)
 
-        res = requests.post(
-            f"{base_url}/oauth/token",
-            verify=verify_ssl,
+        res = niquests.post(
+            f"{get_base_url()}/oauth/token",
+            verify=get_verify_ssl(),
             headers=headers,
             data={
                 "client_id": client_id,
@@ -186,16 +229,26 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
 
 
 def write_cached_credentials():
-    # get_auth_token() normally creates this, but a login prompted by an
-    # anonymous request's 401 never went through it.
-    redivis_dir.mkdir(parents=True, exist_ok=True)
-    # The file holds a refresh token, so keep it private to this user. Creating
-    # it with these permissions means it's never readable by others, even
-    # briefly; the chmod covers a file that already existed.
-    fd = os.open(credentials_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(cached_credentials, f, indent=2)
-    os.chmod(credentials_file, 0o600)
+    global cached_credentials_file
+
+    credentials_dir = get_credentials_dir()
+    credentials_file = get_credentials_file()
+    cached_credentials_file = credentials_file
+    # The file holds a refresh token, so keep it private to this user
+    credentials_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Write a temporary file and swap it into place, so that another process
+    # (e.g. a second notebook kernel) never reads a partially written file.
+    # mkstemp creates it readable only by this user, so the token is never
+    # exposed to others, even briefly, and replacing the file also replaces
+    # the permissions of one written by an earlier version of the client.
+    fd, temp_path = tempfile.mkstemp(dir=credentials_dir, prefix=".python_credentials.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(cached_credentials, f, indent=2)
+        os.replace(temp_path, credentials_file)
+    except BaseException:
+        Path(temp_path).unlink(missing_ok=True)
+        raise
 
 
 def refresh_credentials(scope=None, amr_values=None):
@@ -212,22 +265,51 @@ def refresh_credentials(scope=None, amr_values=None):
         # The resource isn't public, so we need to authenticate now.
         perform_oauth_login(scope=default_scope)
     elif "refresh_token" in cached_credentials:
-        res = requests.post(
-            f"{base_url}/oauth/token",
-            verify=verify_ssl,
+        # Each refresh replaces the refresh token, and the server revokes the login
+        # if a replaced one is used again. So if another process sharing these
+        # credentials (e.g. a second notebook kernel) has refreshed them since they
+        # were read, use what it saved instead.
+        saved_credentials = read_credentials_file(get_credentials_file())
+        if (
+            saved_credentials
+            and saved_credentials.get("refresh_token")
+            and saved_credentials["refresh_token"]
+            != cached_credentials["refresh_token"]
+        ):
+            cached_credentials = saved_credentials
+            if saved_credentials.get("expires_at", 0) > time.time() + 5 * 60:
+                return get_auth_token()
+
+        res = niquests.post(
+            f"{get_base_url()}/oauth/token",
+            verify=get_verify_ssl(),
             data={
                 "client_id": client_id,
                 "grant_type": "refresh_token",
                 "refresh_token": cached_credentials["refresh_token"],
             },
         )
-        if res.status_code >= 400:
+        if res.status_code in (400, 401):
+            # The refresh token was rejected (e.g. revoked or expired), so the
+            # user needs to log in again
             clear_cached_credentials()
+        elif res.status_code >= 400:
+            # Anything else (e.g. a 503 during a deploy) says nothing about the
+            # refresh token, so keep it for a later call to retry with
+            try:
+                response_json = res.json()
+            except Exception:
+                raise_api_error(response_text=res.text, response=res)
+            raise_api_error(response_json=response_json, response=res)
         else:
             refresh_response = res.json()
             cached_credentials["access_token"] = refresh_response["access_token"]
             cached_credentials["expires_at"] = refresh_response["expires_at"]
             cached_credentials["expires_in"] = refresh_response["expires_in"]
+            # The server rotates refresh tokens, returning a new one to replace the
+            # one that was just used
+            if refresh_response.get("refresh_token"):
+                cached_credentials["refresh_token"] = refresh_response["refresh_token"]
             write_cached_credentials()
     else:
         clear_cached_credentials()

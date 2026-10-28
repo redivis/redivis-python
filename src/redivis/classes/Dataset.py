@@ -5,10 +5,12 @@ import warnings
 from .Query import Query
 from .Base import Base
 from urllib.parse import quote as quote_uri
+from ..common.util import split_reference
 import re
 
 from ..common import exceptions
 from ..common.api_request import make_request, make_paginated_request
+from ..common.config import get_config
 
 
 class Dataset(Base):
@@ -25,15 +27,14 @@ class Dataset(Base):
             from .User import User
             from .Organization import Organization
 
-            if len(name.split(".")) == 2:
-                username = name.split(".")[0]
-                name = name.split(".")[1]
+            if len(split_reference(name)) == 2:
+                username, name = split_reference(name)
                 organization = Organization(username)
                 user = User(username)
-            elif os.getenv("REDIVIS_DEFAULT_USER"):
-                user = User(os.getenv("REDIVIS_DEFAULT_USER"))
-            elif os.getenv("REDIVIS_DEFAULT_ORGANIZATION"):
-                organization = Organization(os.getenv("REDIVIS_DEFAULT_ORGANIZATION"))
+            elif get_config("default_user"):
+                user = User(get_config("default_user"))
+            elif get_config("default_organization"):
+                organization = Organization(get_config("default_organization"))
             else:
                 raise exceptions.ValueError(
                     "Invalid dataset specifier, must be the fully qualified reference if no owner is specified"
@@ -96,9 +97,9 @@ class Dataset(Base):
     def create(self, *, public_access_level="none", description=None):
         self._rectify_ambiguous_owner()
         if self.organization:
-            path = f"/organizations/{self.organization.name}/datasets"
+            path = f"{self.organization.uri}/datasets"
         else:
-            path = f"/users/{self.user.name}/datasets"
+            path = f"{self.user.uri}/datasets"
 
         properties = make_request(
             method="POST",
@@ -172,21 +173,29 @@ class Dataset(Base):
     def query(self, query):
         return Query(query, default_dataset=self.qualified_reference)
 
-    def release(self, *, release_notes=None):
+    def release(self, *, release_notes=None, wait_for_finalization=False):
         version_res = make_request(
             method="POST",
             path=f"{self.uri}/versions/next/release",
             payload={"releaseNotes": release_notes},
         )
+        if wait_for_finalization:
+            Version(
+                version_res["tag"], dataset=self, properties=version_res
+            )._wait_for_finalization()
         self.uri = version_res["datasetUri"]
         self.get()
         return self
 
-    def unrelease(self):
+    def unrelease(self, *, wait_for_finalization=False):
         version_res = make_request(
             method="POST",
             path=f"{self.uri}/versions/current/unrelease",
         )
+        if wait_for_finalization:
+            Version(
+                version_res["tag"], dataset=self, properties=version_res
+            )._wait_for_finalization()
         self.uri = version_res["datasetUri"]
         self.get()
         return self
@@ -199,14 +208,12 @@ class Dataset(Base):
         return Version(tag, dataset=self)
 
     def previous_version(self):
-        if not self.version_tag:
-            self.get()
-        return Version(self.version_tag, dataset=self).previous_version().dataset()
+        version = self.version().previous_version()
+        return version.dataset() if version else None
 
     def next_version(self):
-        if not self.version_tag:
-            self.get()
-        return Version(self.version_tag, dataset=self).next_version().dataset()
+        version = self.version().next_version()
+        return version.dataset() if version else None
 
     def table(self, name):
         return Table(name, dataset=self)
@@ -228,19 +235,19 @@ class Dataset(Base):
         return self.update(labels_to_remove=labels)
 
     def update(
-        self, 
-        *, 
-        name=None, 
-        public_access_level=None, 
-        description=None, 
-        methodology_markdown=None, 
-        usage_markdown=None, 
-        labels=None, 
-        labels_to_add=None, 
-        labels_to_remove=None, 
-        tags=None, 
-        tags_to_add=None, 
-        tags_to_remove=None
+        self,
+        *,
+        name=None,
+        public_access_level=None,
+        description=None,
+        methodology_markdown=None,
+        usage_markdown=None,
+        labels=None,
+        labels_to_add=None,
+        labels_to_remove=None,
+        tags=None,
+        tags_to_add=None,
+        tags_to_remove=None,
     ):
         payload = {}
         if name:
@@ -288,4 +295,7 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
+    if (properties.get("version") or {}).get("tag"):
+        # In the form used in references (v1_0, rather than v1.0)
+        instance.version_tag = properties["version"]["tag"].replace(".", "_")
     instance._rectify_ambiguous_owner()

@@ -1,6 +1,7 @@
 """Reads through a mounted directory: cached locally in blocks, with sequential reads streamed in one request.
 
-These call the FUSE operations directly, so they need no FUSE installation.
+These call the FUSE operations directly, so they need no mounted filesystem. But mfusepy loads
+libfuse when it's imported, so they're skipped where it isn't installed (e.g., on Windows).
 """
 
 import base64
@@ -12,7 +13,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from mfusepy import FuseOSError
+
+try:
+    from mfusepy import FuseOSError
+except OSError as e:
+    pytest.skip(f"libfuse can't be loaded: {e}", allow_module_level=True)
+
 from redivis.classes.Directory import Directory
 from redivis.classes.File import File
 from redivis.common import mount_directory
@@ -288,7 +294,13 @@ def test_temporary_cache_dirs_of_exited_processes_are_removed(temp_dir):
     new = mount_directory._TemporaryCacheDir()
 
     assert sorted(p.name for p in temp_dir.iterdir()) == sorted(
-        [Path(live.path).name, being_made.name, unlocked.name, Path(new.path).name, "notes.txt"]
+        [
+            Path(live.path).name,
+            being_made.name,
+            unlocked.name,
+            Path(new.path).name,
+            "notes.txt",
+        ]
     )
     assert not orphaned.exists()
     live.remove()
@@ -317,7 +329,6 @@ def test_new_mount_dir_is_removed_if_mounting_fails(table, tmp_path, monkeypatch
     with pytest.raises(RuntimeError, match="boom"):
         mount_in_foreground(table, mount_path, monkeypatch, tmp_path)
     assert not mount_path.exists()
-
 
 
 def mount_in_foreground(table, mount_path, monkeypatch, tmp_path):

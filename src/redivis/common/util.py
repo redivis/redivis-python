@@ -1,11 +1,16 @@
 import os
+import re
+import sys
 import tempfile
+import time
 import atexit
 import shutil
 import pathlib
 import uuid
+import logging
 
 from ..common import exceptions
+from .config import get_config
 
 
 def get_warning(kind):
@@ -19,6 +24,44 @@ def get_warning(kind):
         return "WARNING"
 
 
+def split_reference(reference):
+    """Splits a reference like `owner.dataset:v1_0.table` into its dot-separated parts.
+
+    A version tag can also be written with a dot (`:v1.0`), so it's first normalized
+    to the equivalent underscore form.
+    """
+    return re.sub(r":v(\d+)\.(\d+)", r":v\1_\2", reference).split(".")
+
+
+def wait_for_run(instance, run_properties):
+    """Waits for a transform or notebook run, given the response to starting it.
+
+    Raises a JobError if the run fails or is cancelled.
+    """
+    job_id = (run_properties.get("currentJob") or {}).get("id")
+    while True:
+        time.sleep(2)
+        instance.get()
+        jobs = [
+            instance.properties.get("currentJob"),
+            instance.properties.get("lastRunJob"),
+        ]
+        if job_id:
+            # Track the job this run started, rather than whichever is most recent
+            job = next((j for j in jobs if j and j.get("id") == job_id), None)
+        else:
+            job = jobs[0] or jobs[1]
+        if job and job["status"] in ["completed", "failed", "cancelled"]:
+            if job["status"] != "completed":
+                raise exceptions.JobError(
+                    message=job.get("errorMessage"),
+                    status=job.get("status"),
+                    kind=job.get("kind"),
+                )
+            return
+        logging.debug("Job is still in progress...")
+
+
 created_temp_dir = None
 
 
@@ -28,11 +71,11 @@ def rm_tempdir():
 
 
 def get_tempdir():
-    if os.getenv("REDIVIS_TMPDIR"):
+    if get_config("tmp_dir"):
         user_suffix = os.environ.get("USER", os.environ.get("USERNAME")) or os.getuid()
         return str(
             pathlib.Path("/").joinpath(
-                os.getenv("REDIVIS_TMPDIR"),
+                os.path.expanduser(get_config("tmp_dir")),
                 f"redivis_{user_suffix}",
             )
         )
@@ -45,12 +88,19 @@ def get_tempdir():
     return created_temp_dir
 
 
+def is_instance_of(data, module_name, class_name):
+    """Whether data is an instance of module_name.class_name, without importing that module.
+
+    If the module hasn't been imported, data can't be one of its classes; so data
+    libraries that aren't used (or installed) are never imported.
+    """
+    module = sys.modules.get(module_name)
+    return module is not None and isinstance(data, getattr(module, class_name))
+
+
 def get_parquet_rows_per_group(data):
-    import pandas as pd
     import pyarrow as pa
     import pyarrow.dataset as pa_dataset
-    from dask.dataframe import DataFrame as dask_df
-    import polars
 
     TARGET_GROUP_BYTES = 128 * 1024**2  # ~128MB per row group
     MAX_RPG = 1_000_000
@@ -79,24 +129,24 @@ def get_parquet_rows_per_group(data):
             bytes_per_row = s.nbytes / s.num_rows
 
     # --- Dask DataFrame: measure one partition, scale by row count ---
-    elif isinstance(data, dask_df):
+    elif is_instance_of(data, "dask.dataframe", "DataFrame"):
         head = data.head(SAMPLE_N, compute=True)
         if len(head) > 0:
             bytes_per_row = head.memory_usage(deep=True).sum() / len(head)
 
     # --- pandas / polars eager DataFrame ---
-    elif isinstance(data, pd.DataFrame):
+    elif is_instance_of(data, "pandas", "DataFrame"):
         n_rows = len(data)
         if n_rows > 0:
             head = data.head(SAMPLE_N)
             bytes_per_row = head.memory_usage(deep=True).sum() / len(head)
-    elif isinstance(data, polars.DataFrame):
+    elif is_instance_of(data, "polars", "DataFrame"):
         n_rows = data.height
         if n_rows > 0:
             tbl = data.head(SAMPLE_N).to_arrow()
             bytes_per_row = tbl.nbytes / tbl.num_rows
         # --- Polars LazyFrame: fetch a small slice, measure as Arrow ---
-    elif isinstance(data, polars.LazyFrame):
+    elif is_instance_of(data, "polars", "LazyFrame"):
         sample = data.head(SAMPLE_N).collect()
         if sample.height > 0:
             tbl = sample.to_arrow()
@@ -109,32 +159,91 @@ def get_parquet_rows_per_group(data):
     return max(MIN_RPG, min(MAX_RPG, rpg))
 
 
+def get_dask_parquet_schema(data):
+    """The schema for dask to write a DataFrame to parquet with.
+
+    dask infers the type of each column from the DataFrame's metadata, which doesn't
+    know what an object column holds: earlier versions of dask treat one as a string, so
+    writing one that holds anything else (such as dates) fails, and newer versions fill
+    it with placeholder objects that pyarrow can't infer a type from at all. Instead,
+    give those the type that pyarrow infers from a sample of their values.
+    """
+    import pyarrow as pa
+
+    object_columns = [name for name, dtype in data.dtypes.items() if dtype == object]
+    if not object_columns:
+        return "infer"
+
+    sample = data[object_columns].head(10_000, npartitions=-1)
+    types = {}
+    for name in object_columns:
+        # A column with no values in the sample is a string, as dask has inferred
+        types[name] = pa.string()
+        values = sample[name].dropna()
+        if len(values):
+            try:
+                types[name] = pa.array(values, from_pandas=True).type
+            except (pa.ArrowInvalid, pa.ArrowTypeError):
+                # e.g., values of mixed types, which dask will report on when it fails
+                # to write them as strings
+                pass
+
+    # Given the types of only some columns, dask still infers every column's from the
+    # metadata, so give it the whole schema, inferring the others' as dask would
+    other_columns = pa.Schema.from_pandas(
+        data._meta_nonempty.drop(columns=object_columns), preserve_index=False
+    )
+    return pa.schema(
+        [
+            (
+                pa.field(name, types[name])
+                if name in types
+                else other_columns.field(name)
+            )
+            for name in data.columns
+        ]
+    )
+
+
 def convert_data_to_parquet(data):
     temp_file_path = f"{get_tempdir()}/parquet/{uuid.uuid4()}"
     pathlib.Path(temp_file_path).parent.mkdir(exist_ok=True, parents=True)
 
-    import geopandas
-    import polars
-    import pandas as pd
     import pyarrow as pa
     import pyarrow.dataset as pa_dataset
     import pyarrow.parquet as pa_parquet
-    from dask.dataframe import DataFrame as dask_df
+
+    if is_instance_of(data, "dask.dataframe", "DataFrame"):
+        import dask
+
+        # dask writes a file for each partition, but an upload is a single file. So
+        # write them to a directory, then combine them as an arrow Dataset, below.
+        partitions_dir = f"{temp_file_path}_partitions"
+        # By default, each new dask collection (including those made here, to write the
+        # DataFrame) converts its object columns to strings, which would turn e.g. a
+        # column of dates into strings. Write the DataFrame as it is instead.
+        with dask.config.set({"dataframe.convert-string": False}):
+            data.to_parquet(
+                partitions_dir,
+                write_index=False,
+                schema=get_dask_parquet_schema(data),
+                coerce_timestamps="us",
+                allow_truncated_timestamps=True,
+                write_statistics=False,
+                engine="pyarrow",
+            )
+        try:
+            return convert_data_to_parquet(
+                pa_dataset.dataset(partitions_dir, format="parquet")
+            )
+        finally:
+            shutil.rmtree(partitions_dir, ignore_errors=True)
 
     rows_per_group = get_parquet_rows_per_group(data)
 
     # IMPORTANT: we need to coerce all timestamps to us precision, since BQ doesn't support ns, and will then just load the timestamp as int64
-    if isinstance(data, geopandas.GeoDataFrame):
-        data.to_parquet(
-            path=temp_file_path,
-            coerce_timestamps="us",
-            allow_truncated_timestamps=True,
-            index=False,
-            row_group_size=rows_per_group,
-            write_statistics=False,
-            engine="pyarrow",
-        )
-    elif isinstance(data, pd.DataFrame):
+    # This includes a geopandas.GeoDataFrame, whose to_parquet() writes its geometry as GeoParquet
+    if is_instance_of(data, "pandas", "DataFrame"):
         data.to_parquet(
             path=temp_file_path,
             coerce_timestamps="us",
@@ -171,25 +280,13 @@ def convert_data_to_parquet(data):
             row_group_size=rows_per_group,
             write_statistics=False,
         )
-    elif isinstance(data, dask_df):
-        # TODO: this can be multiple files, we'll want to refactor once we have the new import API
-        data.to_parquet(
-            temp_file_path,
-            write_index=False,
-            coerce_timestamps="us",
-            allow_truncated_timestamps=True,
-            row_group_size=rows_per_group,
-            write_statistics=False,
-            engine="pyarrow",
-        )
-        temp_file_path = f"{temp_file_path}/part.0.parquet"
-    elif isinstance(data, polars.LazyFrame):
+    elif is_instance_of(data, "polars", "LazyFrame"):
         data.sink_parquet(
             temp_file_path,
             row_group_size=rows_per_group,
             statistics=False,  # Note that this arg looks different than write_statistics elsewhere
         )
-    elif isinstance(data, polars.DataFrame):
+    elif is_instance_of(data, "polars", "DataFrame"):
         data.write_parquet(
             temp_file_path,
             use_pyarrow=True,
@@ -209,7 +306,7 @@ def convert_data_to_parquet(data):
 
 
 def raise_api_error(response_json=None, response_text=None, response=None):
-    # NB: a requests.Response for an error status is falsy, so test for None
+    # NB: a niquests.Response for an error status is falsy, so test for None
     status_code = (
         response.status_code
         if response is not None

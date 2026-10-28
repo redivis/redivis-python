@@ -5,6 +5,8 @@ from ..common.api_request import make_request
 
 from urllib.parse import quote as quote_uri
 import os
+import re
+from ..common.config import get_config
 
 
 class Datasource(Base):
@@ -13,11 +15,11 @@ class Datasource(Base):
         from .Dataset import Dataset
 
         if not workflow:
-            if os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
-                workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+            if get_config("default_workflow"):
+                workflow = Workflow(get_config("default_workflow"))
             else:
                 raise exceptions.ValueError(
-                    "REDIVIS_DEFAULT_WORKFLOW must be set if no workflow is specified in the Datasource constructor"
+                    "A workflow must be specified in the Datasource constructor, or set as the default via redivis.config(default_workflow=...) or the REDIVIS_DEFAULT_WORKFLOW environment variable"
                 )
         if isinstance(source, Dataset) or isinstance(source, Workflow):
             source = source.qualified_reference
@@ -55,6 +57,11 @@ class Datasource(Base):
         )
         self.uri = self.properties["uri"]
         return self
+
+    def delete(self):
+        # Also deletes the transforms and notebooks that depend on the datasource
+        make_request(method="DELETE", path=self.uri)
+        return
 
     def exists(self):
         try:
@@ -136,25 +143,35 @@ class Datasource(Base):
                     raise exceptions.ValueError(
                         "Versions are not applicable to datasources that reference a workflow"
                     )
+            else:
+                # Keep the existing sample setting, unless it's being changed
+                is_sample = (
+                    sample
+                    if sample is not None
+                    else re.search(r":sample\b", source_dataset) is not None
+                )
+                source_dataset = re.sub(r":sample\b", "", source_dataset)
 
-        if isinstance(version, Version):
-            version = version.tag
+                if version is not None:
+                    if isinstance(version, Version):
+                        version = version.tag
+                    source_dataset = Dataset(
+                        source_dataset, version=version
+                    ).qualified_reference
 
-        source_dataset = Dataset(source_dataset, version=version).qualified_reference
+                if is_sample:
+                    source_dataset += ":sample"
 
-        if sample == False:
-            source_dataset.replace(":sample", "")
-        elif sample == True and not ":sample" in source_dataset:
-            source_dataset += ":sample"
-
+        payload = {
+            "sourceDataset": source_dataset,
+            "sourceWorkflow": source_workflow,
+            "mappedTables": mapped_tables,
+        }
         self.properties = make_request(
             method="PATCH",
             path=self.uri,
-            payload={
-                "sourceDataset": source_dataset,
-                "sourceWorkflow": source_workflow,
-                "mappedTables": mapped_tables,
-            },
+            # Only change what was specified
+            payload={key: value for key, value in payload.items() if value is not None},
         )
         self.uri = self.properties["uri"]
 

@@ -8,9 +8,11 @@ from .Transform import Transform
 
 from .Base import Base
 from urllib.parse import quote as quote_uri
+from ..common.util import split_reference
 
 from ..common import exceptions
 from ..common.api_request import make_request, make_paginated_request
+from ..common.config import get_config
 
 
 class Workflow(Base):
@@ -19,15 +21,14 @@ class Workflow(Base):
         from .Organization import Organization  # avoid circular import
 
         if not user and not organization:
-            if len(name.split(".")) == 2:
-                username = name.split(".")[0]
-                name = name.split(".")[1]
+            if len(split_reference(name)) == 2:
+                username, name = split_reference(name)
                 organization = Organization(username)
                 user = User(username)
-            elif os.getenv("REDIVIS_DEFAULT_USER"):
-                user = User(os.getenv("REDIVIS_DEFAULT_USER"))
-            elif os.getenv("REDIVIS_DEFAULT_ORGANIZATION"):
-                organization = Organization(os.getenv("REDIVIS_DEFAULT_ORGANIZATION"))
+            elif get_config("default_user"):
+                user = User(get_config("default_user"))
+            elif get_config("default_organization"):
+                organization = Organization(get_config("default_organization"))
             else:
                 raise exceptions.ValueError(
                     "Invalid workflow specifier, must be the fully qualified reference if no owner is specified"
@@ -37,7 +38,7 @@ class Workflow(Base):
             user = User(user)
 
         if isinstance(organization, str):
-            organization = Organization(user)
+            organization = Organization(organization)
 
         self.user = user
         self.organization = organization
@@ -57,6 +58,39 @@ class Workflow(Base):
 
     def __repr__(self):
         return f"<Workflow {self.qualified_reference}>"
+
+    def _rectify_ambiguous_owner(self):
+        # A reference like "owner.workflow_name" could be owned by either
+        if self.user and self.organization:
+            if (self.properties or {}).get("owner"):
+                if self.properties["owner"]["kind"] == "user":
+                    self.organization = None
+                else:
+                    self.user = None
+            elif self.organization.exists():
+                self.user = None
+            else:
+                self.organization = None
+
+    def create(self, *, description=None, is_public=False):
+        self._rectify_ambiguous_owner()
+        owner = self.organization or self.user
+
+        properties = make_request(
+            method="POST",
+            path=f"{owner.uri}/workflows",
+            payload={
+                "name": self.name,
+                "description": description,
+                "isPublic": is_public,
+            },
+        )
+        update_properties(self, properties)
+        return self
+
+    def delete(self):
+        make_request(method="DELETE", path=self.uri)
+        return
 
     def list_datasources(self, *, max_results=None):
         data_sources = make_paginated_request(
@@ -157,3 +191,4 @@ def update_properties(instance, properties):
     instance.scoped_reference = properties["scopedReference"]
     instance.name = properties["name"]
     instance.uri = properties["uri"]
+    instance._rectify_ambiguous_owner()

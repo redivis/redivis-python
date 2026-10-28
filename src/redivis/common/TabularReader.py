@@ -13,6 +13,7 @@ from contextlib import closing
 from .fetch_rows import make_rows_request
 from ..common.api_request import make_request, make_paginated_request
 from ..common.util import get_warning
+from ..common.config import resolve_config
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Literal
 from datetime import datetime, timezone
 import weakref
@@ -34,39 +35,37 @@ class TabularReader(Base):
         self.properties = {}
 
     def download(
-            self,
-            path=None,
-            *,
-            format="csv",
-            overwrite=False,
-            progress=True,
-            max_parallelization=None,
-            max_concurrency=None,
-        ):
-            if self._is_read_stream:
-                raise exceptions.ValueError(
-                    "Downloading read streams is not supported"
-                )
-            check_is_ready(self)
-            res = make_request(
-                method="POST",
-                path=f"{self.uri}/exports",
-                payload={"format": format},
-            )
-            export_job = Export(
-                res["id"], 
-                table=self if self._is_table else None, 
-                query=self if self._is_query else None, 
-                upload=self if self._is_upload else None, 
-                properties=res
-            )
-            return export_job.download_files(
-                path=path,
-                overwrite=overwrite,
-                progress=progress,
-                max_concurrency=max_concurrency,
-                max_parallelization=max_parallelization,
-            )
+        self,
+        path=None,
+        *,
+        format="csv",
+        overwrite=False,
+        progress=None,
+        max_parallelization=None,
+        max_concurrency=None,
+    ):
+        if self._is_read_stream:
+            raise exceptions.ValueError("Downloading read streams is not supported")
+        check_is_ready(self)
+        res = make_request(
+            method="POST",
+            path=f"{self.uri}/exports",
+            payload={"format": format},
+        )
+        export_job = Export(
+            res["id"],
+            table=self if self._is_table else None,
+            query=self if self._is_query else None,
+            upload=self if self._is_upload else None,
+            properties=res,
+        )
+        return export_job.download_files(
+            path=path,
+            overwrite=overwrite,
+            progress=progress,
+            max_concurrency=max_concurrency,
+            max_parallelization=max_parallelization,
+        )
 
     # TODO: prefix? pattern? Don't cache if these are present
     def to_directory(
@@ -92,11 +91,15 @@ class TabularReader(Base):
         if self._is_query:
             check_is_ready(self)
 
-        if self.directory is None and cached_directories.get(self.uri):
-            self.directory = cached_directories[self.uri]
+        # A listing depends on the variables it was made with, as well as the table or
+        # query
+        self._directory_variables = (file_id_variable, file_name_variable)
+        cache_key = (self.uri, file_id_variable, file_name_variable)
+        cached_directory = cached_directories.get(cache_key)
 
-        if self.directory and self._is_query:
+        if cached_directory and self._is_query:
             # Queries are immutable, always use the cached version
+            self.directory = cached_directory
             return self.directory
 
         import pyarrow
@@ -104,9 +107,9 @@ class TabularReader(Base):
         # Compute this here, to get the timestamp before the request was sent
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         headers = {}
-        if self.directory:
+        if cached_directory:
             headers["If-Modified-Since"] = datetime.fromtimestamp(
-                self.directory._last_cached_at / 1000, tz=timezone.utc
+                cached_directory._last_cached_at / 1000, tz=timezone.utc
             ).strftime("%a, %d %b %Y %H:%M:%S GMT")
 
         with closing(
@@ -124,7 +127,8 @@ class TabularReader(Base):
             )
         ) as res:
             if res.status_code == 304:
-                self.directory._last_cached_at = now_ms
+                cached_directory._last_cached_at = now_ms
+                self.directory = cached_directory
                 return self.directory
 
             directory = Directory(
@@ -164,20 +168,27 @@ class TabularReader(Base):
 
             self.directory = directory
             self.directory._last_cached_at = now_ms
-            cached_directories[self.uri] = self.directory
+            cached_directories[cache_key] = self.directory
             return self.directory
 
     def file(self, path: Union[str, Path]) -> File:
-        if self.directory is None and cached_directories.get(self.uri):
-            self.directory = cached_directories[self.uri]
+        # Look files up with the same variables as the last listing, if any
+        file_id_variable, file_name_variable = getattr(
+            self, "_directory_variables", (None, None)
+        )
+        directory = cached_directories.get(
+            (self.uri, file_id_variable, file_name_variable)
+        )
 
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        if self.directory is None or (
-            now_ms - self.directory._last_cached_at > 30000  # cache for 30s
+        if directory is None or (
+            now_ms - directory._last_cached_at > 30000  # cache for 30s
         ):
-            self.to_directory()
+            directory = self.to_directory(
+                file_id_variable=file_id_variable, file_name_variable=file_name_variable
+            )
 
-        node = self.directory.get(path)
+        node = directory.get(path)
         if isinstance(node, Directory):
             raise exceptions.ValueError(f"{path} is a directory, not a file")
         if node is None:
@@ -212,6 +223,10 @@ class TabularReader(Base):
         if target_count < 1:
             raise exceptions.ValueError("target_count must be at least 1")
 
+        if self._is_query:
+            # A query doesn't have a URI to read from until it's been started
+            check_is_ready(self)
+
         payload = {"requestedStreamCount": target_count, "format": "arrow"}
 
         if variables is not None:
@@ -243,7 +258,7 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         file_id_variable: Optional[str] = None,
         file_name_variable: Optional[str] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         max_parallelization: Optional[int] = None,
     ) -> None:
         warnings.warn(
@@ -268,12 +283,12 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -286,7 +301,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -295,12 +310,12 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -313,7 +328,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -322,12 +337,12 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -340,7 +355,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -349,12 +364,12 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -367,7 +382,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -376,14 +391,14 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         dtype_backend: str = "pyarrow",
         date_as_object: bool = False,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         arrow_table = make_rows_request(
@@ -396,7 +411,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
         return arrow_table_to_pandas(
@@ -409,16 +424,16 @@ class TabularReader(Base):
         *,
         variables: Optional[Iterable[str]] = None,
         geography_variable: Union[str, None, Literal[""]] = "",
-        progress: bool = True,
+        progress: Optional[bool] = None,
         dtype_backend: str = "pyarrow",
         date_as_object: bool = False,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count() or 1,
+        max_parallelization: Optional[int] = None,
     ) -> Any:
         import geopandas
 
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         arrow_table = make_rows_request(
@@ -431,7 +446,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -464,12 +479,12 @@ class TabularReader(Base):
         *,
         variables: Optional[Iterable[str]] = None,
         geography_variable: Union[str, None, Literal[""]] = "",
-        progress: bool = True,
+        progress: Optional[bool] = None,
     ) -> Any:
         warnings.warn(get_warning("dataframe_deprecation"), FutureWarning, stacklevel=2)
 
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         arrow_table = make_rows_request(
@@ -481,7 +496,7 @@ class TabularReader(Base):
             output_type="arrow_table",
             progress=progress,
             coerce_schema=coerce_schema,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
         )
 
         df = arrow_table.to_pandas(self_destruct=True)
@@ -511,10 +526,10 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
     ) -> Iterable[Any]:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -526,6 +541,7 @@ class TabularReader(Base):
             output_type="arrow_iterator",
             progress=progress,
             coerce_schema=coerce_schema,
+            rows_response=rows_response,
         )
 
     def to_sas(
@@ -534,9 +550,9 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: Optional[int] = None,
         geography_variable: Union[str, None, Literal[""]] = "",
     ) -> None:
         if self._is_read_stream:
@@ -617,11 +633,12 @@ class TabularReader(Base):
                 temp_file_path = f"{tmpdirname}/cleaned.csv"
 
                 # This allows SAS to handle line breaks in cells
-                with open(
-                    f"{tmpdirname}/part-0.csv", "r", newline="", encoding="utf-8"
-                ) as fin, open(
-                    temp_file_path, "w", newline="", encoding="utf-8"
-                ) as fout:
+                with (
+                    open(
+                        f"{tmpdirname}/part-0.csv", "r", newline="", encoding="utf-8"
+                    ) as fin,
+                    open(temp_file_path, "w", newline="", encoding="utf-8") as fout,
+                ):
                     reader = csv.reader(fin)
                     writer = csv.writer(fout, lineterminator="\r\n")
 
@@ -701,9 +718,9 @@ class TabularReader(Base):
         *,
         geography_variable: Union[str, None, Literal[""]] = "",
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
         batch_preprocessor: Optional[Any] = None,
-        max_parallelization: int = os.cpu_count(),
+        max_parallelization: Optional[int] = None,
     ) -> None:
         if self._is_read_stream:
             raise exceptions.ValueError("Cannot call to_stata() on a ReadStream.")
@@ -828,7 +845,7 @@ class TabularReader(Base):
         max_results: Optional[int] = None,
         *,
         variables: Optional[Iterable[str]] = None,
-        progress: bool = True,
+        progress: Optional[bool] = None,
     ):
         raise exceptions.DeprecationError(
             "The list_rows method is deprecated. Please use table.to_arrow_batch_iterator() or table.to_arrow_table().to_pylist() for better performance and memory utilization."
@@ -842,18 +859,58 @@ def check_is_ready(self: TabularReader) -> None:
         if not self.properties or "container" not in self.properties:
             self.get()
     elif self._is_upload:
-        if not self.properties or "status" not in self.properties or self.properties['status'] != "completed":
+        if (
+            not self.properties
+            or "status" not in self.properties
+            or self.properties["status"] != "completed"
+        ):
             self.get()
-        if self.properties['status'] != "completed":
+        if self.properties["status"] != "completed":
             raise exceptions.ValueError(
                 f"Cannot read data from an upload with status: {self.properties['status']}"
             )
 
 
+def start_read(
+    self: TabularReader, variables: Optional[Iterable[str]], max_results: Optional[int]
+) -> Tuple[List[Dict[str, Any]], Optional[Iterable[str]], bool, Optional[Any]]:
+    """Get ready to read the instance's rows, as get_mapped_variables() does.
+
+    A read that runs a query asks for its rows along with it, which the API
+    responds with if the query finishes quickly (and its rows aren't too large).
+    If so, the response containing them is returned too, for the read to use.
+    """
+    rows_response = None
+    if self._is_query:
+        list_rows = {"maxResults": max_results, "format": "arrow", "eosSentinel": True}
+        # Variables are validated once the query has run, so only names are sent,
+        # leaving anything else for that to report
+        if variables is not None and not isinstance(variables, str):
+            try:
+                variables = list(variables)
+            except TypeError:
+                pass
+            else:
+                if variables and all(isinstance(name, str) for name in variables):
+                    list_rows["selectedVariables"] = variables
+        rows_response = self._wait_for_finish(list_rows=list_rows)
+
+    try:
+        return (*get_mapped_variables(self, variables), rows_response)
+    except BaseException:
+        if rows_response is not None:
+            rows_response.close()
+        raise
+
+
 def get_mapped_variables(
     self: TabularReader, variables: Optional[Iterable[str]], *, refresh: bool = True
-) -> Tuple[List[Dict[str, Any]], bool]:
+) -> Tuple[List[Dict[str, Any]], Optional[Iterable[str]], bool]:
     if self._is_read_stream:
+        if variables is not None:
+            raise exceptions.ValueError(
+                "A read stream's variables are chosen when it's created; pass them to to_read_streams() instead"
+            )
         return get_mapped_variables(
             (
                 self.table
@@ -901,10 +958,17 @@ def get_mapped_variables(
 
 
 def arrow_table_to_pandas(
-    arrow_table: Any, dtype_backend: str, date_as_object: bool, max_parallelization: int
+    arrow_table: Any,
+    dtype_backend: str,
+    date_as_object: bool,
+    max_parallelization: Optional[int],
 ) -> Any:
     import pandas as pd
     import pyarrow as pa
+
+    max_parallelization = resolve_config(
+        "max_parallelization", max_parallelization, os.cpu_count() or 1
+    )
 
     pa.set_cpu_count(max_parallelization)
     pa.set_io_thread_count(max_parallelization)
@@ -945,7 +1009,7 @@ def get_geography_variable(
         return None
     else:
         for variable in variables:
-            if variable["name"] == geography_variable_name:
+            if variable["name"].lower() == geography_variable_name.lower():
                 return variable
 
         raise exceptions.NotFoundError(
@@ -967,6 +1031,8 @@ def should_use_export_api(self: TabularReader) -> bool:
             self.get()
         num_bytes = self.properties.get("numBytes")
 
-    return num_bytes > (
-        1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11
-    )
+    # The size may not be known (e.g., for an upload that's still being processed)
+    if num_bytes is None:
+        return False
+
+    return num_bytes > (1e9 if os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is None else 1e11)

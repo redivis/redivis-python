@@ -54,18 +54,28 @@ def reset():
             "container_kind": "table",
             "upload_status": "completed",
             "query_bytes": 1000,
+            # POST /queries with listRows responds with the query's rows, as the
+            # API does when the query finishes quickly and its rows are small
+            # enough. Otherwise (as for an older API) it responds with the query.
+            "query_responds_with_rows": True,
             # Reject unauthenticated requests, other than listRows, which (like
             # the real API) can be read anonymously
             "require_auth": False,
             # Return 503 for the next N requests
             "fail_503": 0,
+            # Drop the connection, without responding, for the next N requests
+            "drop_connection": 0,
             # Queued responses for the next requests, as (status, body). A status
             # of None lets that request through to the normal handler.
             "response_script": [],
-            # The next listRows response stops after this many rows
+            # The next listRows response (including the rows that POST /queries
+            # responds with) stops after this many rows, without the sentinel
             "truncate_rows_once": 0,
             # The next listRows request drops the connection without responding
             "fail_rows_once": False,
+            # listRows refuses to serve the rows as a single response, as for an
+            # unreleased table whose uploads have different schemas
+            "rows_read_session_required": False,
             # Raw file contents, by file id
             "raw_files": {},
             # The Range header of each rawFiles request (None if absent)
@@ -77,6 +87,18 @@ def reset():
             # Everything received, as (method, path, query, had_authorization)
             "requests": [],
             "post_body_lengths": [],
+            # The JSON bodies received, as (method, path, body)
+            "json_bodies": [],
+            # The bodies uploaded to temp storage, by path
+            "temp_storage": {},
+            # The variables listed for the table, if not VARIABLES
+            "variables": None,
+            # The table's file index, as rows of file_id, file_name, and alt_name (a
+            # second name variable)
+            "file_index": [],
+            # Respond 304 Not Modified to listings of the file index that send If-
+            # Modified-Since
+            "file_index_unchanged": True,
         }
     )
 
@@ -154,18 +176,38 @@ class Handler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         self._handle("PATCH")
 
-    def _send(self, body, *, status=200, content_type="application/json"):
+    def do_DELETE(self):
+        self._handle("DELETE")
+
+    def do_PUT(self):
+        self._handle("PUT")
+
+    def _send(self, body, *, status=200, content_type="application/json", headers=None):
         if not isinstance(body, bytes):
             body = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _send_arrow(self, body):
-        self._send(body, content_type="application/vnd.apache.arrow.stream")
+    def _send_arrow(self, body, headers=None):
+        self._send(
+            body, content_type="application/vnd.apache.arrow.stream", headers=headers
+        )
+
+    def _send_rows(self, names, count, *, sentinel, headers=None):
+        """A listRows response, of the first `count` rows."""
+        if STATE["truncate_rows_once"]:
+            count = min(count, STATE["truncate_rows_once"])
+            STATE["truncate_rows_once"] = 0
+            sentinel = False
+        return self._send_arrow(
+            arrow_stream(names, 0, count, sentinel=sentinel), headers=headers
+        )
 
     def _send_raw_file(self, file_id):
         data = STATE["raw_files"][file_id]
@@ -201,6 +243,11 @@ class Handler(BaseHTTPRequestHandler):
     def _intercepted(self, method, path, query):
         """Apply any injected failures, returning True if a response was sent."""
         STATE["requests"].append((method, path, query, "Authorization" in self.headers))
+
+        if STATE["drop_connection"]:
+            STATE["drop_connection"] -= 1
+            self.close_connection = True
+            return True
 
         if STATE["fail_503"]:
             STATE["fail_503"] -= 1
@@ -241,6 +288,8 @@ class Handler(BaseHTTPRequestHandler):
         query = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
         if method in ("POST", "PATCH"):
             STATE["post_body_lengths"].append(len(body))
+            if self.headers.get("Content-Type", "").startswith("application/json"):
+                STATE["json_bodies"].append((method, path, json.loads(body or "null")))
 
         if self._intercepted(method, path, query):
             return
@@ -259,7 +308,30 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "POST":
             if path == "/api/v1/queries":
-                return self._send(query_properties)
+                list_rows = json.loads(body).get("listRows")
+                headers = {"Location": "/api/v1/queries/q1"}
+                if list_rows is None or not STATE["query_responds_with_rows"]:
+                    return self._send(query_properties, headers=headers)
+                max_results = list_rows.get("maxResults")
+                count = num_rows if max_results is None else min(max_results, num_rows)
+                # The API only lists rows up to 100MB, scaled by maxResults
+                if STATE["query_bytes"] * count / max(num_rows, 1) > 1e8:
+                    return self._send(query_properties, headers=headers)
+                # Like BigQuery, selected columns are matched case-insensitively,
+                # and come in the table's order
+                selected = {
+                    name.lower()
+                    for name in list_rows.get("selectedVariables", all_names)
+                }
+                return self._send_rows(
+                    [name for name in all_names if name.lower() in selected],
+                    count,
+                    sentinel=list_rows.get("eosSentinel", False),
+                    headers={
+                        **headers,
+                        "Content-Location": "/api/v1/queries/q1/rows",
+                    },
+                )
             if path.endswith("/readSessions"):
                 max_results = json.loads(body or "{}").get("maxResults")
                 if max_results is not None:
@@ -274,6 +346,26 @@ class Handler(BaseHTTPRequestHandler):
                         ],
                         "numRows": num_rows,
                     }
+                )
+            if path.endswith("/tempUploads"):
+                temp_uploads = json.loads(body)["tempUploads"]
+                return self._send(
+                    {
+                        "results": [
+                            {
+                                "id": f"temp-{i}",
+                                # A signed URL, served by this mock (see the PUT
+                                # handler)
+                                "url": f"http://{self.headers['Host']}/tempStorage/{i}",
+                                "resumable": False,
+                            }
+                            for i, _ in enumerate(temp_uploads)
+                        ]
+                    }
+                )
+            if path.endswith("/uploads"):
+                return self._send(
+                    {"uri": "/uploads/u1", "name": "My Upload", "status": "queued"}
                 )
             if path.endswith("/exports"):
                 return self._send(
@@ -291,8 +383,29 @@ class Handler(BaseHTTPRequestHandler):
         if method == "PATCH":
             return self._send({"ok": True})
 
+        if method == "PUT" and path.startswith("/tempStorage/"):
+            STATE["temp_storage"][path] = body
+            return self._send(b"", content_type="text/plain")
+
         if path.endswith("/variables"):
-            return self._send({"results": VARIABLES, "nextPageToken": None})
+            return self._send(
+                {"results": STATE["variables"] or VARIABLES, "nextPageToken": None}
+            )
+
+        if path.endswith("/rawFiles"):
+            if STATE["file_index_unchanged"] and self.headers.get("If-Modified-Since"):
+                return self._send(b"", status=304)
+            name_variable = query.get("fileNameVariable", "file_name")
+            listing = pyarrow.table(
+                {
+                    "file_id": [f["file_id"] for f in STATE["file_index"]],
+                    name_variable: [f[name_variable] for f in STATE["file_index"]],
+                }
+            )
+            sink = io.BytesIO()
+            with pyarrow.ipc.new_stream(sink, listing.schema) as writer:
+                writer.write_table(listing)
+            return self._send_arrow(sink.getvalue())
 
         if path.startswith("/api/v1/rawFiles/"):
             return self._send_raw_file(urllib.parse.unquote(path.rsplit("/", 1)[1]))
@@ -302,16 +415,24 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["fail_rows_once"] = False
                 self.close_connection = True
                 return
+            if STATE["rows_read_session_required"]:
+                return self._send(
+                    {
+                        "status": 400,
+                        "error": "read_session_required",
+                        "error_description": "Use a read session",
+                    },
+                    status=400,
+                )
             names = (
                 query["selectedVariables"].split(",")
                 if "selectedVariables" in query
                 else all_names
             )
             count = min(int(query.get("maxResults", num_rows)), num_rows)
-            if STATE["truncate_rows_once"]:
-                count = min(count, STATE["truncate_rows_once"])
-                STATE["truncate_rows_once"] = 0
-            return self._send_arrow(arrow_stream(names, 0, count, sentinel=False))
+            return self._send_rows(
+                names, count, sentinel=query.get("eosSentinel") == "true"
+            )
 
         if path.startswith("/api/v1/readStreams/"):
             num_rows = STATE.get("session_rows", num_rows)

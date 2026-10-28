@@ -1,7 +1,10 @@
 from .Base import Base
 from ..common import exceptions
 from ..common.api_request import make_request
+from ..common.util import split_reference
 import os
+from ..common.config import get_config
+from urllib.parse import quote as quote_uri
 
 
 class Parameter(Base):
@@ -9,11 +12,12 @@ class Parameter(Base):
         from .Workflow import Workflow  # avoid circular import
 
         if not workflow:
-            if len(name.split(".")) == 3:
-                workflow = Workflow(".".join(name.split(".")[0:2]))
-                name = name.split(".")[-1]
-            elif os.getenv("REDIVIS_DEFAULT_WORKFLOW"):
-                workflow = Workflow(os.getenv("REDIVIS_DEFAULT_WORKFLOW"))
+            if name is not None and len(split_reference(name)) == 3:
+                parts = split_reference(name)
+                workflow = Workflow(".".join(parts[0:2]))
+                name = parts[-1]
+            elif get_config("default_workflow"):
+                workflow = Workflow(get_config("default_workflow"))
             else:
                 raise exceptions.ValueError(
                     "Invalid parameter specifier, must be the fully qualified reference if no workflow is specified"
@@ -29,7 +33,7 @@ class Parameter(Base):
         self.uri = (
             properties["uri"]
             if "uri" in (properties or {})
-            else f"{workflow.uri}/parameters/{name}"
+            else f"{workflow.uri}/parameters/{quote_uri(name, '')}"
         )
 
     def __repr__(self):

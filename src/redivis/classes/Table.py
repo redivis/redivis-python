@@ -13,6 +13,8 @@ from ..common import exceptions
 from ..common.TabularReader import TabularReader
 from ..common.api_request import make_request, make_paginated_request
 from ..common.retryable_upload import perform_resumable_upload, perform_standard_upload
+from ..common.util import split_reference
+from ..common.config import get_config, resolve_config
 
 
 class Table(TabularReader):
@@ -25,7 +27,7 @@ class Table(TabularReader):
         properties=None,
     ):
         super().__init__(is_table=True)
-        if len(name.split(".")) != 3:
+        if len(split_reference(name)) != 3:
             dataset, workflow = get_table_parents(dataset, workflow)
 
         is_workflow_table = False
@@ -34,12 +36,12 @@ class Table(TabularReader):
         elif workflow:
             reference_scope = f"{workflow.qualified_reference}."
             is_workflow_table = True
-        elif len(name.split(".")) == 3:
+        elif len(split_reference(name)) == 3:
             from .Dataset import Dataset
             from .Workflow import Workflow
 
-            reference_scope = ".".join(name.split(".")[0:2])
-            name = name.split(".")[-1]
+            reference_scope = ".".join(split_reference(name)[0:2])
+            name = split_reference(name)[-1]
             dataset = Dataset(reference_scope)
             workflow = Workflow(reference_scope)
             reference_scope += "."
@@ -136,9 +138,13 @@ class Table(TabularReader):
         *,
         files=None,
         directory=None,
-        progress=True,
-        max_parallelization=os.cpu_count() * 5,
+        progress=None,
+        max_parallelization=None,
     ):
+        progress = resolve_config("progress", progress)
+        max_parallelization = resolve_config(
+            "max_parallelization", max_parallelization, (os.cpu_count() or 1) * 5
+        )
         if (files is None) == (directory is None):
             raise exceptions.ValueError("Either files or directory must be specified")
 
@@ -306,7 +312,6 @@ class Table(TabularReader):
 
             raise e
 
-
     def update(self, *, name=None, description=None, upload_merge_strategy=None):
         resolve_table_for_write(self)
         payload = {}
@@ -341,22 +346,19 @@ class Table(TabularReader):
 
 
 def get_table_parents(dataset, workflow):
-    from .User import User
+    from .Dataset import Dataset
+    from .Workflow import Workflow
 
     if dataset or workflow:
         return dataset, workflow
     elif os.getenv("REDIVIS_DEFAULT_NOTEBOOK") is not None:
         return None, None
-    elif os.getenv("REDIVIS_DEFAULT_WORKFLOW") is not None:
-        return None, User(os.getenv("REDIVIS_DEFAULT_WORKFLOW").split(".")[0]).workflow(
-            os.getenv("REDIVIS_DEFAULT_WORKFLOW").split(".")[1]
-        )
-    elif os.getenv("REDIVIS_DEFAULT_DATASET") is not None:
-        return (
-            User(os.getenv("REDIVIS_DEFAULT_DATASET").split(".")[0]).dataset(
-                os.getenv("REDIVIS_DEFAULT_DATASET").split(".")[1]
-            )
-        ), None
+    elif get_config("default_workflow") is not None:
+        # Parsing the qualified reference resolves the owner, whether a user or an
+        # organization
+        return None, Workflow(get_config("default_workflow"))
+    elif get_config("default_dataset") is not None:
+        return Dataset(get_config("default_dataset")), None
     return None, None
 
 
