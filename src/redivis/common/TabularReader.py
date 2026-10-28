@@ -287,8 +287,8 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -301,7 +301,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -314,8 +314,8 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -328,7 +328,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -341,8 +341,8 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -355,7 +355,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -368,8 +368,8 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -382,7 +382,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -397,8 +397,8 @@ class TabularReader(Base):
         batch_preprocessor: Optional[Any] = None,
         max_parallelization: Optional[int] = None,
     ) -> Any:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         arrow_table = make_rows_request(
@@ -411,7 +411,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
         return arrow_table_to_pandas(
@@ -432,8 +432,8 @@ class TabularReader(Base):
     ) -> Any:
         import geopandas
 
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         arrow_table = make_rows_request(
@@ -446,7 +446,7 @@ class TabularReader(Base):
             progress=progress,
             coerce_schema=coerce_schema,
             batch_preprocessor=batch_preprocessor,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
             max_parallelization=max_parallelization,
         )
 
@@ -483,8 +483,8 @@ class TabularReader(Base):
     ) -> Any:
         warnings.warn(get_warning("dataframe_deprecation"), FutureWarning, stacklevel=2)
 
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         arrow_table = make_rows_request(
@@ -496,7 +496,7 @@ class TabularReader(Base):
             output_type="arrow_table",
             progress=progress,
             coerce_schema=coerce_schema,
-            use_export_api=should_use_export_api(self),
+            rows_response=rows_response,
         )
 
         df = arrow_table.to_pandas(self_destruct=True)
@@ -528,8 +528,8 @@ class TabularReader(Base):
         variables: Optional[Iterable[str]] = None,
         progress: Optional[bool] = None,
     ) -> Iterable[Any]:
-        mapped_variables, selected_variables, coerce_schema = get_mapped_variables(
-            self, variables
+        mapped_variables, selected_variables, coerce_schema, rows_response = start_read(
+            self, variables, max_results
         )
 
         return make_rows_request(
@@ -541,6 +541,7 @@ class TabularReader(Base):
             output_type="arrow_iterator",
             progress=progress,
             coerce_schema=coerce_schema,
+            rows_response=rows_response,
         )
 
     def to_sas(
@@ -868,6 +869,38 @@ def check_is_ready(self: TabularReader) -> None:
             raise exceptions.ValueError(
                 f"Cannot read data from an upload with status: {self.properties['status']}"
             )
+
+
+def start_read(
+    self: TabularReader, variables: Optional[Iterable[str]], max_results: Optional[int]
+) -> Tuple[List[Dict[str, Any]], Optional[Iterable[str]], bool, Optional[Any]]:
+    """Get ready to read the instance's rows, as get_mapped_variables() does.
+
+    A read that runs a query asks for its rows along with it, which the API
+    responds with if the query finishes quickly (and its rows aren't too large).
+    If so, the response containing them is returned too, for the read to use.
+    """
+    rows_response = None
+    if self._is_query:
+        list_rows = {"maxResults": max_results, "format": "arrow", "eosSentinel": True}
+        # Variables are validated once the query has run, so only names are sent,
+        # leaving anything else for that to report
+        if variables is not None and not isinstance(variables, str):
+            try:
+                variables = list(variables)
+            except TypeError:
+                pass
+            else:
+                if variables and all(isinstance(name, str) for name in variables):
+                    list_rows["selectedVariables"] = variables
+        rows_response = self._wait_for_finish(list_rows=list_rows)
+
+    try:
+        return (*get_mapped_variables(self, variables), rows_response)
+    except BaseException:
+        if rows_response is not None:
+            rows_response.close()
+        raise
 
 
 def get_mapped_variables(

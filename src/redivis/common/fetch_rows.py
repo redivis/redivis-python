@@ -30,19 +30,43 @@ class ArrowStreamSource:
       - A readStream belonging to a read session. These can be resumed from a
         row offset, and terminate with an empty end-of-stream sentinel batch,
         so an interrupted read picks up where it left off.
-      - A table.listRows request. This supports neither, so an interrupted read
-        must restart from the beginning, and completion is verified by comparing
-        the number of rows read against the number of rows we expect.
+      - A listRows request. This can't be resumed, so an interrupted read must
+        restart from the beginning, and completion is verified by the
+        end-of-stream sentinel if requested (`eos_sentinel`, which only queries
+        support), and otherwise by comparing the number of rows read against
+        the number of rows we expect.
+
+    `response` is an already-received response to read first, e.g. the rows
+    that running a query responded with. Should that read fail, the rows are
+    requested again.
     """
 
-    def __init__(self, *, name, path, query=None, resumable=True, expected_rows=None):
+    def __init__(
+        self,
+        *,
+        name,
+        path,
+        query=None,
+        resumable=True,
+        expected_rows=None,
+        eos_sentinel=False,
+        response=None,
+    ):
         self.name = name
         self.path = path
         self.query = query or {}
         self.resumable = resumable
         self.expected_rows = expected_rows
+        self.eos_sentinel = eos_sentinel
+        self.response = response
 
     def open(self, offset=0):
+        # A received response can only be read once, so any retry requests the
+        # rows again
+        response, self.response = self.response, None
+        if response is not None:
+            return response
+
         query = {**self.query}
         if self.resumable:
             query["offset"] = offset
@@ -58,11 +82,11 @@ class ArrowStreamSource:
 
     def is_finished(self, *, received_sentinel, rows_read):
         """Whether the stream completed, as opposed to being cut off mid-read."""
-        if self.resumable:
+        if self.resumable or self.eos_sentinel:
             return received_sentinel
 
-        # listRows has no end-of-stream sentinel; the expected row count is the
-        # only signal that everything arrived.
+        # Without an end-of-stream sentinel, the expected row count is the only
+        # signal that everything arrived.
         return self.expected_rows is None or rows_read >= self.expected_rows
 
 
@@ -70,7 +94,15 @@ def read_stream_source(stream_id):
     return ArrowStreamSource(name=stream_id, path=f"/readStreams/{stream_id}")
 
 
-def list_rows_source(*, uri, selected_variables, max_results, expected_rows):
+def list_rows_source(
+    *,
+    uri,
+    selected_variables,
+    max_results,
+    expected_rows=None,
+    eos_sentinel=False,
+    response=None,
+):
     query = {"format": "arrow"}
 
     if selected_variables is not None:
@@ -79,12 +111,17 @@ def list_rows_source(*, uri, selected_variables, max_results, expected_rows):
     if max_results is not None:
         query["maxResults"] = max_results
 
+    if eos_sentinel:
+        query["eosSentinel"] = "true"
+
     return ArrowStreamSource(
         name="rows",
         path=f"{uri}/rows",
         query=query,
         resumable=False,
         expected_rows=expected_rows,
+        eos_sentinel=eos_sentinel,
+        response=response,
     )
 
 
@@ -234,7 +271,8 @@ class RedivisArrowIterator:
                         ),
                         None,
                     )
-                    if mapped_index is not None and mapped_index != i:
+                    # Includes a column that wasn't selected, which reordering drops
+                    if mapped_index != i:
                         self.should_reorder_fields = True
                         break
 
@@ -404,16 +442,24 @@ class RedivisArrowIterator:
             pass
 
 
-def make_rows_request(**kwargs):
+def make_rows_request(*, rows_response=None, **kwargs):
     try:
-        return read_rows(**kwargs)
-    except exceptions.APIError as e:
+        return read_rows(**kwargs, rows_response=rows_response)
+    except BaseException as e:
+        # The read closes the response once it's read it, unless it failed first
+        if rows_response is not None:
+            rows_response.close()
+
         # listRows can't always serve the rows as a single response (e.g., those of an
         # unreleased version's uploads, when their schemas differ), so read them through
         # a read session instead
-        if e.message != "read_session_required":
+        if (
+            not isinstance(e, exceptions.APIError)
+            or e.message != "read_session_required"
+        ):
             raise
-        return read_rows(**kwargs, allow_list_rows=False)
+
+    return read_rows(**kwargs, allow_list_rows=False)
 
 
 def read_rows(
@@ -427,9 +473,9 @@ def read_rows(
     coerce_schema=False,
     batch_preprocessor=None,
     instance=None,
-    use_export_api=False,
     max_parallelization=None,
     allow_list_rows=True,
+    rows_response=None,
 ):
     progress = resolve_config("progress", progress)
     max_parallelization = resolve_config(
@@ -439,11 +485,13 @@ def read_rows(
     import pyarrow.dataset as pyarrow_dataset  # need to import separately, it's not on the pyarrow import
     from ..classes.Table import Table
     from ..classes.ReadStream import ReadStream
+    from .TabularReader import should_use_export_api
 
     progressbar = None
 
     sources = []
     num_rows = 0
+    use_export_api = False
 
     if isinstance(instance, ReadStream):
         if max_results is not None:
@@ -460,15 +508,30 @@ def read_rows(
         pyarrow.set_cpu_count(max_parallelization)
         pyarrow.set_io_thread_count(max_parallelization)
 
+        # Large, unfiltered reads are faster to export than to stream
         use_export_api = (
-            use_export_api
+            rows_response is None
             and output_type != "arrow_iterator"
             and selected_variables is None
             and batch_preprocessor is None
             and max_results is None
+            and should_use_export_api(instance)
         )
 
-        if (
+        if rows_response is not None:
+            # The rows that running the query responded with, which carry no row
+            # count, so their completeness is verified by the end-of-stream sentinel
+            num_rows = None
+            sources = [
+                list_rows_source(
+                    uri=uri,
+                    selected_variables=selected_variables,
+                    max_results=max_results,
+                    eos_sentinel=True,
+                    response=rows_response,
+                )
+            ]
+        elif (
             not use_export_api
             and allow_list_rows
             and should_use_list_rows(instance, max_results)
@@ -864,7 +927,9 @@ def process_stream(
                             ),
                             None,
                         )
-                        if mapped_index is not None and mapped_index != i:
+                        # Includes a column that wasn't selected, which
+                        # reordering drops
+                        if mapped_index != i:
                             should_reorder_fields = True
                             break
 

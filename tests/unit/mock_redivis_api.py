@@ -54,6 +54,10 @@ def reset():
             "container_kind": "table",
             "upload_status": "completed",
             "query_bytes": 1000,
+            # POST /queries with listRows responds with the query's rows, as the
+            # API does when the query finishes quickly and its rows are small
+            # enough. Otherwise (as for an older API) it responds with the query.
+            "query_responds_with_rows": True,
             # Reject unauthenticated requests, other than listRows, which (like
             # the real API) can be read anonymously
             "require_auth": False,
@@ -64,7 +68,8 @@ def reset():
             # Queued responses for the next requests, as (status, body). A status
             # of None lets that request through to the normal handler.
             "response_script": [],
-            # The next listRows response stops after this many rows
+            # The next listRows response (including the rows that POST /queries
+            # responds with) stops after this many rows, without the sentinel
             "truncate_rows_once": 0,
             # The next listRows request drops the connection without responding
             "fail_rows_once": False,
@@ -177,18 +182,32 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         self._handle("PUT")
 
-    def _send(self, body, *, status=200, content_type="application/json"):
+    def _send(self, body, *, status=200, content_type="application/json", headers=None):
         if not isinstance(body, bytes):
             body = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _send_arrow(self, body):
-        self._send(body, content_type="application/vnd.apache.arrow.stream")
+    def _send_arrow(self, body, headers=None):
+        self._send(
+            body, content_type="application/vnd.apache.arrow.stream", headers=headers
+        )
+
+    def _send_rows(self, names, count, *, sentinel, headers=None):
+        """A listRows response, of the first `count` rows."""
+        if STATE["truncate_rows_once"]:
+            count = min(count, STATE["truncate_rows_once"])
+            STATE["truncate_rows_once"] = 0
+            sentinel = False
+        return self._send_arrow(
+            arrow_stream(names, 0, count, sentinel=sentinel), headers=headers
+        )
 
     def _send_raw_file(self, file_id):
         data = STATE["raw_files"][file_id]
@@ -289,7 +308,30 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "POST":
             if path == "/api/v1/queries":
-                return self._send(query_properties)
+                list_rows = json.loads(body).get("listRows")
+                headers = {"Location": "/api/v1/queries/q1"}
+                if list_rows is None or not STATE["query_responds_with_rows"]:
+                    return self._send(query_properties, headers=headers)
+                max_results = list_rows.get("maxResults")
+                count = num_rows if max_results is None else min(max_results, num_rows)
+                # The API only lists rows up to 100MB, scaled by maxResults
+                if STATE["query_bytes"] * count / max(num_rows, 1) > 1e8:
+                    return self._send(query_properties, headers=headers)
+                # Like BigQuery, selected columns are matched case-insensitively,
+                # and come in the table's order
+                selected = {
+                    name.lower()
+                    for name in list_rows.get("selectedVariables", all_names)
+                }
+                return self._send_rows(
+                    [name for name in all_names if name.lower() in selected],
+                    count,
+                    sentinel=list_rows.get("eosSentinel", False),
+                    headers={
+                        **headers,
+                        "Content-Location": "/api/v1/queries/q1/rows",
+                    },
+                )
             if path.endswith("/readSessions"):
                 max_results = json.loads(body or "{}").get("maxResults")
                 if max_results is not None:
@@ -388,10 +430,9 @@ class Handler(BaseHTTPRequestHandler):
                 else all_names
             )
             count = min(int(query.get("maxResults", num_rows)), num_rows)
-            if STATE["truncate_rows_once"]:
-                count = min(count, STATE["truncate_rows_once"])
-                STATE["truncate_rows_once"] = 0
-            return self._send_arrow(arrow_stream(names, 0, count, sentinel=False))
+            return self._send_rows(
+                names, count, sentinel=query.get("eosSentinel") == "true"
+            )
 
         if path.startswith("/api/v1/readStreams/"):
             num_rows = STATE.get("session_rows", num_rows)

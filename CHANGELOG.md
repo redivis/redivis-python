@@ -7,8 +7,8 @@ see [CONTRIBUTING.md](CONTRIBUTING.md#to-upload-to-pypi). Notes for releases bef
 
 ## 0.22.0
 
-**__This release adds `redivis.config()` for library-wide settings, keeps each environment's login separate, and
-fixes many bugs in uploads, downloads, and authentication__**
+****This release adds `redivis.config()` for library-wide settings, keeps each environment's login separate, and
+fixes many bugs in uploads, downloads, and authentication****
 
 ### What's new
 
@@ -30,12 +30,14 @@ fixes many bugs in uploads, downloads, and authentication__**
 ### Improvements and fixes
 
 Authentication
+
 - A temporary server error while refreshing your login no longer logs you out; you're only asked to log in again if
   the login was revoked or has expired.
 - Cached credentials are written in a single step, and are only readable by you, so another process using the client
   at the same time (e.g., a second notebook kernel) never reads a partially written file.
 
 Uploads
+
 - Fixed `table.add_files()` failing when given bytes, and uploads of bytes now show a progress bar.
 - `upload.create()` checks for an upload with the same name before uploading the data, rather than after, and cleans
   up the files it creates. `remove_on_fail=True` now works without `raise_on_fail=True`.
@@ -48,6 +50,7 @@ Uploads
   Python objects (e.g., strings or dates).
 
 Downloads
+
 - Downloads are written to a temporary file, which replaces the destination only once it's complete and its MD5 hash
   has been verified, so an interrupted download never leaves a partial file in its place.
 - A download that can't be resumed starts over, rather than failing, and downloads no longer require the server to
@@ -56,13 +59,19 @@ Downloads
 - `file.read()` handles `end_byte=0`, and `file.stream()` returns bytes again.
 
 Reading tables and queries
+
 - Fixed `to_polars_lazyframe()` with polars 2, which removed an argument the client passed to it.
 - Tables whose size isn't known yet can be read.
 - Read streams raise an error when given `variables` or `max_results`, rather than ignoring them.
 - Variables, including geography variables, are matched case-insensitively when reading.
 - Requests that only read data are retried after connection failures and timeouts.
+- Reading a query's results is faster for queries that finish quickly: the API returns their rows in the same response
+  that runs the query, rather than the client waiting for the query and then reading its rows separately. Reads of
+  large results, and other uses of a query (e.g., `query.get()` or `query.download()`), are unchanged.
+- A query used from several threads at once is run only once.
 
 Datasets, workflows, and other resources
+
 - References with a dotted version tag, like `"owner.dataset:v1.0"`, are parsed correctly.
 - `REDIVIS_DEFAULT_WORKFLOW` and `REDIVIS_DEFAULT_DATASET` may be owned by an organization, and are validated.
 - Fixed `version.dataset()`, `dataset.version()` after `dataset.get()`, and `previous_version()` / `next_version()`
@@ -78,6 +87,7 @@ Datasets, workflows, and other resources
   (e.g., macOS and Windows).
 
 Installation
+
 - Requires Python 3.9 or later. On earlier versions, pip installs the previous release.
 - No longer installs folium and mapclassify, which geopandas only uses for `GeoDataFrame.explore()`. This makes
   installing the client about 135MB smaller; install them yourself to use `explore()`.

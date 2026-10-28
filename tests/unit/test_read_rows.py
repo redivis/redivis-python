@@ -1,5 +1,8 @@
 """How table reads are routed (listRows vs. read sessions) and recover from interruptions."""
 
+import os
+import threading
+
 import pytest
 import redivis
 from redivis.common import exceptions
@@ -9,6 +12,8 @@ from .mock_redivis_api import DEFAULT_NUM_ROWS as N, TABLE_PATH, paths
 
 ROWS = f"{TABLE_PATH}/rows"
 READ_SESSIONS = f"{TABLE_PATH}/readSessions"
+QUERIES = "/api/v1/queries"
+QUERY = "/api/v1/queries/q1"
 
 
 def data_requests():
@@ -142,11 +147,214 @@ def test_other_list_rows_errors_are_raised(api, table):
     assert not paths("/readSessions")
 
 
-def test_queries_never_use_list_rows(api):
+# --- queries -----------------------------------------------------------------
+
+
+def list_rows_options(api):
+    """The listRows options sent with each POST /queries."""
+    return [
+        body.get("listRows")
+        for method, path, body in api["json_bodies"]
+        if (method, path) == ("POST", QUERIES)
+    ]
+
+
+def test_quick_query_is_read_from_the_response_that_runs_it(api):
+    query = redivis.query("SELECT 1")
+    df = query.to_pandas_dataframe(progress=False)
+
+    assert list_rows_options(api) == [
+        {"maxResults": None, "format": "arrow", "eosSentinel": True}
+    ]
+    assert paths() == [QUERIES, f"{QUERY}/variables"]
+    assert df["id"].tolist() == list(range(N))
+    assert list(df.columns) == ["id", "name", "val"]
+    assert query.uri == "/queries/q1"
+    assert query.properties["status"] == "completed"
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        lambda q: q.to_arrow_table(progress=False).num_rows,
+        lambda q: q.to_arrow_dataset(progress=False).count_rows(),
+        lambda q: q.to_polars_lazyframe(progress=False).collect().height,
+        lambda q: sum(b.num_rows for b in q.to_arrow_batch_iterator(progress=False)),
+    ],
+    ids=["arrow_table", "arrow_dataset", "polars_lazyframe", "arrow_batch_iterator"],
+)
+def test_every_output_type_reads_a_quick_query_inline(api, read):
+    assert read(redivis.query("SELECT 1")) == N
+    assert paths() == [QUERIES, f"{QUERY}/variables"]
+
+
+def test_inline_query_reads_respect_max_results_and_variables(api):
+    df = redivis.query("SELECT 1").to_pandas_dataframe(
+        max_results=7, variables=["VAL", "id"], progress=False
+    )
+
+    assert list_rows_options(api) == [
+        {
+            "maxResults": 7,
+            "format": "arrow",
+            "eosSentinel": True,
+            "selectedVariables": ["VAL", "id"],
+        }
+    ]
+    assert paths() == [QUERIES, f"{QUERY}/variables"]
+    assert list(df.columns) == ["val", "id"]
+    assert df["id"].tolist() == list(range(7))
+
+
+def test_inline_query_reads_accept_any_iterable_of_variables(api):
+    df = redivis.query("SELECT 1").to_pandas_dataframe(
+        variables=(name for name in ["val", "id"]), progress=False
+    )
+
+    assert list_rows_options(api)[0]["selectedVariables"] == ["val", "id"]
+    assert list(df.columns) == ["val", "id"]
+
+
+def test_invalid_variables_are_reported_by_the_client_not_sent(api):
+    with pytest.raises(Exception):
+        redivis.query("SELECT 1").to_pandas_dataframe(variables=[1], progress=False)
+
+    assert "selectedVariables" not in list_rows_options(api)[0]
+
+
+def test_empty_query_result_is_read_inline(api):
+    api["num_rows"] = 0
+
+    table = redivis.query("SELECT 1").to_arrow_table(progress=False)
+
+    assert table.num_rows == 0
+    assert table.column_names == ["id", "name", "val"]
+    assert paths() == [QUERIES, f"{QUERY}/variables"]
+
+
+def test_truncated_inline_rows_are_requested_again(api):
+    # Without the end-of-stream sentinel, the response was cut off
+    api["truncate_rows_once"] = 120
+
+    df = redivis.query("SELECT 1").to_pandas_dataframe(max_results=300, progress=False)
+
+    assert paths() == [QUERIES, f"{QUERY}/variables", f"{QUERY}/rows"]
+    assert [q for _, path, q, _ in api["requests"] if path == f"{QUERY}/rows"] == [
+        {"format": "arrow", "maxResults": "300", "eosSentinel": "true"}
+    ]
+    assert df["id"].tolist() == list(range(300))
+
+
+@pytest.mark.parametrize(
+    "configure",
+    [
+        # An older API, which ignores listRows
+        lambda api: api.update(query_responds_with_rows=False),
+        # Rows too large to list
+        lambda api: api.update(query_bytes=int(5e8)),
+    ],
+    ids=["old_api", "large_result"],
+)
+def test_queries_that_respond_with_themselves_are_read_as_usual(api, configure):
+    configure(api)
+
     df = redivis.query("SELECT 1").to_pandas_dataframe(progress=False)
 
-    assert len(df) == N
+    assert list_rows_options(api)[0] is not None
+    assert paths()[:3] == [QUERIES, f"{QUERY}/variables", f"{QUERY}/readSessions"]
     assert not paths("/rows")
+    assert sorted(df["id"].tolist()) == list(range(N))
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda q: q.get(),
+        lambda q: q.list_variables(),
+        lambda q: q.to_read_streams(target_count=2),
+        lambda q: q.list_files(),
+        lambda q, tmp_path: q.download(f"{tmp_path}/", progress=False),
+    ],
+    ids=["get", "list_variables", "to_read_streams", "list_files", "download"],
+)
+def test_operations_that_dont_read_rows_dont_request_them(api, tmp_path, operation):
+    query = redivis.query("SELECT 1")
+    if operation.__code__.co_argcount == 2:
+        operation(query, tmp_path)
+    else:
+        operation(query)
+
+    assert list_rows_options(api) == [None]
+
+
+def test_query_run_before_reading_is_read_as_usual(api):
+    query = redivis.query("SELECT 1").get()
+    df = query.to_pandas_dataframe(progress=False)
+
+    assert list_rows_options(api) == [None]
+    assert f"{QUERY}/readSessions" in paths()
+    assert sorted(df["id"].tolist()) == list(range(N))
+
+
+def test_query_read_inline_can_be_read_again(api, tmp_path):
+    query = redivis.query("SELECT 1")
+    query.to_arrow_table(progress=False)
+    api["requests"].clear()
+
+    # The query's size wasn't known, so it's fetched to size the read
+    df = query.to_pandas_dataframe(progress=False)
+
+    assert paths()[:3] == [f"{QUERY}/variables", QUERY, f"{QUERY}/readSessions"]
+    assert sorted(df["id"].tolist()) == list(range(N))
+    assert query.properties["outputNumRows"] == N
+
+    # As well as its other properties, e.g. to name a download
+    [path] = query.download(f"{tmp_path}/", format="parquet", progress=False)
+    assert not os.path.basename(path).startswith("query_1970")
+
+
+def test_concurrent_reads_run_the_query_once(api):
+    query = redivis.query("SELECT 1")
+    results = []
+
+    def read():
+        results.append(query.to_arrow_table(progress=False).num_rows)
+
+    threads = [threading.Thread(target=read) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert results == [N] * 4
+    assert paths().count(QUERIES) == 1
+    # Only the read that ran the query was given its rows
+    assert paths().count(f"{QUERY}/readSessions") == 3
+
+
+def test_inline_rows_are_closed_if_the_read_fails_first(api, monkeypatch):
+    from redivis.classes.Query import Query
+
+    responses = []
+    initiate = Query._initiate
+
+    def capture(self, list_rows=None):
+        response = initiate(self, list_rows)
+        if response is not None:
+            responses.append(response)
+        return response
+
+    monkeypatch.setattr(Query, "_initiate", capture)
+    api["response_script"] = [
+        (None, None),  # POST /queries
+        (500, {"status": 500, "error": "internal", "error_description": "Oops"}),
+    ]
+
+    with pytest.raises(exceptions.APIError, match="Oops"):
+        redivis.query("SELECT 1").to_arrow_table(progress=False)
+
+    [response] = responses
+    assert response.raw.closed
 
 
 # --- table metadata freshness ------------------------------------------------

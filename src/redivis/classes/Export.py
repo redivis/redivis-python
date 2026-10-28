@@ -54,6 +54,9 @@ class Export(Base):
                 r"\W+", "_", self.table.properties.get("name", "table")
             ).lower()
         elif self.query is not None:
+            # A query whose rows were read as it ran hasn't been fetched since
+            if "finishedAt" not in self.query.properties:
+                self.query.get()
             finished_at = self.query.properties.get("finishedAt", 0)
             escaped_name = f"query_{datetime.fromtimestamp(finished_at / 1000).isoformat().replace('.', '_').replace(':', '_')}"
         elif self.upload is not None:
