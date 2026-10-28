@@ -70,15 +70,21 @@ def load_cached_credentials():
     ):
         cached_credentials = None
 
-    if cached_credentials is None and credentials_file.is_file():
-        try:
-            with open(credentials_file, "r") as f:
-                cached_credentials = json.load(f)
+    if cached_credentials is None:
+        cached_credentials = read_credentials_file(credentials_file)
+        if cached_credentials is not None:
             cached_credentials_file = credentials_file
-        except Exception as e:
-            """ignore"""
 
     return cached_credentials
+
+
+def read_credentials_file(credentials_file):
+    """The credentials saved in a file, or None if there are none."""
+    try:
+        with open(credentials_file, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def has_credentials():
@@ -259,6 +265,21 @@ def refresh_credentials(scope=None, amr_values=None):
         # The resource isn't public, so we need to authenticate now.
         perform_oauth_login(scope=default_scope)
     elif "refresh_token" in cached_credentials:
+        # Each refresh replaces the refresh token, and the server revokes the login
+        # if a replaced one is used again. So if another process sharing these
+        # credentials (e.g. a second notebook kernel) has refreshed them since they
+        # were read, use what it saved instead.
+        saved_credentials = read_credentials_file(get_credentials_file())
+        if (
+            saved_credentials
+            and saved_credentials.get("refresh_token")
+            and saved_credentials["refresh_token"]
+            != cached_credentials["refresh_token"]
+        ):
+            cached_credentials = saved_credentials
+            if saved_credentials.get("expires_at", 0) > time.time() + 5 * 60:
+                return get_auth_token()
+
         res = niquests.post(
             f"{get_base_url()}/oauth/token",
             verify=get_verify_ssl(),
@@ -285,6 +306,10 @@ def refresh_credentials(scope=None, amr_values=None):
             cached_credentials["access_token"] = refresh_response["access_token"]
             cached_credentials["expires_at"] = refresh_response["expires_at"]
             cached_credentials["expires_in"] = refresh_response["expires_in"]
+            # The server rotates refresh tokens, returning a new one to replace the
+            # one that was just used
+            if refresh_response.get("refresh_token"):
+                cached_credentials["refresh_token"] = refresh_response["refresh_token"]
             write_cached_credentials()
     else:
         clear_cached_credentials()

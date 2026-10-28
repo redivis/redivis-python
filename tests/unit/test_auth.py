@@ -174,6 +174,45 @@ def test_a_token_that_isnt_about_to_expire_is_used_as_is(api, oauth_server):
     assert auth.get_auth_token() == token
 
 
+def test_a_rotated_refresh_token_replaces_the_one_that_was_used(api, monkeypatch):
+    sent = []
+
+    def post(url, **kwargs):
+        sent.append(kwargs["data"]["refresh_token"])
+        return FakeResponse({**TOKEN, "refresh_token": "refresh-2"})
+
+    monkeypatch.setattr(auth.niquests, "post", post)
+    auth.cached_credentials["expires_at"] = time.time()
+
+    auth.get_auth_token()
+
+    assert sent == ["refresh"]
+    saved = json.loads(auth.get_credentials_file().read_text())
+    assert saved["refresh_token"] == "refresh-2"
+
+
+def test_credentials_another_process_refreshed_are_used(api, monkeypatch):
+    """Rather than refreshing with the refresh token they replaced, which the server
+    takes as a sign that it was stolen."""
+    # e.g. a second notebook kernel, sharing the credentials file
+    theirs = {
+        **TOKEN,
+        "access_token": jwt("data.edit organization.write workflow.write") + "-theirs",
+        "refresh_token": "refresh-2",
+    }
+    auth.get_credentials_dir().mkdir(parents=True)
+    auth.get_credentials_file().write_text(json.dumps(theirs))
+    monkeypatch.setattr(
+        auth.niquests,
+        "post",
+        lambda url, **kwargs: pytest.fail("refreshed with a replaced refresh token"),
+    )
+    auth.cached_credentials["expires_at"] = time.time()
+
+    assert auth.get_auth_token() == theirs["access_token"]
+    assert auth.cached_credentials["refresh_token"] == "refresh-2"
+
+
 def file_mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
 
