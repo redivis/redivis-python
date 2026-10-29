@@ -99,10 +99,15 @@ def has_credentials():
     return load_cached_credentials() is not None
 
 
-def get_auth_token(scope=None):
+def get_auth_token(scope=None, interactive=True):
+    """An access token with `scope` (the default scope if None).
+
+    If not `interactive`, returns None rather than logging in when no token can
+    be obtained without one.
+    """
     global cached_credentials
 
-    if not scope:
+    if scope is None:
         scope = default_scope
 
     if os.getenv("REDIVIS_API_TOKEN"):
@@ -131,16 +136,18 @@ This environment variable should only ever be set in a non-interactive environme
         # Refresh a token that expires in the next 5 minutes, rather than
         # sending one the server is about to reject
         if cached_credentials["expires_at"] < (time.time() + 5 * 60):
-            return refresh_credentials()
-        else:
+            refresh_cached_credentials()
+        if cached_credentials is not None:
             return cached_credentials["access_token"]
-    else:
-        perform_oauth_login(
-            scope=missing_scope if len(missing_scope) > 0 else scope,
-            upgrade_credentials=bool(len(missing_scope)),
-        )
 
-        return cached_credentials["access_token"]
+    if not interactive:
+        return None
+    perform_oauth_login(
+        scope=missing_scope if len(missing_scope) > 0 else scope,
+        upgrade_credentials=bool(len(missing_scope)),
+    )
+
+    return cached_credentials["access_token"]
 
 
 def clear_cached_credentials():
@@ -160,10 +167,17 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
 
     challenge, verifier = get_pkce()
 
+    # Sent along so that the new token is merged with the scopes and logins of the
+    # current one, and so that the user can be asked to sign in with a login it
+    # needs (amr_values), which only the user it belongs to can look up
+    headers = {}
+    if upgrade_credentials and cached_credentials:
+        headers["Authorization"] = f"Bearer {cached_credentials['access_token']}"
+
     res = niquests.post(
         f"{get_base_url()}/oauth/device_authorization",
         verify=get_verify_ssl(),
-        headers={"Content-Type": "application/json"},
+        headers={**headers, "Content-Type": "application/json"},
         data=json.dumps(
             {
                 "client_id": client_id,
@@ -186,10 +200,6 @@ def perform_oauth_login(scope, amr_values=None, upgrade_credentials=False):
     else:
         print("Please visit the URL below to authenticate with your Redivis account:")
         print(parsed_response["verification_uri_complete"])
-
-    headers = {}
-    if upgrade_credentials and cached_credentials:
-        headers["Authorization"] = f"Bearer {cached_credentials['access_token']}"
 
     started_polling_at = time.time()
     while True:
@@ -264,57 +274,66 @@ def refresh_credentials(scope=None, amr_values=None):
         # The request was made anonymously because no credentials were available.
         # The resource isn't public, so we need to authenticate now.
         perform_oauth_login(scope=default_scope)
-    elif "refresh_token" in cached_credentials:
-        # Each refresh replaces the refresh token, and the server revokes the login
-        # if a replaced one is used again. So if another process sharing these
-        # credentials (e.g. a second notebook kernel) has refreshed them since they
-        # were read, use what it saved instead.
-        saved_credentials = read_credentials_file(get_credentials_file())
-        if (
-            saved_credentials
-            and saved_credentials.get("refresh_token")
-            and saved_credentials["refresh_token"]
-            != cached_credentials["refresh_token"]
-        ):
-            cached_credentials = saved_credentials
-            if saved_credentials.get("expires_at", 0) > time.time() + 5 * 60:
-                return get_auth_token()
-
-        res = niquests.post(
-            f"{get_base_url()}/oauth/token",
-            verify=get_verify_ssl(),
-            data={
-                "client_id": client_id,
-                "grant_type": "refresh_token",
-                "refresh_token": cached_credentials["refresh_token"],
-            },
-        )
-        if res.status_code in (400, 401):
-            # The refresh token was rejected (e.g. revoked or expired), so the
-            # user needs to log in again
-            clear_cached_credentials()
-        elif res.status_code >= 400:
-            # Anything else (e.g. a 503 during a deploy) says nothing about the
-            # refresh token, so keep it for a later call to retry with
-            try:
-                response_json = res.json()
-            except Exception:
-                raise_api_error(response_text=res.text, response=res)
-            raise_api_error(response_json=response_json, response=res)
-        else:
-            refresh_response = res.json()
-            cached_credentials["access_token"] = refresh_response["access_token"]
-            cached_credentials["expires_at"] = refresh_response["expires_at"]
-            cached_credentials["expires_in"] = refresh_response["expires_in"]
-            # The server rotates refresh tokens, returning a new one to replace the
-            # one that was just used
-            if refresh_response.get("refresh_token"):
-                cached_credentials["refresh_token"] = refresh_response["refresh_token"]
-            write_cached_credentials()
     else:
-        clear_cached_credentials()
+        refresh_cached_credentials()
 
     return get_auth_token()
+
+
+def refresh_cached_credentials():
+    """Exchanges the refresh token for a new access token, clearing the
+    credentials if it's been rejected."""
+    global cached_credentials
+
+    if "refresh_token" not in cached_credentials:
+        clear_cached_credentials()
+        return
+
+    # Each refresh replaces the refresh token, and the server revokes the login
+    # if a replaced one is used again. So if another process sharing these
+    # credentials (e.g. a second notebook kernel) has refreshed them since they
+    # were read, use what it saved instead.
+    saved_credentials = read_credentials_file(get_credentials_file())
+    if (
+        saved_credentials
+        and saved_credentials.get("refresh_token")
+        and saved_credentials["refresh_token"] != cached_credentials["refresh_token"]
+    ):
+        cached_credentials = saved_credentials
+        if saved_credentials.get("expires_at", 0) > time.time() + 5 * 60:
+            return
+
+    res = niquests.post(
+        f"{get_base_url()}/oauth/token",
+        verify=get_verify_ssl(),
+        data={
+            "client_id": client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": cached_credentials["refresh_token"],
+        },
+    )
+    if res.status_code in (400, 401):
+        # The refresh token was rejected (e.g. revoked or expired), so the
+        # user needs to log in again
+        clear_cached_credentials()
+    elif res.status_code >= 400:
+        # Anything else (e.g. a 503 during a deploy) says nothing about the
+        # refresh token, so keep it for a later call to retry with
+        try:
+            response_json = res.json()
+        except Exception:
+            raise_api_error(response_text=res.text, response=res)
+        raise_api_error(response_json=response_json, response=res)
+    else:
+        refresh_response = res.json()
+        cached_credentials["access_token"] = refresh_response["access_token"]
+        cached_credentials["expires_at"] = refresh_response["expires_at"]
+        cached_credentials["expires_in"] = refresh_response["expires_in"]
+        # The server rotates refresh tokens, returning a new one to replace the
+        # one that was just used
+        if refresh_response.get("refresh_token"):
+            cached_credentials["refresh_token"] = refresh_response["refresh_token"]
+        write_cached_credentials()
 
 
 def get_current_credential_scope():

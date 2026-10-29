@@ -116,11 +116,14 @@ def get_request_args(
         **headers,
     }
 
-    # Only obtain a token if we already have credentials on hand; otherwise send
-    # the request anonymously, since the resource may be publicly accessible.
-    # If it isn't, process_request_response() authenticates and retries.
+    # Only send a token we can obtain without logging in, of whatever scope;
+    # otherwise send the request anonymously, since the resource may be publicly
+    # accessible. If it isn't, or needs more scope, the server says so, and
+    # process_request_response() authenticates and retries.
     if "Authorization" not in headers and has_credentials():
-        headers["Authorization"] = f"Bearer {get_auth_token()}"
+        auth_token = get_auth_token(scope=[], interactive=False)
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
 
     if parse_payload and payload:
         payload = json.dumps(payload)

@@ -69,6 +69,25 @@ def oauth_server(monkeypatch):
     return requested_scopes
 
 
+def test_login_the_api_asks_for_is_requested_with_the_current_token(api, monkeypatch):
+    requests = []
+
+    def post(url, **kwargs):
+        requests.append((url, kwargs))
+        raise RuntimeError("stopped before the login")
+
+    monkeypatch.setattr(auth.niquests, "post", post)
+    monkeypatch.setattr(auth, "cached_credentials", TOKEN)
+
+    with pytest.raises(RuntimeError, match="stopped before the login"):
+        real_login(scope=None, amr_values="123 456", upgrade_credentials=True)
+
+    [(url, kwargs)] = requests
+    assert url.endswith("/oauth/device_authorization")
+    assert json.loads(kwargs["data"])["amr_values"] == "123 456"
+    assert kwargs["headers"]["Authorization"] == f"Bearer {TOKEN['access_token']}"
+
+
 def test_login_always_requests_the_default_scope(api, oauth_server):
     auth.perform_oauth_login(scope=["data.data"])
 
@@ -286,6 +305,34 @@ def test_a_rejected_refresh_token_prompts_a_login(api, monkeypatch):
     assert auth.refresh_credentials() == TOKEN["access_token"]
     assert len(logins) == 1
     assert not auth.get_credentials_file().exists()
+
+
+def test_a_rejected_refresh_token_falls_back_to_an_anonymous_request(api, monkeypatch):
+    # Rather than prompting a login before the request is even sent, since the
+    # resource may be public
+    auth.cached_credentials["expires_at"] = time.time() + 60
+    auth.write_cached_credentials()
+    monkeypatch.setattr(
+        auth.niquests,
+        "post",
+        lambda url, **kwargs: FakeResponse({"error": "invalid_grant"}, 400),
+    )
+
+    table = redivis.table("a.b.mock").get()
+
+    assert table.properties["name"] == "mock"
+    assert [had_auth for *_, had_auth in api["requests"]] == [False]
+    assert not auth.get_credentials_file().exists()
+
+
+def test_a_token_without_the_default_scope_is_sent_as_is(api):
+    # Rather than prompting a login for the default scope first; the server says
+    # if the resource needs more
+    auth.cached_credentials["access_token"] = jwt("data.data")
+
+    redivis.table("a.b.mock").get()
+
+    assert [had_auth for *_, had_auth in api["requests"]] == [True]
 
 
 @pytest.mark.parametrize(

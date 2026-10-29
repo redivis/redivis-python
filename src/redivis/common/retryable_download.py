@@ -41,9 +41,17 @@ def _get_authorization_headers():
     Public files can be downloaded without any.
     """
     with _auth_lock:
-        if has_credentials():
-            return {"Authorization": f"Bearer {get_auth_token()}"}
-        return {}
+        return _current_authorization_headers()
+
+
+def _current_authorization_headers():
+    # Only a token that can be obtained without logging in, of whatever scope;
+    # the server says if it needs more
+    if has_credentials():
+        auth_token = get_auth_token(scope=[], interactive=False)
+        if auth_token:
+            return {"Authorization": f"Bearer {auth_token}"}
+    return {}
 
 
 def _reauthorize(rejected_headers, response_json):
@@ -58,9 +66,7 @@ def _reauthorize(rejected_headers, response_json):
         # The token was provided to us, so logging in wouldn't change anything
         return False
     with _auth_lock:
-        current_headers = (
-            {"Authorization": f"Bearer {get_auth_token()}"} if has_credentials() else {}
-        )
+        current_headers = _current_authorization_headers()
         if current_headers and current_headers != rejected_headers:
             # Another download already re-authenticated
             return True
