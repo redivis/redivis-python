@@ -5,20 +5,21 @@ from ..common import exceptions
 
 from .Base import Base
 from ..common.api_request import make_request
+from ..common.util import normalize_version_tag
 
 
 class Version(Base):
     def __init__(self, tag, *, dataset, properties=None):
-        if tag != "current" and tag != "next" and not tag.lower().startswith("v"):
-            tag = f"v{tag}"
-
-        self.tag = tag
+        # e.g. v1.0, even if given in the form used in references (v1_0)
+        self.tag = normalize_version_tag(tag)
         self._dataset = dataset
 
         self.uri = (
             properties["uri"]
             if "uri" in (properties or {})
-            else (f"{dataset.uri}/versions/{self.tag}")
+            else (
+                f"{dataset.uri}/versions/{normalize_version_tag(tag, for_reference=True)}"
+            )
         )
         self.properties = properties
 

@@ -33,6 +33,25 @@ def split_reference(reference):
     return re.sub(r":v(\d+)\.(\d+)", r":v\1_\2", reference).split(".")
 
 
+def normalize_version_tag(tag, *, for_reference=False):
+    """Normalizes a version tag, e.g. `1.0` or `v1_0`, to the version's tag (`v1.0`).
+
+    Since a dot also separates the parts of a reference, a reference writes the tag as
+    the equivalent `v1_0`, which is what `for_reference` returns.
+    """
+    if not tag:
+        return None
+    tag = re.sub(
+        r"^(v?\d+)[._](\d+)$",
+        r"\1_\2" if for_reference else r"\1.\2",
+        str(tag),
+        flags=re.IGNORECASE,
+    )
+    if tag != "current" and tag != "next" and not tag.lower().startswith("v"):
+        tag = f"v{tag}"
+    return tag
+
+
 def wait_for_run(instance, run_properties):
     """Waits for a transform or notebook run, given the response to starting it.
 

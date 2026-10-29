@@ -78,7 +78,7 @@ def test_dataset_version_navigation(api):
     )
     dataset = redivis.dataset("owner.ds:abc1")
     previous = dataset.previous_version()
-    assert previous.qualified_reference == "owner.ds:abc1:v1.0"
+    assert previous.qualified_reference == "owner.ds:abc1:v1_0"
     assert dataset.version_tag == "v1_1"
 
     script(
@@ -93,7 +93,20 @@ def test_dataset_version_navigation(api):
     assert dataset.next_version() is None
 
     version = redivis.dataset("owner.ds:abc1").version("v2.0")
-    assert version.dataset().qualified_reference == "owner.ds:abc1:v2.0"
+    assert version.dataset().qualified_reference == "owner.ds:abc1:v2_0"
+
+
+def test_version_tags_are_the_dotted_form(api):
+    # A version's tag is e.g. v1.0, while references use v1_0
+    for tag in ["v1.0", "v1_0", "1.0"]:
+        version = redivis.dataset("owner.ds").version(tag)
+        assert version.tag == "v1.0"
+        assert version.uri.endswith("/versions/v1_0")
+    assert redivis.dataset("owner.ds:v1_0").version().tag == "v1.0"
+    assert redivis.dataset("owner.ds").version("next").tag == "next"
+    dataset = redivis.dataset("owner.ds", version="v1.0")
+    assert dataset.version_tag == "v1_0"
+    assert dataset.qualified_reference == "owner.ds:v1_0"
 
 
 def test_version_delete_and_undelete_return_the_version(api):

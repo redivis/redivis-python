@@ -5,7 +5,7 @@ import warnings
 from .Query import Query
 from .Base import Base
 from urllib.parse import quote as quote_uri
-from ..common.util import split_reference
+from ..common.util import split_reference, normalize_version_tag
 import re
 
 from ..common import exceptions
@@ -58,14 +58,7 @@ class Dataset(Base):
             if version_search:
                 version = version_search[1]
 
-        if (
-            version
-            and version != "current"
-            and version != "next"
-            and not version.lower().startswith("v")
-        ):
-            version = f"v{version}"
-
+        version = normalize_version_tag(version, for_reference=True)
         self.version_tag = version
         self.scoped_reference = (properties or {}).get(
             "scopedReference",
@@ -297,5 +290,7 @@ def update_properties(instance, properties):
     instance.uri = properties["uri"]
     if (properties.get("version") or {}).get("tag"):
         # In the form used in references (v1_0, rather than v1.0)
-        instance.version_tag = properties["version"]["tag"].replace(".", "_")
+        instance.version_tag = normalize_version_tag(
+            properties["version"]["tag"], for_reference=True
+        )
     instance._rectify_ambiguous_owner()

@@ -5,6 +5,16 @@ see [CONTRIBUTING.md](CONTRIBUTING.md#to-upload-to-pypi). Notes for releases bef
 
 ## Unreleased
 
+## 0.22.1
+
+### Fixes
+
+- `version.tag` is now always the version's tag as the API returns it, e.g. `v1.0`, rather than sometimes the form used
+  in references (`v1_0`), e.g. for `dataset.version()` on a dataset referenced as `owner.dataset:v1_0`. Either form is
+  still accepted wherever a tag is passed.
+- `redivis.dataset(..., version="v1.0")`, and the datasets returned by `version.dataset()` and
+  `dataset.previous_version()`, now write the version as `v1_0` in their references, as elsewhere.
+
 ## 0.22.0
 
 ****This release adds `redivis.config()` for library-wide settings, keeps each environment's login separate, and
