@@ -5,6 +5,18 @@ see [CONTRIBUTING.md](CONTRIBUTING.md#to-upload-to-pypi). Notes for releases bef
 
 ## Unreleased
 
+## 0.22.2
+
+### Fixes
+
+- A cached login that can no longer be refreshed (e.g. it was revoked, or has expired) no longer prompts a login before
+  a request is even sent. Requests are made anonymously instead, so public data can still be read, and you're only
+  prompted to log in when the API requires it. Similarly, a cached token is sent as is, rather than prompting for more
+  scope until the API asks for it.
+- When the API requires you to sign in with a particular login (e.g. through your organization's identity provider),
+  the sign-in page asks you to use that login again. It now needs your current token to look the login up, which is
+  sent along with the login request; older versions of the client are shown the usual sign-in options instead.
+
 ## 0.22.1
 
 ### Fixes
