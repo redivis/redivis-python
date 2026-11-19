@@ -127,6 +127,8 @@ def reset():
             "kill_session_after_chunks": None,
             # Upload sessions keep at most this many bytes of the next chunk
             "commit_limit_once": None,
+            # Upload sessions keep none of the chunks they're sent, answering 308
+            "commit_nothing": False,
         }
     )
 
@@ -660,6 +662,8 @@ class Handler(BaseHTTPRequestHandler):
             if STATE["commit_limit_once"] is not None:
                 body = body[: STATE["commit_limit_once"]]
                 STATE["commit_limit_once"] = None
+            if STATE["commit_nothing"]:
+                body = b""
             session["chunks"].append((start, end))
             session["data"] += body
             limit = STATE["kill_session_after_chunks"]

@@ -402,6 +402,20 @@ def test_session_gives_up_after_repeated_failures(api, table, small_sessions):
     assert requests_to(api, "/finalize") == []
 
 
+def test_session_gives_up_when_it_keeps_none_of_its_chunks(api, table, small_sessions):
+    # Answering every chunk with a 308 that shows no progress must count as failing,
+    # rather than resending the same chunk forever
+    api["commit_nothing"] = True
+
+    with pytest.raises(exceptions.NetworkError):
+        table.upload("big.csv").create(
+            large_content(), rename_on_conflict=True, progress=False
+        )
+    (session,) = api["upload_sessions"].values()
+    assert len(session["chunks"]) == imports.MAX_CONSECUTIVE_FAILURES + 1
+    assert requests_to(api, "/finalize") == []
+
+
 def test_session_reopens_after_it_dies(api, table, small_sessions):
     content = large_content()
     api["kill_session_after_chunks"] = 2

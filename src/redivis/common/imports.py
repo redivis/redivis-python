@@ -217,7 +217,8 @@ def _upload_in_chunks(*, open_session, file, start, size, tracker):
 
         if status == 308:
             committed = get_committed_bytes(response)
-            if offset is not None:
+            sent_chunk = offset is not None
+            if sent_chunk:
                 # Adapt the size of the chunks to how long they take to send
                 elapsed = time.monotonic() - sent_at
                 if elapsed > TARGET_CHUNK_SECONDS:
@@ -228,10 +229,14 @@ def _upload_in_chunks(*, open_session, file, start, size, tracker):
                 most_committed = committed
                 failures = 0
             tracker.set(committed)
-            if committed < size:
+            # Continue from what the session committed, so long as a chunk sent to it
+            # moved it forward
+            if committed < size and (not sent_chunk or committed > offset):
                 offset = committed
                 continue
-            # The session has every byte, but hasn't said it's complete, so ask again
+            # The session has every byte without saying it's complete, or kept none of
+            # the chunk, so ask again after a pause. A session that keeps doing so
+            # counts as failing, rather than retrying forever.
             failures += 1
         elif status in DEAD_SESSION_STATUSES:
             # The session was cancelled or has expired. Asking for it again opens a new
