@@ -7,6 +7,7 @@ the `api` fixture in conftest.py.
 """
 
 import base64
+import hashlib
 import io
 import json
 import re
@@ -99,11 +100,50 @@ def reset():
             # Respond 304 Not Modified to listings of the file index that send If-
             # Modified-Since
             "file_index_unchanged": True,
+            # Failures for the first requests to match, as dicts of method, the
+            # fragment of the path to match, and the status to respond with (or None
+            # to drop the connection). Each is used once.
+            "path_failures": [],
+            # Imports, by id, as {"import": properties, "body": the create request's
+            # body}
+            "imports": {},
+            # The import ids created for each idempotency key
+            "idempotency_keys": {},
+            # The name imports are given, as when the API renames on a conflict.
+            # Defaults to the name requested.
+            "import_name": None,
+            # The statuses that GET /imports/:id responds with after the import is
+            # finalized, in turn; the last is repeated
+            "import_statuses": ["completed"],
+            "import_error_message": None,
+            # The files uploaded to imports, by (import id, file name)
+            "import_files": {},
+            # Upload sessions, by upload_id
+            "upload_sessions": {},
+            # Asking for an upload session again, after it has died, responds with
+            # the same (dead) session, as for an import that's no longer accepting files
+            "dead_sessions_stay_dead": False,
+            # Upload sessions die after receiving this many chunks
+            "kill_session_after_chunks": None,
+            # Upload sessions keep at most this many bytes of the next chunk
+            "commit_limit_once": None,
         }
     )
 
 
 reset()
+
+
+# Every chunk of an upload session, but the last, must be a multiple of this
+SESSION_CHUNK_ALIGNMENT = 2**18
+
+
+def decode_file_name(encoded):
+    return base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+
+
+def md5_base64(data):
+    return base64.b64encode(hashlib.md5(data).digest()).decode()
 
 
 def paths(*fragments):
@@ -249,6 +289,19 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return True
 
+        for failure in STATE["path_failures"]:
+            if failure["method"] == method and failure["fragment"] in path:
+                STATE["path_failures"].remove(failure)
+                if failure["status"] is None:
+                    self.close_connection = True
+                else:
+                    self._send(
+                        {"status": failure["status"], "error": "injected_failure"},
+                        status=failure["status"],
+                        headers=failure.get("headers"),
+                    )
+                return True
+
         if STATE["fail_503"]:
             STATE["fail_503"] -= 1
             self._send(
@@ -305,6 +358,9 @@ class Handler(BaseHTTPRequestHandler):
             "outputNumRows": num_rows,
             "finishedAt": 1758800000123,
         }
+
+        if path.startswith("/api/v1/imports/") or path.endswith("/imports"):
+            return self._handle_import(method, path, query, body)
 
         if method == "POST":
             if path == "/api/v1/queries":
@@ -468,7 +524,10 @@ class Handler(BaseHTTPRequestHandler):
                 }
             )
 
-        if path == TABLE_PATH:
+        # The table, also when referenced through a workflow
+        if path == TABLE_PATH or re.fullmatch(
+            r"/api/v1/workflows/[^/]+/tables/mock", path
+        ):
             return self._send(
                 {
                     "kind": "table",
@@ -483,6 +542,147 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         return self._send({"status": 404, "error": "not_found"}, status=404)
+
+    def _import_properties(self, import_id):
+        return STATE["imports"][import_id]["import"]
+
+    def _handle_import(self, method, path, query, body):
+        if method == "POST" and path.endswith("/imports"):
+            request = json.loads(body)
+            key = request["idempotencyKey"]
+            if key not in STATE["idempotency_keys"]:
+                import_id = f"i{len(STATE['imports']) + 1}"
+                STATE["idempotency_keys"][key] = import_id
+                STATE["imports"][import_id] = {
+                    "body": request,
+                    "import": {
+                        "kind": "import",
+                        "id": import_id,
+                        "uri": f"/imports/{import_id}",
+                        "name": STATE["import_name"] or request.get("name"),
+                        # Transfers aren't finalized, but start right away
+                        "status": (
+                            "queued"
+                            if request.get("sourceType", "local") == "local"
+                            else "running"
+                        ),
+                        "type": request.get("type"),
+                        "totalFileCount": request.get("totalFileCount"),
+                        "transferredFileCount": 0,
+                        "errorMessage": None,
+                    },
+                }
+            return self._send(self._import_properties(STATE["idempotency_keys"][key]))
+
+        match = re.fullmatch(
+            r"/api/v1/imports/([^/]+)(?:/(finalize)|/files/([^/]+)(/uploadSession)?)?",
+            path,
+        )
+        import_id, finalize, encoded_name, is_session = match.groups()
+        properties = self._import_properties(import_id)
+
+        if finalize:
+            if properties["status"] == "queued":
+                properties["status"] = "running"
+            return self._send(properties)
+
+        if encoded_name is None:
+            if properties["status"] == "running":
+                statuses = STATE["import_statuses"]
+                status = statuses.pop(0) if len(statuses) > 1 else statuses[0]
+                properties["status"] = status
+                if status == "failed":
+                    properties["errorMessage"] = STATE["import_error_message"]
+            return self._send(properties)
+
+        name = decode_file_name(encoded_name)
+
+        if not is_session:
+            # A file uploaded in one request
+            if self.headers.get("Content-MD5") != md5_base64(body):
+                return self._send(
+                    {"status": 400, "error": "bad_digest"},
+                    status=400,
+                )
+            STATE["import_files"][(import_id, name)] = body
+            return self._send({"name": name, "size": len(body)})
+
+        if method == "POST":
+            request = json.loads(body)
+            sessions = [
+                (upload_id, session)
+                for upload_id, session in STATE["upload_sessions"].items()
+                if session["import_id"] == import_id
+                and session["name"] == name
+                and session["size"] == request["size"]
+                and session["md5"] == request["md5Hash"]
+            ]
+            live = [(upload_id, s) for upload_id, s in sessions if not s["dead"]]
+            if live:
+                upload_id = live[-1][0]
+            elif sessions and STATE["dead_sessions_stay_dead"]:
+                upload_id = sessions[-1][0]
+            else:
+                upload_id = f"up{len(STATE['upload_sessions']) + 1}"
+                STATE["upload_sessions"][upload_id] = {
+                    "import_id": import_id,
+                    "name": name,
+                    "size": request["size"],
+                    "md5": request["md5Hash"],
+                    "data": b"",
+                    "chunks": [],
+                    "dead": False,
+                }
+            return self._send(
+                {
+                    "kind": "importUploadSession",
+                    "name": name,
+                    "size": request["size"],
+                    "uri": f"/imports/{import_id}/files/{encoded_name}/uploadSession?upload_id={upload_id}",
+                }
+            )
+
+        # A PUT of a chunk, or a query of what the session has received
+        session = STATE["upload_sessions"][query["upload_id"]]
+        if session["dead"]:
+            return self._send({"status": 404, "error": "not_found"}, status=404)
+        content_range = self.headers["Content-Range"]
+        size = session["size"]
+        chunk = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
+        if chunk:
+            start, end = int(chunk[1]), int(chunk[2])
+            assert int(chunk[3]) == size
+            assert start == len(session["data"]), "chunk doesn't start where it should"
+            assert end - start + 1 == len(body)
+            assert (
+                end == size - 1 or len(body) % SESSION_CHUNK_ALIGNMENT == 0
+            ), "chunk isn't a multiple of 256KiB"
+            if STATE["commit_limit_once"] is not None:
+                body = body[: STATE["commit_limit_once"]]
+                STATE["commit_limit_once"] = None
+            session["chunks"].append((start, end))
+            session["data"] += body
+            limit = STATE["kill_session_after_chunks"]
+            if limit is not None and len(session["chunks"]) >= limit:
+                STATE["kill_session_after_chunks"] = None
+                session["dead"] = True
+                return self._send({"status": 404, "error": "not_found"}, status=404)
+        else:
+            assert content_range == f"bytes */{size}"
+
+        received = len(session["data"])
+        if received == size:
+            assert md5_base64(session["data"]) == session["md5"]
+            STATE["import_files"][(session["import_id"], session["name"])] = session[
+                "data"
+            ]
+            return self._send({"name": session["name"], "size": size})
+        return self._send(
+            b"",
+            status=308,
+            content_type="text/plain",
+            headers={"Range": f"bytes=0-{received - 1}"} if received else None,
+        )
 
 
 def start():

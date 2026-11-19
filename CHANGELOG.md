@@ -5,6 +5,12 @@ see [CONTRIBUTING.md](CONTRIBUTING.md#to-upload-to-pypi). Notes for releases bef
 
 ## Unreleased
 
+### Improvements and fixes
+
+- Uploads (`upload.create()`, for files, data, and transfers, and `table.add_files()`) now use the Redivis imports API.
+  Files are uploaded in resumable chunks with md5 verification, and requests are retried on transient errors. Stream
+  uploads and notebook output tables are unchanged.
+
 ## 0.22.2
 
 ### Fixes

@@ -41,12 +41,10 @@ def test_retried_request_resends_its_whole_file_body(api):
         method="PATCH",
         path=TABLE,
         parse_payload=False,
-        files={"metadata": '{"a": 1}', "data": io.BytesIO(content)},
+        payload=io.BytesIO(content),
     )
 
-    lengths = api["post_body_lengths"]
-    assert len(lengths) == 3
-    assert len(set(lengths)) == 1 and lengths[0] > len(content)
+    assert api["post_body_lengths"] == [len(content)] * 3
     assert response["ok"]
 
 
@@ -65,10 +63,89 @@ def test_unseekable_body_is_not_retried(api):
             method="PATCH",
             path=TABLE,
             parse_payload=False,
-            files={"data": Unseekable()},
+            payload=Unseekable(),
+            headers={"Content-Length": "4"},
         )
 
     assert len(api["requests"]) == 1
+
+
+# --- idempotent requests -----------------------------------------------------
+
+
+@pytest.mark.parametrize("status", [408, 429, 500, 502, 503, 504])
+def test_idempotent_requests_retry_transient_errors(api, status):
+    api["response_script"] = [(status, {"status": status, "error": "transient"})] * 2
+
+    response = api_request.make_request(
+        method="POST", path=TABLE, payload={"a": 1}, idempotent=True
+    )
+
+    assert response["ok"]
+    assert len(api["requests"]) == 3
+
+
+@pytest.mark.parametrize("status", [429, 500])
+def test_other_requests_dont_retry_transient_errors(api, status):
+    api["response_script"] = [(status, {"status": status, "error": "transient"})]
+
+    with pytest.raises(exceptions.APIError):
+        api_request.make_request(method="POST", path=TABLE, payload={"a": 1})
+
+    assert len(api["requests"]) == 1
+
+
+def test_idempotent_requests_dont_retry_other_errors(api):
+    api["response_script"] = [(400, {"status": 400, "error": "invalid"})]
+
+    with pytest.raises(exceptions.APIError):
+        api_request.make_request(
+            method="POST", path=TABLE, payload={"a": 1}, idempotent=True
+        )
+
+    assert len(api["requests"]) == 1
+
+
+def test_idempotent_requests_honor_retry_after(api, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(api_request.time, "sleep", sleeps.append)
+    api["path_failures"] = [
+        {
+            "method": "POST",
+            "fragment": "/tables/",
+            "status": 429,
+            "headers": {"Retry-After": "7"},
+        },
+        {
+            "method": "POST",
+            "fragment": "/tables/",
+            "status": 503,
+            "headers": {"Retry-After": "100000"},
+        },
+        {"method": "POST", "fragment": "/tables/", "status": 500},
+    ]
+
+    api_request.make_request(
+        method="POST", path=TABLE, payload={"a": 1}, idempotent=True
+    )
+
+    assert sleeps == [7, api_request.MAX_RETRY_AFTER, 2]
+
+
+def test_idempotent_requests_are_retried_after_connection_failures(api):
+    api["drop_connection"] = 2
+
+    response = api_request.make_request(
+        method="POST",
+        path=TABLE,
+        parse_payload=False,
+        payload=io.BytesIO(b"x" * 100),
+        idempotent=True,
+    )
+
+    assert response["ok"]
+    assert len(api["requests"]) == 3
+    assert api["post_body_lengths"][-1] == 100
 
 
 # --- connection hygiene ------------------------------------------------------
@@ -198,12 +275,10 @@ def test_auth_retry_resends_its_whole_file_body(api, logins):
         method="PATCH",
         path=TABLE,
         parse_payload=False,
-        files={"metadata": '{"a": 1}', "data": io.BytesIO(content)},
+        payload=io.BytesIO(content),
     )
 
-    lengths = api["post_body_lengths"]
-    assert len(lengths) == 3
-    assert len(set(lengths)) == 1 and lengths[0] > len(content)
+    assert api["post_body_lengths"] == [len(content)] * 3
     assert response["ok"]
 
 
@@ -222,7 +297,8 @@ def test_unseekable_body_is_not_retried_after_auth_failure(api, logins):
             method="PATCH",
             path=TABLE,
             parse_payload=False,
-            files={"data": Unseekable()},
+            payload=Unseekable(),
+            headers={"Content-Length": "4"},
         )
 
     assert logins == []
