@@ -338,8 +338,8 @@ def large_csv(num_rows):
     return ("\n".join(lines) + "\n").encode()
 
 
-def test_large_upload_goes_through_temp_storage(new_table):
-    # Content over 1MB is sent to temp storage first, rather than with the request
+def test_large_upload(new_table):
+    # Content over 1MB, which once had to go through temp storage
     table = new_table()
     content = large_csv(40_000)
     assert len(content) > 2**20
@@ -352,11 +352,11 @@ def test_large_upload_goes_through_temp_storage(new_table):
 
 @pytest.mark.slow
 def test_resumable_upload(new_table, tmp_path):
-    # Files of 32MB or more are uploaded resumably
+    # Files over 32MiB are uploaded in chunks, through an upload session
     table = new_table()
     path = tmp_path / "huge.csv"
     path.write_bytes(large_csv(1_000_000))
-    assert path.stat().st_size >= 2**25
+    assert path.stat().st_size > 2**25
 
     upload = table.upload().create(path, progress=False)
 

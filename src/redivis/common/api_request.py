@@ -4,6 +4,7 @@ import os
 import json
 import platform
 import warnings
+from email.utils import parsedate_to_datetime
 from urllib.parse import unquote
 import time
 
@@ -22,11 +23,22 @@ def make_request(
     parse_payload=True,
     parse_response=True,
     stream=False,
-    files=None,
     headers=None,
+    idempotent=False,
     retry_count=0,
     auth_failures=(),
 ):
+    """Makes a request to the API, returning its parsed response.
+
+    A `payload` is sent as JSON, unless `parse_payload` is False, in which case it's
+    sent as is: e.g. bytes, or a seekable file-like object, which is rewound (with
+    seek(0)) to be sent again on a retry.
+
+    Pass `idempotent=True` for a request that's safe to repeat whatever its method
+    (e.g., because it carries an idempotency key), to retry it after connection
+    failures and transient errors (408, 429, and 5xx statuses), as GET and HEAD
+    requests are after connection failures.
+    """
     if headers is None:
         headers = {}
 
@@ -38,7 +50,6 @@ def make_request(
         payload=payload,
         parse_payload=parse_payload,
         stream=stream,
-        files=files,
         headers=headers,
     )
 
@@ -49,7 +60,11 @@ def make_request(
         # Retry a request that failed to connect (or timed out) with backoff. Only
         # idempotent requests are safe to repeat, since we can't know whether the server
         # received the original.
-        if method.upper() in ("GET", "HEAD") and retry_count < 10:
+        if (
+            (idempotent or method.upper() in ("GET", "HEAD"))
+            and retry_count < 10
+            and __rewind_request_body(original_parameters)
+        ):
             logging.debug("Request failed to connect, retrying...")
             time.sleep(retry_count)
             original_parameters["retry_count"] = retry_count + 1
@@ -104,7 +119,6 @@ def get_request_args(
     payload=None,
     parse_payload=True,
     stream=False,
-    files=None,
     headers={},
 ):
     api_endpoint = __get_api_endpoint()
@@ -136,7 +150,6 @@ def get_request_args(
         "params": query,
         "data": payload,
         "stream": stream,
-        "files": files,
         "timeout": 125,
     }
 
@@ -147,6 +160,12 @@ previously_printed_warnings = {}
 # changing without ever succeeding. See process_request_response()
 MAX_AUTH_ATTEMPTS = 5
 
+# The statuses that idempotent requests are retried after. Other requests are only
+# retried after a 503
+RETRYABLE_STATUSES = (408, 429, 500, 502, 503, 504)
+# The longest a Retry-After header is waited for
+MAX_RETRY_AFTER = 60
+
 
 def process_request_response(
     r, parse_response=True, method=None, original_parameters=None
@@ -154,17 +173,22 @@ def process_request_response(
     method = method.lower()
     response_json = {}
 
-    # Retry with backoff on service unavailable.
+    # Retry with backoff on service unavailable, or, for idempotent requests, any
+    # transient error
+    idempotent = original_parameters["idempotent"]
     if (
-        r.status_code == 503
+        (r.status_code == 503 or (idempotent and r.status_code in RETRYABLE_STATUSES))
         and original_parameters["retry_count"] < 10
         and __rewind_request_body(original_parameters)
     ):
-        logging.debug("API is currently unavailable, retrying...")
+        logging.debug(f"API responded with {r.status_code}, retrying...")
+        retry_after = __get_retry_after(r) if idempotent else None
         # Release the connection now; otherwise a streamed response holds its
         # socket open for as long as the retries take.
         r.close()
-        time.sleep(original_parameters["retry_count"])
+        time.sleep(
+            original_parameters["retry_count"] if retry_after is None else retry_after
+        )
         original_parameters["retry_count"] += 1
         return make_request(**original_parameters)
 
@@ -261,24 +285,34 @@ def process_request_response(
 def __rewind_request_body(original_parameters):
     """Prepare a request to be sent again, reporting whether that's possible.
 
-    `files` holds file-like objects that the first attempt already consumed, so
-    they have to be rewound — re-sending one as-is would upload nothing at all.
+    A file-like payload was already consumed by the first attempt, so it has to be
+    rewound — re-sending one as-is would upload nothing at all.
     """
-    files = original_parameters.get("files")
+    payload = original_parameters.get("payload")
 
-    if not files:
+    if not hasattr(payload, "read"):
         return True
 
-    for value in files.values():
-        if not hasattr(value, "read"):
-            continue
+    if not hasattr(payload, "seek") or not getattr(payload, "seekable", lambda: True)():
+        return False
 
-        if not hasattr(value, "seek") or not getattr(value, "seekable", lambda: True)():
-            return False
-
-        value.seek(0)
-
+    payload.seek(0)
     return True
+
+
+def __get_retry_after(r):
+    """The seconds to wait that a response's Retry-After header asks for, if any."""
+    value = r.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            seconds = parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+    return min(max(seconds, 0), MAX_RETRY_AFTER)
 
 
 def __get_user_agent():
